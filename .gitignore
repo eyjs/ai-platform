@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,13 +7,51 @@ dist/
 build/
 .eggs/
 *.egg
-.env
+
+# Virtual environments
 .venv/
 venv/
 env/
-.mypy_cache/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
-*.log
+coverage.xml
+
+# Type checking / Lint
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Models (large binary files)
+models/
+*.bin
+*.onnx
+*.pt
+*.safetensors
