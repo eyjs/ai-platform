@@ -18,6 +18,9 @@ class HttpRerankerProvider(RerankerProvider):
         self._fallback_model = fallback_model
         self._fallback: Optional[RerankerProvider] = None
 
+    async def close(self) -> None:
+        await self._client.aclose()
+
     async def rerank(
         self, query: str, documents: List[str], top_k: int = 10
     ) -> List[dict]:

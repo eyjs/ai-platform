@@ -6,6 +6,8 @@ HTTP 서버 URL이 설정되면 GPU 서버를 우선 사용.
 
 import logging
 
+import httpx
+
 from src.config import ProviderMode, Settings
 
 from .base import EmbeddingProvider, LLMProvider, RerankerProvider
@@ -26,10 +28,6 @@ class ProviderFactory:
     def _is_local(self) -> bool:
         return self._mode == ProviderMode.DEVELOPMENT
 
-    @property
-    def _is_gemini(self) -> bool:
-        return self._mode == ProviderMode.GEMINI
-
     def get_embedding_provider(self) -> EmbeddingProvider:
         if self._settings.embedding_server_url:
             from .embedding.http_embedding import HttpEmbeddingProvider
@@ -48,14 +46,6 @@ class ProviderFactory:
                 model_name=self._settings.dev_embedding_model,
             )
 
-        if self._is_gemini:
-            from .embedding.gemini import GeminiEmbeddingProvider
-
-            return GeminiEmbeddingProvider(
-                api_key=self._settings.gemini_api_key,
-                model=self._settings.gemini_embedding_model,
-            )
-
         from .embedding.openai import OpenAIEmbeddingProvider
 
         return OpenAIEmbeddingProvider(
@@ -64,47 +54,27 @@ class ProviderFactory:
         )
 
     def get_router_llm(self) -> LLMProvider:
-        if self._settings.router_llm_server_url:
-            from .llm.http_llm import HttpLLMProvider
-
-            logger.info("Using HTTP LLM server (router): %s", self._settings.router_llm_server_url)
-            return HttpLLMProvider(
-                base_url=self._settings.router_llm_server_url,
-                system_prefix=_LLM_SYSTEM_PREFIX,
-            )
-
-        if self._is_local:
-            from .llm.ollama import OllamaProvider
-
-            return OllamaProvider(
-                base_url=self._settings.ollama_host,
-                model=self._settings.router_model,
-                num_ctx=self._settings.ollama_num_ctx,
-                system_prefix=_LLM_SYSTEM_PREFIX,
-            )
-
-        if self._is_gemini:
-            from .llm.gemini import GeminiLLMProvider
-
-            return GeminiLLMProvider(
-                api_key=self._settings.gemini_api_key,
-                model="gemini-2.0-flash",
-            )
-
-        from .llm.openai import OpenAILLMProvider
-
-        return OpenAILLMProvider(
-            api_key=self._settings.openai_api_key,
-            model="gpt-4o-mini",
+        return self._create_llm(
+            server_url=self._settings.router_llm_server_url,
+            local_model=self._settings.router_model,
+            label="router",
         )
 
     def get_main_llm(self) -> LLMProvider:
-        if self._settings.main_llm_server_url:
+        return self._create_llm(
+            server_url=self._settings.main_llm_server_url,
+            local_model=self._settings.main_model,
+            label="main",
+        )
+
+    def _create_llm(self, server_url: str, local_model: str, label: str) -> LLMProvider:
+        """LLM 프로바이더 생성 (router/main 공통 로직)."""
+        if server_url:
             from .llm.http_llm import HttpLLMProvider
 
-            logger.info("Using HTTP LLM server (main): %s", self._settings.main_llm_server_url)
+            logger.info("Using HTTP LLM server (%s): %s", label, server_url)
             return HttpLLMProvider(
-                base_url=self._settings.main_llm_server_url,
+                base_url=server_url,
                 system_prefix=_LLM_SYSTEM_PREFIX,
             )
 
@@ -113,17 +83,9 @@ class ProviderFactory:
 
             return OllamaProvider(
                 base_url=self._settings.ollama_host,
-                model=self._settings.main_model,
+                model=local_model,
                 num_ctx=self._settings.ollama_num_ctx,
                 system_prefix=_LLM_SYSTEM_PREFIX,
-            )
-
-        if self._is_gemini:
-            from .llm.gemini import GeminiLLMProvider
-
-            return GeminiLLMProvider(
-                api_key=self._settings.gemini_api_key,
-                model=self._settings.gemini_llm_model,
             )
 
         from .llm.openai import OpenAILLMProvider
@@ -166,8 +128,7 @@ class ProviderFactory:
 
     @staticmethod
     def _check_server_health(base_url: str, timeout: float = 3.0) -> bool:
-        import httpx
-
+        """서버 헬스체크. startup 시점에만 호출되므로 동기 허용."""
         try:
             r = httpx.get(f"{base_url.rstrip('/')}/health", timeout=timeout)
             return r.status_code == 200

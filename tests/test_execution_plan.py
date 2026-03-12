@@ -1,17 +1,18 @@
 """ExecutionPlan + SearchScope 테스트."""
 
+from src.agent.profile import AgentMode
+from src.domain.models import SearchScope
 from src.router.execution_plan import (
     ExecutionPlan,
     QuestionStrategy,
     QuestionType,
-    SearchScope,
 )
 
 
 def test_question_type_values():
     assert QuestionType.GREETING == "GREETING"
     assert QuestionType.STANDALONE == "STANDALONE"
-    assert len(QuestionType) == 8
+    assert len(QuestionType) == 6
 
 
 def test_search_scope_defaults():
@@ -39,9 +40,9 @@ def test_question_strategy_defaults():
 
 def test_execution_plan():
     plan = ExecutionPlan(
-        mode="agentic",
+        mode=AgentMode.AGENTIC,
         scope=SearchScope(domain_codes=["보험"]),
         question_type=QuestionType.STANDALONE,
     )
-    assert plan.mode == "agentic"
+    assert plan.mode == AgentMode.AGENTIC
     assert plan.scope.domain_codes == ["보험"]

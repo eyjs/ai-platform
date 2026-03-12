@@ -2,9 +2,12 @@
 
 import logging
 
-from src.safety.base import Guardrail, GuardrailContext, GuardrailResult
+from src.domain.models import ResponsePolicy
+from src.safety.base import GuardrailContext, GuardrailResult
 
 logger = logging.getLogger(__name__)
+
+NO_DOCUMENT_BLOCK_MSG = "관련 문서를 찾지 못했습니다. 정확한 답변을 위해 문서를 확인해주세요."
 
 
 class ResponsePolicyGuard:
@@ -17,14 +20,10 @@ class ResponsePolicyGuard:
     name = "response_policy"
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
-        if context.response_policy != "strict":
+        if context.response_policy != ResponsePolicy.STRICT:
             return GuardrailResult.passed()
 
-        # strict 모드: 문서 근거 없으면 차단
         if not context.source_documents:
-            return GuardrailResult.block(
-                "관련 문서를 찾지 못했습니다. "
-                "정확한 답변을 위해 문서를 확인해주세요."
-            )
+            return GuardrailResult.block(NO_DOCUMENT_BLOCK_MSG)
 
         return GuardrailResult.passed()

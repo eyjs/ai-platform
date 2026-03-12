@@ -1,6 +1,7 @@
-"""Layer 1: Intent Classifier — QuestionType 분류.
+"""Layer 1: Intent Classifier -- QuestionType 분류.
 
 패턴 매칭 + Profile.intent_hints + LLM 폴백.
+전략(QuestionStrategy) 매핑은 L3 StrategyBuilder의 책임.
 """
 
 import logging
@@ -9,21 +10,9 @@ from typing import List, Optional
 
 from src.agent.profile import AgentProfile, IntentHint
 from src.infrastructure.providers.base import LLMProvider
-from src.router.execution_plan import QuestionType, QuestionStrategy
+from src.router.execution_plan import QuestionType
 
 logger = logging.getLogger(__name__)
-
-# QuestionType별 기본 전략
-STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
-    QuestionType.GREETING: QuestionStrategy(needs_rag=False, history_turns=0),
-    QuestionType.SYSTEM_META: QuestionStrategy(needs_rag=False, history_turns=0),
-    QuestionType.ANSWER_REFERENCE: QuestionStrategy(needs_rag=False, history_turns=3, boost_recent=True),
-    QuestionType.STANDALONE: QuestionStrategy(needs_rag=True, history_turns=0),
-    QuestionType.SAME_DOC_FOLLOWUP: QuestionStrategy(needs_rag=True, history_turns=3, boost_recent=True, max_vector_chunks=3),
-    QuestionType.ANSWER_BASED_FOLLOWUP: QuestionStrategy(needs_rag=True, history_turns=5, boost_recent=True),
-    QuestionType.CROSS_DOC_INTEGRATION: QuestionStrategy(needs_rag=True, history_turns=3, max_vector_chunks=8),
-    QuestionType.TOPIC_SWITCH: QuestionStrategy(needs_rag=True, history_turns=0),
-}
 
 # 인사/시스템 패턴
 GREETING_PATTERNS = [
@@ -37,6 +26,8 @@ SYSTEM_META_PATTERNS = [
     r"(어떤\s*문서|몇\s*개|상태)",
 ]
 
+PATTERN_MAX_QUERY_LEN = 15
+
 
 class IntentClassifier:
     """질문 의도 분류기."""
@@ -49,30 +40,30 @@ class IntentClassifier:
         query: str,
         history: List[dict],
         profile: AgentProfile,
-    ) -> tuple[QuestionType, QuestionStrategy, Optional[str]]:
-        """질문 유형, 전략, 커스텀 인텐트명을 반환한다.
+    ) -> tuple[QuestionType, Optional[str]]:
+        """질문 유형, 커스텀 인텐트명을 반환한다.
 
         Returns:
-            (question_type, strategy, custom_intent_name)
+            (question_type, custom_intent_name)
         """
         # 1. 커스텀 Intent 체크
         custom = self._check_custom_intents(query, profile.intent_hints)
         if custom:
-            return QuestionType.STANDALONE, STRATEGY_MATRIX[QuestionType.STANDALONE], custom
+            return QuestionType.STANDALONE, custom
 
         # 2. 패턴 기반 분류
-        pattern_type = self._pattern_classify(query, history)
+        pattern_type = self._pattern_classify(query)
         if pattern_type:
-            return pattern_type, STRATEGY_MATRIX[pattern_type], None
+            return pattern_type, None
 
         # 3. 대화 이력 기반 후속 질문 판단
         if history:
-            followup_type = self._detect_followup(query, history)
+            followup_type = self._detect_followup(query)
             if followup_type:
-                return followup_type, STRATEGY_MATRIX[followup_type], None
+                return followup_type, None
 
         # 4. 기본: STANDALONE
-        return QuestionType.STANDALONE, STRATEGY_MATRIX[QuestionType.STANDALONE], None
+        return QuestionType.STANDALONE, None
 
     @staticmethod
     def _check_custom_intents(query: str, hints: List[IntentHint]) -> Optional[str]:
@@ -83,9 +74,9 @@ class IntentClassifier:
         return None
 
     @staticmethod
-    def _pattern_classify(query: str, history: List[dict]) -> Optional[QuestionType]:
+    def _pattern_classify(query: str) -> Optional[QuestionType]:
         # 길이 가드: 15자 이하만 인사/시스템 패턴 매칭
-        if len(query) <= 15:
+        if len(query) <= PATTERN_MAX_QUERY_LEN:
             for pattern in GREETING_PATTERNS:
                 if re.search(pattern, query):
                     return QuestionType.GREETING
@@ -97,10 +88,17 @@ class IntentClassifier:
         return None
 
     @staticmethod
-    def _detect_followup(query: str, history: List[dict]) -> Optional[QuestionType]:
+    def _detect_followup(query: str) -> Optional[QuestionType]:
         """대화 이력 기반 후속 질문 유형 판단."""
-        followup_markers = ["그러면", "그럼", "그래서", "그건", "이건", "더", "또"]
+        # 조사/공백이 바로 뒤따르는 경우만 매칭 ("더블" 등 오탐 방지)
+        followup_markers = ["그러면", "그럼", "그래서", "그건", "이건"]
         for marker in followup_markers:
+            if query.startswith(marker):
+                return QuestionType.ANSWER_BASED_FOLLOWUP
+
+        # 짧은 마커는 뒤에 조사/공백이 있어야만 매칭
+        short_markers = ["더 ", "또 ", "더는", "또한"]
+        for marker in short_markers:
             if query.startswith(marker):
                 return QuestionType.ANSWER_BASED_FOLLOWUP
 

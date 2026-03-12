@@ -1,6 +1,6 @@
 """AI Platform 설정 관리.
 
-PostgreSQL only — Redis 의존 없음.
+PostgreSQL only -- Redis 의존 없음.
 모든 캐시/큐/세션을 PostgreSQL로 통합 관리.
 """
 
@@ -12,7 +12,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ProviderMode(str, Enum):
     DEVELOPMENT = "development"  # Ollama + sentence-transformers (로컬)
     OPENAI = "openai"            # OpenAI API (GPT + text-embedding)
-    GEMINI = "gemini"            # Google Gemini API
     PRODUCTION = "production"    # OpenAI (하위 호환)
 
 
@@ -28,7 +27,7 @@ class Settings(BaseSettings):
     provider_mode: ProviderMode = ProviderMode.DEVELOPMENT
 
     # PostgreSQL (유일한 인프라)
-    database_url: str = "postgresql://aip:aip_dev@localhost:5433/ai_platform"
+    database_url: str = "postgresql://aip:aip_dev@localhost:5434/ai_platform"
 
     # Ollama (development 모드)
     ollama_host: str = "http://localhost:11434"
@@ -37,7 +36,7 @@ class Settings(BaseSettings):
     # 응답 정책
     response_policy: str = "strict"
 
-    # GPU 서버 URL (선택 — 호스트에서 실행 시)
+    # GPU 서버 URL (선택 -- 호스트에서 실행 시)
     embedding_server_url: str = ""
     reranker_server_url: str = ""
     router_llm_server_url: str = ""
@@ -49,11 +48,8 @@ class Settings(BaseSettings):
     dev_embedding_model: str = "dragonkue/BGE-m3-ko"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     openai_api_key: str = ""
-    gemini_api_key: str = ""
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"
-    gemini_llm_model: str = "gemini-2.0-flash"
-    gemini_embedding_model: str = "models/text-embedding-004"
 
     # 청킹
     chunk_size: int = 1000
@@ -82,6 +78,9 @@ class Settings(BaseSettings):
 
     # JWT 인증 (선택)
     jwt_secret: str = ""
+
+    # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
+    cors_origins: list[str] = []
 
     # 서버
     host: str = "0.0.0.0"

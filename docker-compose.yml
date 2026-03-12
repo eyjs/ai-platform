@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: aip_dev
       POSTGRES_DB: ai_platform
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -18,11 +18,19 @@ services:
   ai-platform:
     build: .
     ports:
-      - "8000:8000"
+      - "8010:8000"
     environment:
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
-      AIP_OLLAMA_HOST: http://host.docker.internal:11434
       AIP_PROVIDER_MODE: development
+      AIP_OLLAMA_HOST: http://host.docker.internal:11434
+      # MLX GPU 서버 (호스트에서 실행 중)
+      AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
+      AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
+      AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8104
+      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8105
+      # 로깅
+      AIP_LOG_FORMAT: json
+      AIP_LOG_LEVEL: INFO
     depends_on:
       postgres:
         condition: service_healthy

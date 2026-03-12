@@ -44,4 +44,3 @@ intent_hints:
   - name: "CONTRACT_REQUEST"
     patterns: ["계약", "가입", "신청"]
     description: "고객이 보험 계약/가입을 요청하는 의도"
-    route_to: "workflow"

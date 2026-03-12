@@ -1,12 +1,13 @@
 """Faithfulness Guard: 숫자/인용 검증.
 
 답변에 등장하는 숫자가 출처 문서에 실제로 존재하는지 검증.
+문서 유무에 따른 차단 정책은 ResponsePolicyGuard의 책임.
 """
 
 import logging
 import re
 
-from src.safety.base import Guardrail, GuardrailContext, GuardrailResult
+from src.safety.base import GuardrailContext, GuardrailResult
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,6 @@ class FaithfulnessGuard:
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
         if not context.source_documents:
-            # 문서 없이 생성된 답변은 검증 불가
-            if context.response_policy == "strict":
-                return GuardrailResult.block(
-                    "관련 문서를 찾지 못했습니다. 정확한 답변을 위해 문서를 확인해주세요."
-                )
             return GuardrailResult.passed()
 
         # 답변에서 숫자 추출
@@ -37,10 +33,7 @@ class FaithfulnessGuard:
         source_numbers = self._extract_numbers(source_text)
 
         # 검증: 답변의 숫자가 출처에 있는지
-        unverified = []
-        for num in answer_numbers:
-            if num not in source_numbers:
-                unverified.append(num)
+        unverified = [num for num in answer_numbers if num not in source_numbers]
 
         if unverified:
             warning = (
@@ -67,7 +60,7 @@ class FaithfulnessGuard:
         numbers = set()
         for pattern in patterns:
             numbers.update(re.findall(pattern, text))
-        # 단독 숫자 (3자리 이상만 — 1, 2 같은 건 제외)
+        # 단독 숫자 (3자리 이상만)
         for match in re.findall(r'\b(\d{3,})\b', text):
             numbers.add(match)
         return numbers

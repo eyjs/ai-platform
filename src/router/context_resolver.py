@@ -12,6 +12,10 @@ from src.infrastructure.providers.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+PATTERN_CONFIDENCE_THRESHOLD = 0.9
+LLM_CHANGED_CONFIDENCE = 0.7
+LLM_HISTORY_TURNS = 4
+
 
 @dataclass
 class ResolutionResult:
@@ -77,7 +81,7 @@ class LLMBasedResolver:
             )
 
         history_text = "\n".join(
-            f"{t['role']}: {t['content']}" for t in history[-4:]
+            f"{t['role']}: {t['content']}" for t in history[-LLM_HISTORY_TURNS:]
         )
 
         try:
@@ -93,7 +97,7 @@ class LLMBasedResolver:
             return ResolutionResult(
                 resolved_query=resolved,
                 original_query=query,
-                confidence=0.7 if changed else 1.0,
+                confidence=LLM_CHANGED_CONFIDENCE if changed else 1.0,
                 method="llm" if changed else "passthrough",
             )
         except Exception as e:
@@ -116,7 +120,7 @@ class ChainResolver:
     ) -> ResolutionResult:
         # 1. 패턴 기반 (빠르고 정확)
         result = self._pattern.resolve(query, history)
-        if result and result.confidence >= 0.9:
+        if result and result.confidence >= PATTERN_CONFIDENCE_THRESHOLD:
             return result
 
         # 2. LLM 기반 (폴백)

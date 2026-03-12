@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from src.infrastructure.fact_store import FactStore
-from src.router.execution_plan import SearchScope
+from src.domain.models import SearchScope
 from src.tools.base import AgentContext, ToolResult
 
 logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ Lifespan: DB풀, ProviderFactory, ProfileStore, ToolRegistry, Agent 초기화.
 """
 
 import asyncio
-import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,12 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.agent.profile_store import ProfileStore
 from src.agent.universal import UniversalAgent
 from src.config import settings
-from src.gateway.router import gateway_router
+from src.gateway.router import APP_VERSION, gateway_router
 from src.infrastructure.fact_store import FactStore
 from src.infrastructure.memory.cache import PgCache
 from src.infrastructure.memory.session import SessionMemory
 from src.infrastructure.providers.factory import ProviderFactory
 from src.infrastructure.vector_store import VectorStore
+from src.observability.logging import configure_logging, get_logger
 from src.pipeline.ingest import IngestPipeline
 from src.router.ai_router import AIRouter
 from src.safety.faithfulness import FaithfulnessGuard
@@ -29,17 +30,24 @@ from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+# 로깅 설정: Docker/프로덕션에서는 JSON, 로컬 개발에서는 사람이 읽기 쉬운 포맷
+_json_logs = os.getenv("AIP_LOG_FORMAT", "json") == "json"
+_log_level = os.getenv("AIP_LOG_LEVEL", "INFO")
+configure_logging(level=_log_level, json_format=_json_logs)
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 생명주기: 초기화 → 실행 → 정리."""
-    logger.info("Starting AI Platform (mode: %s)", settings.provider_mode.value)
+    """앱 생명주기: 초기화 -> 실행 -> 정리."""
+    logger.info(
+        "startup",
+        mode=settings.provider_mode.value,
+        database=settings.database_url.split("@")[-1],  # 비밀번호 제거
+        log_format="json" if _json_logs else "human",
+        log_level=_log_level,
+    )
 
     # 1. VectorStore (PostgreSQL + pgvector)
     vector_store = VectorStore(settings.database_url)
@@ -48,6 +56,7 @@ async def lifespan(app: FastAPI):
         max_size=settings.pg_pool_max,
     )
     pool = vector_store.pool
+    logger.info("vectorstore_connected", pool_min=settings.pg_pool_min, pool_max=settings.pg_pool_max)
 
     # 2. FactStore
     fact_store = FactStore(pool)
@@ -61,17 +70,24 @@ async def lifespan(app: FastAPI):
     embedding_provider = provider_factory.get_embedding_provider()
     router_llm = provider_factory.get_router_llm()
     main_llm = provider_factory.get_main_llm()
+    logger.info(
+        "providers_initialized",
+        embedding=type(embedding_provider).__name__,
+        router_llm=type(router_llm).__name__,
+        main_llm=type(main_llm).__name__,
+    )
 
     reranker = None
     try:
         reranker = provider_factory.get_reranker()
+        logger.info("reranker_initialized", type=type(reranker).__name__)
     except Exception as e:
-        logger.warning("Reranker unavailable (degraded): %s", e)
+        logger.warning("reranker_unavailable", error=str(e))
 
     # 5. Profile Store
     profile_store = ProfileStore(pool, seed_dir="seeds/profiles")
     seed_count = await profile_store.load_seeds()
-    logger.info("Loaded %d profile seeds", seed_count)
+    logger.info("profiles_loaded", seed_count=seed_count)
 
     # 6. Tool Registry
     tool_registry = ToolRegistry()
@@ -81,7 +97,7 @@ async def lifespan(app: FastAPI):
         reranker=reranker,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
-    logger.info("Registered tools: %s", tool_registry.tool_names)
+    logger.info("tools_registered", tools=tool_registry.tool_names)
 
     # 7. AI Router
     ai_router = AIRouter(router_llm)
@@ -115,7 +131,7 @@ async def lifespan(app: FastAPI):
                 await cache.cleanup_expired()
                 await session_memory.cleanup_expired()
             except Exception as e:
-                logger.warning("Periodic cleanup failed: %s", e)
+                logger.warning("cleanup_failed", error=str(e))
 
     cleanup_task = asyncio.create_task(periodic_cleanup())
 
@@ -132,31 +148,41 @@ async def lifespan(app: FastAPI):
     app.state.ingest_pipeline = ingest_pipeline
     app.state.provider_factory = provider_factory
 
-    logger.info("AI Platform ready")
+    logger.info("startup_complete")
     yield
 
     # 정리
-    logger.info("Shutting down AI Platform")
+    logger.info("shutdown_start")
     cleanup_task.cancel()
     try:
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # HTTP 프로바이더 커넥션 풀 정리
+    for provider in (embedding_provider, router_llm, main_llm, reranker):
+        if provider and hasattr(provider, "close"):
+            try:
+                await provider.close()
+            except Exception as e:
+                logger.warning("provider_close_error", error=str(e))
+
     await vector_store.close()
-    logger.info("AI Platform shutdown complete")
+    logger.info("shutdown_complete")
 
 
 app = FastAPI(
     title="AI Platform",
     description="Universal Agent Platform - Profile 기반 도메인별 AI 에이전트",
-    version="0.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
+_cors_origins = settings.cors_origins or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

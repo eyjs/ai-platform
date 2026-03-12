@@ -1,29 +1,54 @@
-"""Layer 3: Strategy Builder — ExecutionPlan 조립.
+"""Layer 3: Strategy Builder -- ExecutionPlan 조립.
 
-SearchScope + tools + system_prompt + guardrails 통합.
+STRATEGY_MATRIX 소유 + SearchScope + tools + system_prompt + guardrails + conversation_context 통합.
 """
 
 import logging
 from typing import List, Optional, Union
 
 from src.agent.profile import AgentProfile
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, SearchScope
+from src.domain.models import AgentMode, ResponsePolicy, SearchScope, SecurityLevel, SECURITY_HIERARCHY
+from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
 from src.tools.base import ScopedTool, Tool
 
 logger = logging.getLogger(__name__)
 
+# QuestionType별 기본 전략 (L3 책임)
+STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
+    QuestionType.GREETING: QuestionStrategy(needs_rag=False, history_turns=0),
+    QuestionType.SYSTEM_META: QuestionStrategy(needs_rag=False, history_turns=0),
+    QuestionType.STANDALONE: QuestionStrategy(needs_rag=True, history_turns=0),
+    QuestionType.SAME_DOC_FOLLOWUP: QuestionStrategy(
+        needs_rag=True, history_turns=3, max_vector_chunks=3,
+    ),
+    QuestionType.ANSWER_BASED_FOLLOWUP: QuestionStrategy(
+        needs_rag=True, history_turns=5,
+    ),
+    QuestionType.CROSS_DOC_INTEGRATION: QuestionStrategy(
+        needs_rag=True, history_turns=3, max_vector_chunks=8,
+    ),
+}
+
 
 class StrategyBuilder:
     """ExecutionPlan 조립기."""
+
+    def get_strategy(self, question_type: QuestionType) -> QuestionStrategy:
+        """QuestionType에 대응하는 전략을 반환한다."""
+        strategy = STRATEGY_MATRIX.get(question_type)
+        if strategy is None:
+            logger.warning("No strategy for QuestionType %s, defaulting to STANDALONE", question_type.value)
+            strategy = STRATEGY_MATRIX[QuestionType.STANDALONE]
+        return strategy
 
     def build(
         self,
         profile: AgentProfile,
         question_type: QuestionType,
         strategy: QuestionStrategy,
-        mode: str,
+        mode: AgentMode,
         tools: List[Union[Tool, ScopedTool]],
-        conversation_context: str = "",
+        history: Optional[List[dict]] = None,
         user_security_level: str = "PUBLIC",
         prior_doc_ids: Optional[List[str]] = None,
         workflow_step: Optional[str] = None,
@@ -42,6 +67,14 @@ class StrategyBuilder:
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,
         )
 
+        # conversation_context 조립 (L3 책임)
+        conversation_context = ""
+        if history and strategy.history_turns > 0:
+            recent = history[-strategy.history_turns:]
+            conversation_context = "\n".join(
+                f"{t['role']}: {t['content']}" for t in recent
+            )
+
         return ExecutionPlan(
             mode=mode,
             scope=scope,
@@ -52,15 +85,20 @@ class StrategyBuilder:
             strategy=strategy,
             workflow_step=workflow_step,
             conversation_context=conversation_context,
+            response_policy=profile.response_policy,
         )
 
-    _SECURITY_RANKS = {"PUBLIC": 0, "INTERNAL": 1, "CONFIDENTIAL": 2, "SECRET": 3}
+    @staticmethod
+    def _security_rank(level: str) -> int:
+        rank = SECURITY_HIERARCHY.get(level)
+        if rank is None:
+            logger.warning("Unknown security level '%s', defaulting to PUBLIC", level)
+            return 0
+        return rank
 
-    def _security_rank(self, level: str) -> int:
-        return self._SECURITY_RANKS.get(level, 0)
-
-    def _rank_to_level(self, rank: int) -> str:
-        for level, r in self._SECURITY_RANKS.items():
+    @staticmethod
+    def _rank_to_level(rank: int) -> str:
+        for level, r in SECURITY_HIERARCHY.items():
             if r == rank:
                 return level
-        return "PUBLIC"
+        return SecurityLevel.PUBLIC

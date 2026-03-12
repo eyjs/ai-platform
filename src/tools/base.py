@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from src.router.execution_plan import SearchScope
+from src.domain.models import SearchScope, UserRole
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class AgentContext:
 
     session_id: str = ""
     user_id: str = ""
-    user_role: str = "VIEWER"
+    user_role: str = UserRole.VIEWER
     conversation_history: list = field(default_factory=list)
     prior_doc_ids: list[str] = field(default_factory=list)
 

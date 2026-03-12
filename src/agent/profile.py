@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from src.domain.models import AgentMode, ResponsePolicy, SecurityLevel  # noqa: F401 (re-export)
+
 
 @dataclass(frozen=True)
 class ToolRef:
@@ -21,13 +23,12 @@ class ToolRef:
 class IntentHint:
     """Profile별 커스텀 Intent 정의.
 
-    기본 8개 QuestionType 외에 도메인 특화 Intent를 선택적으로 추가.
+    기본 QuestionType 외에 도메인 특화 Intent를 선택적으로 추가.
     """
 
     name: str
     patterns: list[str]
     description: str
-    route_to: str  # "workflow" | "agentic"
 
 
 @dataclass(frozen=True)
@@ -54,10 +55,10 @@ class AgentProfile:
     # 도메인 스코프
     domain_scopes: list[str]
     category_scopes: list[str] = field(default_factory=list)
-    security_level_max: str = "PUBLIC"
+    security_level_max: str = SecurityLevel.PUBLIC
 
     # 오케스트레이션 모드
-    mode: str = "agentic"  # "agentic" | "workflow" | "hybrid"
+    mode: AgentMode = AgentMode.AGENTIC
     workflow_id: str | None = None
     hybrid_triggers: list[HybridTrigger] = field(default_factory=list)
 
@@ -66,7 +67,7 @@ class AgentProfile:
 
     # 응답 설정
     system_prompt: str = ""
-    response_policy: str = "balanced"  # "strict" | "balanced"
+    response_policy: str = ResponsePolicy.BALANCED
     guardrails: list[str] = field(default_factory=list)
 
     # LLM 설정
@@ -79,3 +80,8 @@ class AgentProfile:
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
+
+    @property
+    def tool_names(self) -> list[str]:
+        """도구 이름 목록."""
+        return [ref.name for ref in self.tools]

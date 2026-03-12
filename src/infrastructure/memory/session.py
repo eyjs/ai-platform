@@ -45,14 +45,14 @@ class SessionMemory:
         content: str,
         metadata: Optional[dict] = None,
     ) -> None:
-        """대화 턴 추가."""
+        """대화 턴 추가. 세션이 없으면 경고 로그를 남긴다."""
         turn = {
             "role": role,
             "content": content,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             **(metadata or {}),
         }
-        await self._pool.execute(
+        result = await self._pool.execute(
             """
             UPDATE conversation_sessions
             SET turns = turns || $2::jsonb,
@@ -61,6 +61,9 @@ class SessionMemory:
             """,
             session_id, json.dumps([turn], ensure_ascii=False),
         )
+        rows_affected = int(result.split()[-1])
+        if rows_affected == 0:
+            logger.warning("add_turn: session not found, turn dropped", extra={"session_id": session_id})
 
     async def get_turns(
         self,

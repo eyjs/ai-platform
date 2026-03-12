@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import AsyncIterator
 
 import httpx
@@ -16,6 +17,9 @@ class HttpLLMProvider(LLMProvider):
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=120.0)
         self._system_prefix = system_prefix
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     async def generate(self, prompt: str, system: str = "") -> str:
         system_msg = self._build_system(system)
@@ -34,7 +38,10 @@ class HttpLLMProvider(LLMProvider):
 
     async def generate_json(self, prompt: str, system: str = "") -> dict:
         text = await self.generate(prompt, system)
-        return json.loads(text)
+        # LLM이 ```json ... ``` 으로 감싸는 경우 fence 제거
+        stripped = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
+        stripped = re.sub(r"\n?```\s*$", "", stripped)
+        return json.loads(stripped)
 
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
         system_msg = self._build_system(system)

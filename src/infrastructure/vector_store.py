@@ -13,11 +13,18 @@ import asyncpg
 import numpy as np
 from pgvector.asyncpg import register_vector
 
+from src.domain.models import SECURITY_HIERARCHY
+
 logger = logging.getLogger(__name__)
 
 RRF_K = 60
-
-SECURITY_HIERARCHY = {"PUBLIC": 0, "INTERNAL": 1, "CONFIDENTIAL": 2, "SECRET": 3}
+HYBRID_CANDIDATE_MULTIPLIER = 3
+TRIGRAM_FALLBACK_THRESHOLD = 3
+FTS_MAX_TOKENS = 100
+TSQUERY_MAX_TOKENS = 20
+TRIGRAM_MIN_TERM_LEN = 2
+TRIGRAM_MIN_SIMILARITY = 0.1
+TRIGRAM_MAX_TERMS = 5
 
 
 class VectorStore:
@@ -64,6 +71,26 @@ class VectorStore:
             raise RuntimeError("VectorStore not connected")
         doc_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
+            if file_hash:
+                # INSERT ON CONFLICT: race condition 없는 atomic upsert
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO documents (id, external_id, title, file_name, file_hash,
+                        domain_code, security_level, source_url, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (file_hash, domain_code) DO UPDATE
+                        SET title = EXCLUDED.title,
+                            security_level = EXCLUDED.security_level,
+                            source_url = EXCLUDED.source_url,
+                            metadata = EXCLUDED.metadata
+                    RETURNING id
+                    """,
+                    uuid.UUID(doc_id), external_id, title, file_name, file_hash,
+                    domain_code, security_level, source_url,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                )
+                return str(row["id"])
+
             await conn.execute(
                 """
                 INSERT INTO documents (id, external_id, title, file_name, file_hash,
@@ -178,7 +205,7 @@ class VectorStore:
             raise RuntimeError("VectorStore not connected")
 
         allowed_levels = self._allowed_security_levels(max_security_level)
-        candidate_limit = limit * 3
+        candidate_limit = limit * HYBRID_CANDIDATE_MULTIPLIER
 
         async with self._pool.acquire() as conn:
             # 1. 벡터 검색
@@ -198,7 +225,7 @@ class VectorStore:
                 fts_rows = []
 
             # 3. Trigram fallback
-            if len(fts_rows) < 3:
+            if len(fts_rows) < TRIGRAM_FALLBACK_THRESHOLD:
                 try:
                     trgm_rows = await self._trigram_search(
                         conn, text_query, candidate_limit, domain_codes,
@@ -251,16 +278,16 @@ class VectorStore:
     def _tokenize_for_fts(text: str) -> str:
         """간단한 한국어 토큰화 (공백 기반)."""
         cleaned = re.sub(r"[(),:!&|<>'\\*\"]+", " ", text)
-        tokens = [t for t in cleaned.split() if len(t) >= 2]
-        return " ".join(tokens[:100])
+        tokens = [t for t in cleaned.split() if len(t) >= TRIGRAM_MIN_TERM_LEN]
+        return " ".join(tokens[:FTS_MAX_TOKENS])
 
     @staticmethod
     def _sanitize_tsquery(text: str) -> str:
         cleaned = re.sub(r"[(),:!&|<>'\\*\"]+", " ", text)
-        tokens = [t for t in cleaned.split() if len(t) >= 2]
+        tokens = [t for t in cleaned.split() if len(t) >= TRIGRAM_MIN_TERM_LEN]
         if not tokens:
             return ""
-        return " | ".join(tokens[:20])
+        return " | ".join(tokens[:TSQUERY_MAX_TOKENS])
 
     def _build_vector_query(
         self,
@@ -350,12 +377,12 @@ class VectorStore:
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
     ) -> list:
-        terms = [t for t in text_query.split() if len(t) >= 2]
+        terms = [t for t in text_query.split() if len(t) >= TRIGRAM_MIN_TERM_LEN]
         if not terms:
             return []
 
-        search_text = " ".join(terms[:5])
-        conditions = ["similarity(c.content, $1::text) > 0.1"]
+        search_text = " ".join(terms[:TRIGRAM_MAX_TERMS])
+        conditions = [f"similarity(c.content, $1::text) > {TRIGRAM_MIN_SIMILARITY}"]
         params: list = [search_text, limit]
         param_idx = 3
 
@@ -414,8 +441,7 @@ class VectorStore:
 
         results = []
         for chunk_id in sorted_ids[:limit]:
-            data = chunk_data[chunk_id]
-            data["score"] = rrf_scores[chunk_id]
+            data = {**chunk_data[chunk_id], "score": rrf_scores[chunk_id]}
             results.append(data)
         return results
 

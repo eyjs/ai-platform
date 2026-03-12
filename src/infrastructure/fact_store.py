@@ -95,21 +95,24 @@ class FactStore:
         subject: str,
         domain_codes: Optional[List[str]] = None,
         max_depth: int = 3,
+        max_total: int = 30,
+        fan_out: int = 3,
     ) -> List[dict]:
-        """subject → predicate → object 체인 탐색.
+        """subject -> predicate -> object 체인 탐색.
 
-        예: "자동차보험 대인배상" → [한도: 무한] → [특약: 자기부담금 면제]
+        예: "자동차보험 대인배상" -> [한도: 무한] -> [특약: 자기부담금 면제]
+        fan_out으로 각 depth에서 탐색할 subject 수를 제한한다.
         """
-        visited = set()
-        chain = []
+        visited: set[str] = set()
+        chain: list[dict] = []
         current_subjects = [subject]
 
-        for _ in range(max_depth):
-            if not current_subjects:
+        for depth in range(max_depth):
+            if not current_subjects or len(chain) >= max_total:
                 break
 
-            next_subjects = []
-            for subj in current_subjects:
+            next_subjects: list[str] = []
+            for subj in current_subjects[:fan_out]:
                 if subj in visited:
                     continue
                 visited.add(subj)
@@ -117,7 +120,12 @@ class FactStore:
                 facts = await self.search(subj, domain_codes=domain_codes, limit=5)
                 for fact in facts:
                     chain.append(fact)
+                    if len(chain) >= max_total:
+                        break
                     next_subjects.append(fact["object"])
+
+                if len(chain) >= max_total:
+                    break
 
             current_subjects = next_subjects
 

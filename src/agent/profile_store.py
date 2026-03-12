@@ -11,6 +11,7 @@ from typing import Optional
 import asyncpg
 import yaml
 
+from src.domain.models import AgentMode
 from .profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,11 @@ class ProfileStore:
         self._pool = pool
         self._seed_dir = Path(seed_dir)
         self._cache: dict[str, AgentProfile] = {}
+
+    @property
+    def profile_count(self) -> int:
+        """캐시된 프로필 수."""
+        return len(self._cache)
 
     async def load_seeds(self) -> int:
         """YAML 시드 파일을 DB에 로딩한다."""
@@ -101,6 +107,8 @@ class ProfileStore:
 
     @staticmethod
     def _parse_profile(data: dict) -> AgentProfile:
+        if "id" not in data or "name" not in data:
+            raise ValueError(f"Profile must have 'id' and 'name'. Got keys: {list(data.keys())}")
         tools = [
             ToolRef(name=t["name"], config=t.get("config", {}))
             for t in data.get("tools", [])
@@ -108,7 +116,7 @@ class ProfileStore:
         intent_hints = [
             IntentHint(
                 name=h["name"], patterns=h["patterns"],
-                description=h["description"], route_to=h["route_to"],
+                description=h.get("description", ""),
             )
             for h in data.get("intent_hints", [])
         ]
@@ -126,7 +134,7 @@ class ProfileStore:
             domain_scopes=data.get("domain_scopes", []),
             category_scopes=data.get("category_scopes", []),
             security_level_max=data.get("security_level_max", "PUBLIC"),
-            mode=data.get("mode", "agentic"),
+            mode=AgentMode(data.get("mode", "agentic")),
             workflow_id=data.get("workflow_id"),
             hybrid_triggers=hybrid_triggers,
             tools=tools,
@@ -146,7 +154,7 @@ class ProfileStore:
             "domain_scopes": profile.domain_scopes,
             "category_scopes": profile.category_scopes,
             "security_level_max": profile.security_level_max,
-            "mode": profile.mode,
+            "mode": profile.mode.value,
             "workflow_id": profile.workflow_id,
             "hybrid_triggers": [
                 {"keyword_patterns": t.keyword_patterns, "intent_types": t.intent_types, "workflow_id": t.workflow_id}
@@ -161,7 +169,7 @@ class ProfileStore:
             "memory_type": profile.memory_type,
             "memory_ttl_seconds": profile.memory_ttl_seconds,
             "intent_hints": [
-                {"name": h.name, "patterns": h.patterns, "description": h.description, "route_to": h.route_to}
+                {"name": h.name, "patterns": h.patterns, "description": h.description}
                 for h in profile.intent_hints
             ],
         }

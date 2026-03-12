@@ -1,11 +1,11 @@
 """AgentProfile 데이터 모델 테스트."""
 
-from src.agent.profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
+from src.agent.profile import AgentMode, AgentProfile, HybridTrigger, IntentHint, ToolRef
 
 
 def test_agent_profile_defaults():
     profile = AgentProfile(id="test", name="Test", domain_scopes=[])
-    assert profile.mode == "agentic"
+    assert profile.mode == AgentMode.AGENTIC
     assert profile.security_level_max == "PUBLIC"
     assert profile.response_policy == "balanced"
     assert profile.memory_type == "short"
@@ -28,12 +28,20 @@ def test_tool_ref():
     assert ref.config["max_vector_chunks"] == 3
 
 
+def test_tool_names_property():
+    profile = AgentProfile(
+        id="test", name="Test", domain_scopes=[],
+        tools=[ToolRef(name="rag_search"), ToolRef(name="fact_lookup")],
+    )
+    assert profile.tool_names == ["rag_search", "fact_lookup"]
+
+
 def test_intent_hint():
     hint = IntentHint(
         name="CONTRACT", patterns=["계약", "가입"],
-        description="계약 요청", route_to="workflow",
+        description="계약 요청",
     )
-    assert hint.route_to == "workflow"
+    assert hint.description == "계약 요청"
     assert "계약" in hint.patterns
 
 
@@ -43,3 +51,10 @@ def test_hybrid_trigger():
         workflow_id="insurance_contract",
     )
     assert trigger.workflow_id == "insurance_contract"
+
+
+def test_agent_mode_enum():
+    assert AgentMode.AGENTIC.value == "agentic"
+    assert AgentMode.WORKFLOW.value == "workflow"
+    assert AgentMode.HYBRID.value == "hybrid"
+    assert AgentMode("agentic") == AgentMode.AGENTIC

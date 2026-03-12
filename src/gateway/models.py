@@ -1,13 +1,18 @@
 """AI Gateway 요청/응답 모델.
 
-Gateway는 인증, Profile 로딩, 요청 라우팅, SSE 스트리밍을 담당.
+Gateway 전용 DTO: 요청(ChatRequest, IngestRequest), 응답(IngestResponse), 인증(UserContext).
+공유 도메인 모델(AgentResponse, SourceRef, TraceInfo, SearchScope)은 domain.models에 정의.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+from src.domain.models import (  # noqa: F401 (re-export)
+    AgentResponse, SecurityLevel, SourceRef, TraceInfo, UserRole,
+)
 
 
 class ChatRequest(BaseModel):
@@ -19,33 +24,12 @@ class ChatRequest(BaseModel):
     user_id: str | None = None
     user_role: str | None = None
 
-
-class ChatResponse(BaseModel):
-    """챗봇 응답 모델 (비스트리밍)."""
-
-    answer: str
-    sources: list[SourceRef] = []
-    trace: TraceInfo | None = None
-
-
-class SourceRef(BaseModel):
-    """출처 참조."""
-
-    document_id: str
-    title: str
-    chunk_text: str = ""
-    score: float = 0.0
-    method: str = ""  # "vector" | "fact" | "graph"
-
-
-class TraceInfo(BaseModel):
-    """AI 추론 과정 추적 정보."""
-
-    question_type: str = ""
-    mode: str = ""
-    tools_called: list[str] = []
-    router_decision: dict = {}
-    latency_ms: float = 0.0
+    @field_validator("question")
+    @classmethod
+    def question_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("question must not be empty")
+        return v
 
 
 class IngestRequest(BaseModel):
@@ -56,8 +40,8 @@ class IngestRequest(BaseModel):
     source_url: str | None = None
     domain_code: str
     file_name: str | None = None
-    security_level: str = "PUBLIC"
-    metadata: dict = {}
+    security_level: str = SecurityLevel.PUBLIC
+    metadata: dict = Field(default_factory=dict)
 
 
 class IngestResponse(BaseModel):
@@ -73,5 +57,5 @@ class UserContext:
     """인증 후 생성되는 사용자 맥락."""
 
     user_id: str = ""
-    user_role: str = "VIEWER"
-    security_level_max: str = "PUBLIC"
+    user_role: str = UserRole.VIEWER
+    security_level_max: str = SecurityLevel.PUBLIC

@@ -1,20 +1,19 @@
-"""Tool Registry: Profile.tools 기반 동적 도구 로딩.
+"""Tool Registry: 도구 등록 + 동적 해석 + 실행.
 
-ScopedTool에 SearchScope를 자동 주입한다.
+Profile 의존 없음 — tool_names: list[str]로 해석한다.
 """
 
 import logging
 from typing import Optional, Union
 
-from src.agent.profile import AgentProfile, ToolRef
-from src.router.execution_plan import SearchScope
+from src.domain.models import SearchScope
 from src.tools.base import AgentContext, ScopedTool, Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
-    """Profile.tools 기반 도구 레지스트리."""
+    """도구 레지스트리."""
 
     def __init__(self):
         self._tools: dict[str, Union[Tool, ScopedTool]] = {}
@@ -23,15 +22,15 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         logger.info("Registered tool: %s", tool.name)
 
-    def resolve(self, profile: AgentProfile) -> list[Union[Tool, ScopedTool]]:
-        """Profile.tools 참조를 실제 도구 인스턴스로 해석한다."""
+    def resolve(self, tool_names: list[str]) -> list[Union[Tool, ScopedTool]]:
+        """도구 이름 목록을 실제 도구 인스턴스로 해석한다."""
         resolved = []
-        for ref in profile.tools:
-            tool = self._tools.get(ref.name)
+        for name in tool_names:
+            tool = self._tools.get(name)
             if tool:
                 resolved.append(tool)
             else:
-                logger.warning("Tool not found: %s (profile: %s)", ref.name, profile.id)
+                logger.warning("Tool not found: %s", name)
         return resolved
 
     def get(self, name: str) -> Optional[Union[Tool, ScopedTool]]:
@@ -50,14 +49,16 @@ class ToolRegistry:
             return ToolResult.fail(f"Tool not found: {tool_name}")
 
         try:
-            if isinstance(tool, ScopedTool) and scope:
+            if isinstance(tool, ScopedTool):
+                if not scope:
+                    return ToolResult.fail(
+                        f"ScopedTool '{tool_name}' requires SearchScope"
+                    )
                 return await tool.execute(params, context, scope)
             elif isinstance(tool, Tool):
                 return await tool.execute(params, context)
             else:
-                return ToolResult.fail(
-                    f"ScopedTool '{tool_name}' requires SearchScope"
-                )
+                return ToolResult.fail(f"Unknown tool type: {tool_name}")
         except Exception as e:
             logger.error("Tool '%s' execution failed: %s", tool_name, e)
             return ToolResult.fail(str(e))
