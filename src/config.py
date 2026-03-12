@@ -29,20 +29,18 @@ class Settings(BaseSettings):
     # PostgreSQL (유일한 인프라)
     database_url: str = "postgresql://aip:aip_dev@localhost:5434/ai_platform"
 
-    # Ollama (development 모드)
-    ollama_host: str = "http://localhost:11434"
-    ollama_num_ctx: int = 16384
-
-    # 응답 정책
-    response_policy: str = "strict"
-
-    # GPU 서버 URL (선택 -- 호스트에서 실행 시)
+    # MLX GPU 서버 URL (development 모드 기본)
     embedding_server_url: str = ""
     reranker_server_url: str = ""
     router_llm_server_url: str = ""
     main_llm_server_url: str = ""
 
-    # 모델 설정
+    # 응답 정책
+    response_policy: str = "strict"
+
+    # Ollama 폴백 (MLX 서버 미실행 시)
+    ollama_host: str = "http://localhost:11434"
+    ollama_num_ctx: int = 16384
     router_model: str = "qwen3:8b"
     main_model: str = "gemma2:9b"
     dev_embedding_model: str = "dragonkue/BGE-m3-ko"

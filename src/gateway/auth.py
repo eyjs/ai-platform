@@ -10,6 +10,7 @@
 - AIP_JWT_SECRET → JWT 서명 검증 키
 """
 
+import asyncio
 import hashlib
 import secrets
 from datetime import datetime, timezone
@@ -112,7 +113,7 @@ class AuthService:
         row = await self._pool.fetchrow(
             """
             SELECT user_id, user_role, security_level_max,
-                   allowed_profiles, rate_limit_per_min, expires_at
+                   allowed_profiles, allowed_origins, rate_limit_per_min, expires_at
             FROM api_keys
             WHERE key_hash = $1 AND is_active = TRUE
             """,
@@ -126,20 +127,15 @@ class AuthService:
         if row["expires_at"] and row["expires_at"] < datetime.now(timezone.utc):
             raise AuthError("만료된 API Key")
 
-        # last_used_at 갱신 (fire-and-forget)
-        try:
-            await self._pool.execute(
-                "UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = $1",
-                key_hash,
-            )
-        except Exception:
-            pass  # 갱신 실패는 무시
+        # last_used_at 갱신 — 메인 요청 흐름을 막지 않도록 백그라운드 태스크로 분리
+        asyncio.create_task(self._update_last_used(key_hash))
 
         return UserContext(
             user_id=row["user_id"] or "api-user",
             user_role=row["user_role"],
             security_level_max=row["security_level_max"],
             allowed_profiles=row["allowed_profiles"] or [],
+            allowed_origins=row["allowed_origins"] or [],
             rate_limit_per_min=row["rate_limit_per_min"] or 60,
         )
 
@@ -157,6 +153,36 @@ class AuthService:
             raise AuthError(
                 f"이 API Key는 '{chatbot_id}' 프로필에 접근 권한이 없습니다"
             )
+
+    def check_origin(
+        self,
+        user_ctx: UserContext,
+        origin: str | None,
+    ) -> None:
+        """요청 Origin이 허용된 도메인인지 확인한다."""
+        if not self._auth_required:
+            return
+
+        if not user_ctx.allowed_origins:
+            return  # 제한 없음
+
+        if not origin:
+            raise AuthError("Origin 헤더가 필요합니다")
+
+        if origin not in user_ctx.allowed_origins:
+            raise AuthError(
+                f"허용되지 않은 Origin: {origin}"
+            )
+
+    async def _update_last_used(self, key_hash: str) -> None:
+        """API Key 마지막 사용 시각을 백그라운드로 갱신한다."""
+        try:
+            await self._pool.execute(
+                "UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = $1",
+                key_hash,
+            )
+        except Exception as e:
+            logger.error("api_key_last_used_update_failed", key_hash=key_hash[:8], error=str(e))
 
 
 class AuthError(Exception):

@@ -62,4 +62,5 @@ class UserContext:
     user_role: str = UserRole.VIEWER
     security_level_max: str = SecurityLevel.PUBLIC
     allowed_profiles: list[str] = field(default_factory=list)
+    allowed_origins: list[str] = field(default_factory=list)
     rate_limit_per_min: int = 60

@@ -45,9 +45,19 @@ async def _authenticate(request: Request) -> UserContext:
             authorization=request.headers.get("Authorization"),
             api_key=request.headers.get("X-API-Key"),
         )
-        return user_ctx
     except AuthError as e:
         raise HTTPException(status_code=401, detail=str(e))
+
+    # Origin 도메인 화이트리스트 검증
+    try:
+        auth_service.check_origin(
+            user_ctx,
+            origin=request.headers.get("Origin"),
+        )
+    except AuthError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    return user_ctx
 
 
 @dataclass
@@ -338,6 +348,7 @@ async def create_api_key(request: Request):
     user_role = body.get("user_role", UserRole.VIEWER)
     security_level_max = body.get("security_level_max", "PUBLIC")
     allowed_profiles = body.get("allowed_profiles", [])
+    allowed_origins = body.get("allowed_origins", [])
     rate_limit = body.get("rate_limit_per_min", 60)
 
     from src.gateway.auth import generate_api_key
@@ -347,19 +358,20 @@ async def create_api_key(request: Request):
     await state.vector_store.pool.execute(
         """
         INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
-                              allowed_profiles, rate_limit_per_min)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                              allowed_profiles, allowed_origins, rate_limit_per_min)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         """,
         key_hash, name, user_ctx.user_id, user_role, security_level_max,
-        allowed_profiles, rate_limit,
+        allowed_profiles, allowed_origins, rate_limit,
     )
 
-    logger.info("api_key_created", name=name, user_role=user_role)
+    logger.info("api_key_created", name=name, user_role=user_role, origins=allowed_origins)
 
     return {
         "api_key": raw_key,
         "name": name,
         "user_role": user_role,
         "security_level_max": security_level_max,
+        "allowed_origins": allowed_origins,
         "message": "이 키는 다시 표시되지 않습니다. 안전하게 보관하세요.",
     }

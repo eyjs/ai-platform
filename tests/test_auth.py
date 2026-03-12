@@ -113,6 +113,7 @@ async def test_api_key_valid(auth_service, mock_pool):
         "user_role": "EDITOR",
         "security_level_max": "INTERNAL",
         "allowed_profiles": ["insurance-qa"],
+        "allowed_origins": ["https://customer.com"],
         "rate_limit_per_min": 100,
         "expires_at": None,
     }
@@ -144,6 +145,7 @@ async def test_api_key_expired(auth_service, mock_pool):
         "user_role": "VIEWER",
         "security_level_max": "PUBLIC",
         "allowed_profiles": [],
+        "allowed_origins": [],
         "rate_limit_per_min": 60,
         "expires_at": datetime.now(timezone.utc) - timedelta(days=1),
     }
@@ -190,6 +192,53 @@ async def test_profile_access_auth_disabled(auth_service_disabled):
         allowed_profiles=["other-profile"],
     )
     await auth_service_disabled.check_profile_access(ctx, "insurance-qa")
+
+
+# --- Origin 도메인 제한 ---
+
+
+def test_origin_allowed(auth_service):
+    """허용된 Origin → 통과."""
+    ctx = UserContext(
+        user_id="u1", user_role="VIEWER",
+        allowed_origins=["https://customer.com", "https://app.customer.com"],
+    )
+    auth_service.check_origin(ctx, "https://customer.com")
+
+
+def test_origin_denied(auth_service):
+    """허용되지 않은 Origin → AuthError."""
+    ctx = UserContext(
+        user_id="u1", user_role="VIEWER",
+        allowed_origins=["https://customer.com"],
+    )
+    with pytest.raises(AuthError, match="허용되지 않은 Origin"):
+        auth_service.check_origin(ctx, "https://hacker-site.com")
+
+
+def test_origin_missing_header(auth_service):
+    """allowed_origins 설정됐는데 Origin 헤더 없음 → AuthError."""
+    ctx = UserContext(
+        user_id="u1", user_role="VIEWER",
+        allowed_origins=["https://customer.com"],
+    )
+    with pytest.raises(AuthError, match="Origin 헤더가 필요합니다"):
+        auth_service.check_origin(ctx, None)
+
+
+def test_origin_empty_allows_all(auth_service):
+    """allowed_origins 비어있으면 제한 없음."""
+    ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_origins=[])
+    auth_service.check_origin(ctx, "https://any-site.com")
+
+
+def test_origin_auth_disabled(auth_service_disabled):
+    """인증 비활성이면 Origin 검사 스킵."""
+    ctx = UserContext(
+        user_id="u1", user_role="VIEWER",
+        allowed_origins=["https://customer.com"],
+    )
+    auth_service_disabled.check_origin(ctx, "https://hacker-site.com")
 
 
 # --- API Key 생성 유틸리티 ---

@@ -22,7 +22,6 @@ services:
     environment:
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       AIP_PROVIDER_MODE: development
-      AIP_OLLAMA_HOST: http://host.docker.internal:11434
       # MLX GPU 서버 (호스트에서 실행 중)
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102

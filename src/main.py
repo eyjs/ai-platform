@@ -173,12 +173,18 @@ async def lifespan(app: FastAPI):
                 user_role VARCHAR(20) NOT NULL DEFAULT 'VIEWER',
                 security_level_max VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
                 allowed_profiles TEXT[] DEFAULT '{}',
+                allowed_origins TEXT[] DEFAULT '{}',
                 rate_limit_per_min INT DEFAULT 60,
                 is_active BOOLEAN DEFAULT TRUE,
                 expires_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 last_used_at TIMESTAMPTZ
             );
+        """)
+
+        # 기존 테이블에 allowed_origins 컬럼이 없으면 추가
+        await conn.execute("""
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_origins TEXT[] DEFAULT '{}';
         """)
 
         # 개발용 기본 키 (aip_dev_admin / aip_dev_viewer)
