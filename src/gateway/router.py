@@ -133,7 +133,10 @@ async def chat(req: ChatRequest, request: Request):
         setup = await _prepare_chat(req, request)
 
         response = await state.agent.execute(
-            req.question, setup.plan, setup.context, setup.trace,
+            question=req.question,
+            plan=setup.plan,
+            session_id=setup.session_id,
+            trace=setup.trace,
         )
 
         await state.session_memory.add_turn(setup.session_id, "user", req.question)
@@ -174,7 +177,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         try:
             answer_parts = []
             async for event in state.agent.execute_stream(
-                req.question, setup.plan, setup.context, setup.trace,
+                question=req.question, plan=setup.plan,
+                session_id=setup.session_id, trace=setup.trace,
             ):
                 event_type = event["type"]
                 if event_type == "token":

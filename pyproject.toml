@@ -30,8 +30,12 @@ local = [
     "torch>=2.0.0",
     "transformers>=4.40.0",
 ]
+ollama = [
+    "langchain-ollama>=0.3.0",
+]
 openai = [
     "openai>=1.50.0",
+    "langchain-openai>=0.3.0",
 ]
 
 [build-system]

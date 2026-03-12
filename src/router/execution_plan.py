@@ -46,3 +46,5 @@ class ExecutionPlan:
     workflow_step: str | None = None
     conversation_context: str = ""
     response_policy: str = ResponsePolicy.BALANCED
+    max_tool_calls: int = 5
+    agent_timeout_seconds: int = 30

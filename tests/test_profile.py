@@ -57,4 +57,21 @@ def test_agent_mode_enum():
     assert AgentMode.AGENTIC.value == "agentic"
     assert AgentMode.WORKFLOW.value == "workflow"
     assert AgentMode.HYBRID.value == "hybrid"
+    assert AgentMode.DETERMINISTIC.value == "deterministic"
     assert AgentMode("agentic") == AgentMode.AGENTIC
+    assert len(AgentMode) == 4
+
+
+def test_profile_agentic_defaults():
+    profile = AgentProfile(id="test", name="Test", domain_scopes=[])
+    assert profile.max_tool_calls == 5
+    assert profile.agent_timeout_seconds == 30
+
+
+def test_profile_agentic_custom():
+    profile = AgentProfile(
+        id="test", name="Test", domain_scopes=[],
+        mode=AgentMode.AGENTIC, max_tool_calls=10, agent_timeout_seconds=60,
+    )
+    assert profile.max_tool_calls == 10
+    assert profile.agent_timeout_seconds == 60

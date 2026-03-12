@@ -26,6 +26,9 @@ class ModeSelector:
         Returns:
             (mode, workflow_id)
         """
+        if profile.mode == AgentMode.DETERMINISTIC:
+            return AgentMode.DETERMINISTIC, None
+
         if profile.mode == AgentMode.AGENTIC:
             return AgentMode.AGENTIC, None
 

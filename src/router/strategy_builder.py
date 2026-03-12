@@ -95,6 +95,8 @@ class StrategyBuilder:
             workflow_step=workflow_step,
             conversation_context=conversation_context,
             response_policy=profile.response_policy,
+            max_tool_calls=profile.max_tool_calls,
+            agent_timeout_seconds=profile.agent_timeout_seconds,
         )
 
     @staticmethod

@@ -146,6 +146,8 @@ class ProfileStore:
             main_model=data.get("main_model", "sonnet"),
             memory_type=data.get("memory_type", "short"),
             memory_ttl_seconds=data.get("memory_ttl_seconds", 3600),
+            max_tool_calls=data.get("max_tool_calls", 5),
+            agent_timeout_seconds=data.get("agent_timeout_seconds", 30),
             intent_hints=intent_hints,
         )
 
@@ -170,6 +172,8 @@ class ProfileStore:
             "main_model": profile.main_model,
             "memory_type": profile.memory_type,
             "memory_ttl_seconds": profile.memory_ttl_seconds,
+            "max_tool_calls": profile.max_tool_calls,
+            "agent_timeout_seconds": profile.agent_timeout_seconds,
             "intent_hints": [
                 {"name": h.name, "patterns": h.patterns, "description": h.description}
                 for h in profile.intent_hints

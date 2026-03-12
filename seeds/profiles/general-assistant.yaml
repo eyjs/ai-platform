@@ -1,12 +1,14 @@
-# 범용 AI 어시스턴트 프로필
-id: "general-chat"
-name: "통합 AI 어시스턴트"
+# 범용 에이전틱 어시스턴트 프로필
+id: "general-assistant"
+name: "AI 에이전트 어시스턴트"
 
-domain_scopes: []  # 전체 도메인
+domain_scopes: []
 category_scopes: []
 security_level_max: "PUBLIC"
 
-mode: "deterministic"
+mode: "agentic"
+max_tool_calls: 5
+agent_timeout_seconds: 30
 workflow_id: null
 hybrid_triggers: []
 
@@ -17,8 +19,8 @@ tools:
     config: {}
 
 system_prompt: |
-  당신은 AI 어시스턴트입니다.
-  사용자의 질문에 문서를 기반으로 답변합니다.
+  당신은 도구를 자율적으로 선택하여 사용자의 질문에 답변하는 AI 에이전트입니다.
+  필요한 정보를 찾기 위해 검색 도구를 활용하세요.
   확실하지 않은 정보는 "확인이 필요합니다"라고 안내하세요.
 
 response_policy: "balanced"

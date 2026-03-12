@@ -11,8 +11,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.agent.chat_model_factory import create_chat_model
+from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
-from src.agent.universal import UniversalAgent
 from src.config import settings
 from src.gateway.router import APP_VERSION, gateway_router
 from src.infrastructure.fact_store import FactStore
@@ -109,11 +110,25 @@ async def lifespan(app: FastAPI):
         "pii_filter": PIIFilterGuard(),
     }
 
-    # 9. Universal Agent
-    agent = UniversalAgent(
+    # 9. ChatModel (에이전틱 모드용) + GraphExecutor
+    chat_model = None
+    try:
+        chat_model = create_chat_model(
+            provider_mode=settings.provider_mode,
+            model_name=settings.main_model,
+            ollama_host=settings.ollama_host,
+            openai_api_key=settings.openai_api_key,
+            server_url=settings.main_llm_server_url,
+        )
+        logger.info("chat_model_initialized", type=type(chat_model).__name__)
+    except ImportError:
+        logger.warning("chat_model_unavailable, agentic mode disabled")
+
+    agent = GraphExecutor(
         main_llm=main_llm,
         tool_registry=tool_registry,
         guardrails=guardrails,
+        chat_model=chat_model,
     )
 
     # 10. Ingest Pipeline

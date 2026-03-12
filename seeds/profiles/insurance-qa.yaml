@@ -9,7 +9,7 @@ domain_scopes:
 category_scopes: []
 security_level_max: "INTERNAL"
 
-mode: "agentic"
+mode: "deterministic"
 workflow_id: null
 hybrid_triggers: []
 

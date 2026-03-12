@@ -79,6 +79,10 @@ class AgentProfile:
     memory_type: str = "short"  # "short" | "session" | "long"
     memory_ttl_seconds: int = 3600
 
+    # 에이전틱 모드 설정
+    max_tool_calls: int = 5
+    agent_timeout_seconds: int = 30
+
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
 

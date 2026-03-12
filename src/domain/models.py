@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 class AgentMode(str, Enum):
     """오케스트레이션 모드."""
 
-    AGENTIC = "agentic"
+    DETERMINISTIC = "deterministic"  # StateGraph: 정해진 Tool 순서 실행
+    AGENTIC = "agentic"              # create_react_agent: LLM이 Tool 자율 선택
     WORKFLOW = "workflow"
     HYBRID = "hybrid"
 
