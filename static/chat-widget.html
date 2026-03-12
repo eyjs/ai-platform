@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Platform Chat Widget</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0f2f5;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-container {
+  width: 420px;
+  height: 680px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chat-header .avatar {
+  width: 40px;
+  height: 40px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.chat-header .info h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chat-header .info p {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.chat-header .status {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  background: #4caf50;
+  border-radius: 50%;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.message.bot {
+  background: #f0f0f0;
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.message.user {
+  background: #1a1a2e;
+  color: #fff;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+.message.bot .sources {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+  font-size: 12px;
+  color: #666;
+}
+
+.message.bot .sources .source-item {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #e8e8e8;
+  border-radius: 4px;
+}
+
+.message.bot .meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #999;
+}
+
+.typing-indicator {
+  align-self: flex-start;
+  padding: 10px 14px;
+  background: #f0f0f0;
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  display: none;
+  gap: 4px;
+  align-items: center;
+}
+
+.typing-indicator.active { display: flex; }
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  background: #999;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+.input-area {
+  padding: 12px 16px;
+  border-top: 1px solid #e8e8e8;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input-area select {
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 24px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-area input:focus { border-color: #1a1a2e; }
+
+.input-area button {
+  width: 40px;
+  height: 40px;
+  background: #1a1a2e;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+.input-area button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+</style>
+</head>
+<body>
+
+<div class="chat-container">
+  <div class="chat-header">
+    <div class="avatar">AI</div>
+    <div class="info">
+      <h2 id="headerTitle">AI Platform</h2>
+      <p>Powered by ai-platform</p>
+    </div>
+    <div class="status"></div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="message bot">
+      안녕하세요! AI Platform 챗봇입니다. 무엇을 도와드릴까요?
+    </div>
+  </div>
+
+  <div class="typing-indicator" id="typing">
+    <span></span><span></span><span></span>
+  </div>
+
+  <div class="input-area">
+    <select id="profileSelect">
+      <option value="insurance-qa">보험 QA</option>
+      <option value="general-chat">일반 대화</option>
+      <option value="general-assistant">범용 어시스턴트</option>
+    </select>
+    <input type="text" id="userInput" placeholder="메시지를 입력하세요..." autocomplete="off">
+    <button id="sendBtn" onclick="sendMessage()">&#9654;</button>
+  </div>
+</div>
+
+<script>
+const API_BASE = 'http://localhost:8010/api';
+const API_KEY = 'aip_dev_viewer';
+let sessionId = crypto.randomUUID();
+let isStreaming = false;
+
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('userInput');
+const typingEl = document.getElementById('typing');
+const sendBtn = document.getElementById('sendBtn');
+const profileSelect = document.getElementById('profileSelect');
+
+inputEl.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+function createSourcesSection(sources) {
+  var srcDiv = document.createElement('div');
+  srcDiv.className = 'sources';
+
+  var label = document.createElement('strong');
+  label.textContent = 'Sources:';
+  srcDiv.appendChild(label);
+
+  sources.forEach(function(s) {
+    var item = document.createElement('div');
+    item.className = 'source-item';
+    var score = s.score != null ? ' (' + s.score.toFixed(3) + ')' : '';
+    item.textContent = s.title + score;
+    srcDiv.appendChild(item);
+  });
+
+  return srcDiv;
+}
+
+function addMessage(text, role) {
+  var div = document.createElement('div');
+  div.className = 'message ' + role;
+
+  var textNode = document.createElement('span');
+  textNode.textContent = text;
+  div.appendChild(textNode);
+
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+async function sendMessage() {
+  var question = inputEl.value.trim();
+  if (!question || isStreaming) return;
+
+  isStreaming = true;
+  sendBtn.disabled = true;
+  inputEl.value = '';
+
+  addMessage(question, 'user');
+
+  var chatbotId = profileSelect.value;
+  var startTime = performance.now();
+
+  typingEl.classList.add('active');
+
+  try {
+    var response = await fetch(API_BASE + '/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': API_KEY,
+      },
+      body: JSON.stringify({
+        question: question,
+        chatbot_id: chatbotId,
+        session_id: sessionId,
+      }),
+    });
+
+    if (!response.ok) {
+      var errText = await response.text();
+      throw new Error('HTTP ' + response.status + ': ' + errText);
+    }
+
+    typingEl.classList.remove('active');
+
+    var botDiv = addMessage('', 'bot');
+    var textSpan = botDiv.querySelector('span');
+    var answer = '';
+    var ttft = null;
+    var doneData = null;
+
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var currentEvent = '';
+
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          var data = line.slice(5).trim();
+
+          if (currentEvent === 'token') {
+            if (ttft === null) {
+              ttft = Math.round(performance.now() - startTime);
+            }
+            answer += data;
+            textSpan.textContent = answer;
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          } else if (currentEvent === 'replace') {
+            answer = data;
+            textSpan.textContent = answer;
+          } else if (currentEvent === 'done') {
+            try { doneData = JSON.parse(data); } catch(e) { /* ignore */ }
+          }
+        }
+      }
+    }
+
+    var totalMs = Math.round(performance.now() - startTime);
+
+    if (doneData) {
+      var sources = doneData.sources || [];
+      var mode = doneData.mode || '';
+
+      if (sources.length > 0) {
+        botDiv.appendChild(createSourcesSection(sources));
+      }
+
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = mode + ' | TTFT: ' + ttft + 'ms | Total: ' + totalMs + 'ms';
+      botDiv.appendChild(meta);
+    }
+
+  } catch (err) {
+    typingEl.classList.remove('active');
+    addMessage('Error: ' + err.message, 'bot');
+  } finally {
+    isStreaming = false;
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+}
+</script>
+</body>
+</html>

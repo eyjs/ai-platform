@@ -8,8 +8,11 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
@@ -251,3 +254,7 @@ app.add_middleware(
 )
 
 app.include_router(gateway_router, prefix="/api")
+
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir), html=True), name="static")

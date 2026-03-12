@@ -4,6 +4,7 @@ name: "보험 상담 챗봇"
 
 domain_scopes:
   - "자동차보험"
+  - "실손보험"
   - "화재보험"
   - "건강보험"
 category_scopes: []
