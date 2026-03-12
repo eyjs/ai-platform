@@ -131,6 +131,11 @@ class GraphExecutor:
         is_streaming=True로 그래프를 실행하여 Tool 노드만 실제 작업하고,
         generate/guardrails/build_response 노드는 바이패스한다.
         LLM 토큰 스트리밍과 Guardrail은 래퍼에서 직접 처리한다.
+
+        TODO(tech-debt): Checkpointer 도입 시 상태 영속성 구멍 해결 필요.
+        현재 is_streaming=True에서는 AgentState의 answer/sources가 빈 상태로
+        남는다. 대안 B(BaseChatModel 네이티브 스트리밍) 전환 또는
+        스트리밍 완료 후 graph.update_state() 명시 호출로 해결할 것.
         """
         # RAG 불필요 -> 직접 스트리밍
         if not plan.strategy.needs_rag:
