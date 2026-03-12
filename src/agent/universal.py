@@ -77,7 +77,7 @@ class UniversalAgent:
 
             result = await self._registry.execute(
                 tool_name=tool_name,
-                params={"query": question},
+                params={"query": question, "subject": question},
                 context=context,
                 scope=plan.scope,
             )
@@ -192,7 +192,7 @@ class UniversalAgent:
             t_start = time.time()
             result = await self._registry.execute(
                 tool_name=tool_name,
-                params={"query": question},
+                params={"query": question, "subject": question},
                 context=context,
                 scope=plan.scope,
             )

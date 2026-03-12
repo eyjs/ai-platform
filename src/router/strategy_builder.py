@@ -7,7 +7,10 @@ import logging
 from typing import List, Optional, Union
 
 from src.agent.profile import AgentProfile
-from src.domain.models import AgentMode, ResponsePolicy, SearchScope, SecurityLevel, SECURITY_HIERARCHY
+from src.domain.models import (
+    AgentMode, ResponsePolicy, SearchScope, SecurityLevel,
+    SECURITY_HIERARCHY, resolve_domain_hierarchy,
+)
 from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
 from src.tools.base import ScopedTool, Tool
 
@@ -60,8 +63,14 @@ class StrategyBuilder:
         )
         security_level = self._rank_to_level(effective_security)
 
+        # 도메인 계층 해석: "ga/contract" → ["ga/contract", "ga", "_common"]
+        resolved_domains = resolve_domain_hierarchy(
+            profile.domain_scopes,
+            include_common=profile.include_common,
+        )
+
         scope = SearchScope(
-            domain_codes=profile.domain_scopes,
+            domain_codes=resolved_domains,
             category_ids=profile.category_scopes if profile.category_scopes else None,
             security_level_max=security_level,
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,

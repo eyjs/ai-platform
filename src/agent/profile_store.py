@@ -134,6 +134,7 @@ class ProfileStore:
             domain_scopes=data.get("domain_scopes", []),
             category_scopes=data.get("category_scopes", []),
             security_level_max=data.get("security_level_max", "PUBLIC"),
+            include_common=data.get("include_common", True),
             mode=AgentMode(data.get("mode", "agentic")),
             workflow_id=data.get("workflow_id"),
             hybrid_triggers=hybrid_triggers,
@@ -154,6 +155,7 @@ class ProfileStore:
             "domain_scopes": profile.domain_scopes,
             "category_scopes": profile.category_scopes,
             "security_level_max": profile.security_level_max,
+            "include_common": profile.include_common,
             "mode": profile.mode.value,
             "workflow_id": profile.workflow_id,
             "hybrid_triggers": [

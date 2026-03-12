@@ -56,6 +56,7 @@ class AgentProfile:
     domain_scopes: list[str]
     category_scopes: list[str] = field(default_factory=list)
     security_level_max: str = SecurityLevel.PUBLIC
+    include_common: bool = True  # 플랫폼 공통 지식(_common) 포함 여부
 
     # 오케스트레이션 모드
     mode: AgentMode = AgentMode.AGENTIC

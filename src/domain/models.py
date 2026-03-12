@@ -60,6 +60,35 @@ class ResponsePolicy(str, Enum):
     BALANCED = "balanced"
 
 
+COMMON_DOMAIN = "_common"
+
+
+def resolve_domain_hierarchy(
+    domain_codes: list[str],
+    include_common: bool = True,
+) -> list[str]:
+    """도메인 코드를 계층적으로 확장한다.
+
+    "ga/contract" → ["ga/contract", "ga", "_common"]
+    "camping-a/reservation" → ["camping-a/reservation", "camping-a", "_common"]
+
+    '/' 구분자로 상위 도메인을 자동 포함하여,
+    하위 프로필이 상위 도메인의 공통 문서에 접근할 수 있게 한다.
+    """
+    if not domain_codes:
+        # 빈 리스트 = 전체 검색 (general-chat 등). 필터 없이 모든 문서 접근.
+        return []
+
+    resolved: set[str] = set(domain_codes)
+    for code in domain_codes:
+        parts = code.split("/")
+        for i in range(1, len(parts)):
+            resolved.add("/".join(parts[:i]))
+    if include_common:
+        resolved.add(COMMON_DOMAIN)
+    return sorted(resolved)
+
+
 @dataclass(frozen=True)
 class SearchScope:
     """도구 실행 시 자동 주입되는 검색 범위.
