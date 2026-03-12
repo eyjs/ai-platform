@@ -1,0 +1,40 @@
+# 보험 QA 챗봇 프로필
+id: "insurance-qa"
+name: "보험 상담 챗봇"
+
+domain_scopes:
+  - "자동차보험"
+  - "화재보험"
+  - "건강보험"
+category_scopes: []
+security_level_max: "INTERNAL"
+
+mode: "agentic"
+workflow_id: null
+hybrid_triggers: []
+
+tools:
+  - name: "rag_search"
+    config:
+      max_vector_chunks: 3
+  - name: "fact_lookup"
+    config: {}
+
+system_prompt: |
+  당신은 보험 상품 전문 상담 AI입니다.
+  고객의 질문에 정확하고 친절하게 답변하세요.
+  반드시 문서 근거를 인용하여 답변하세요.
+  확실하지 않은 정보는 "확인이 필요합니다"라고 안내하세요.
+
+response_policy: "strict"
+guardrails:
+  - "faithfulness"
+  - "pii_filter"
+
+router_model: "haiku"
+main_model: "sonnet"
+
+memory_type: "short"
+memory_ttl_seconds: 3600
+
+intent_hints: []

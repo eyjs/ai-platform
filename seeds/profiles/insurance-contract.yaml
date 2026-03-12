@@ -1,0 +1,47 @@
+# 보험 계약 어시스턴트 프로필 (Hybrid 모드)
+id: "insurance-contract"
+name: "보험 계약 어시스턴트"
+
+domain_scopes:
+  - "자동차보험"
+  - "화재보험"
+category_scopes:
+  - "약관"
+  - "상품안내"
+security_level_max: "INTERNAL"
+
+mode: "hybrid"
+workflow_id: null
+hybrid_triggers:
+  - keyword_patterns: ["계약", "가입", "신청"]
+    intent_types: ["CONTRACT_REQUEST"]
+    workflow_id: "insurance_contract"
+
+tools:
+  - name: "rag_search"
+    config:
+      max_vector_chunks: 3
+  - name: "fact_lookup"
+    config: {}
+
+system_prompt: |
+  당신은 보험 계약 절차를 안내하는 AI 어시스턴트입니다.
+  고객의 보험 가입 상담부터 계약 완료까지 안내합니다.
+  문서 근거를 반드시 인용하고, 확실하지 않은 정보는 안내하세요.
+
+response_policy: "strict"
+guardrails:
+  - "faithfulness"
+  - "pii_filter"
+
+router_model: "haiku"
+main_model: "sonnet"
+
+memory_type: "session"
+memory_ttl_seconds: 7200
+
+intent_hints:
+  - name: "CONTRACT_REQUEST"
+    patterns: ["계약", "가입", "신청"]
+    description: "고객이 보험 계약/가입을 요청하는 의도"
+    route_to: "workflow"
