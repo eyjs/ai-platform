@@ -20,6 +20,7 @@ def upgrade() -> None:
             user_role VARCHAR(20) NOT NULL DEFAULT 'VIEWER',
             security_level_max VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
             allowed_profiles TEXT[] DEFAULT '{}',
+            allowed_origins TEXT[] DEFAULT '{}',
             rate_limit_per_min INT DEFAULT 60,
             is_active BOOLEAN DEFAULT TRUE,
             expires_at TIMESTAMPTZ,
