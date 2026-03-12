@@ -128,8 +128,9 @@ class GraphExecutor:
     ) -> AsyncIterator[dict]:
         """결정론적 모드 스트리밍.
 
-        도구 실행은 LangGraph astream으로 노드별 추적,
-        LLM 답변은 기존 LLMProvider.generate_stream으로 토큰 스트리밍.
+        is_streaming=True로 그래프를 실행하여 Tool 노드만 실제 작업하고,
+        generate/guardrails/build_response 노드는 바이패스한다.
+        LLM 토큰 스트리밍과 Guardrail은 래퍼에서 직접 처리한다.
         """
         # RAG 불필요 -> 직접 스트리밍
         if not plan.strategy.needs_rag:
@@ -140,10 +141,12 @@ class GraphExecutor:
             yield {"type": "done", "data": {"tools_called": [], "sources": []}}
             return
 
-        # Tool 실행 (astream으로 노드별 추적)
+        # Tool 실행만 수행 (is_streaming=True → LLM/Guardrail 노드 바이패스)
         yield {"type": "trace", "data": {"step": "tool_execution", "status": "start"}}
 
-        initial_state = create_initial_state(question, plan, session_id)
+        initial_state = create_initial_state(
+            question, plan, session_id, is_streaming=True,
+        )
         tools_called = []
         search_results = []
 
@@ -161,7 +164,7 @@ class GraphExecutor:
                             "ms": tl["ms"],
                         }}
 
-        # 답변 토큰 스트리밍
+        # LLM 토큰 스트리밍 (래퍼에서 직접 처리)
         prompt_results = search_results[:plan.strategy.max_vector_chunks]
         prompt = build_prompt(question, plan, prompt_results)
 
@@ -177,7 +180,7 @@ class GraphExecutor:
             answer_tokens.append(token)
             yield {"type": "token", "data": token}
 
-        # Guardrail
+        # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)
         if plan.guardrail_chain:
             guardrail_ctx = GuardrailContext(

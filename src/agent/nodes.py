@@ -87,9 +87,15 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
 
 
 def create_generate_with_context(llm: LLMProvider) -> Callable:
-    """검색 결과 기반 LLM 답변 생성 노드."""
+    """검색 결과 기반 LLM 답변 생성 노드.
+
+    is_streaming=True이면 바이패스 (래퍼에서 토큰 스트리밍 직접 처리).
+    """
 
     async def generate_with_context(state: AgentState) -> dict:
+        if state.get("is_streaming"):
+            return {}
+
         plan = state["plan"]
         question = state["question"]
         results = state["search_results"]
@@ -120,9 +126,15 @@ def create_direct_generate(llm: LLMProvider) -> Callable:
 
 
 def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
-    """Guardrail 체인 실행 노드."""
+    """Guardrail 체인 실행 노드.
+
+    is_streaming=True이면 바이패스 (래퍼에서 스트리밍 후 직접 실행).
+    """
 
     async def run_guardrails(state: AgentState) -> dict:
+        if state.get("is_streaming"):
+            return {}
+
         plan = state["plan"]
         answer = state["answer"]
 
@@ -145,9 +157,15 @@ def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
 
 
 def create_build_response() -> Callable:
-    """출처 생성 + 최종 응답 조립 노드."""
+    """출처 생성 + 최종 응답 조립 노드.
+
+    is_streaming=True이면 바이패스 (래퍼에서 done 이벤트로 직접 전달).
+    """
 
     async def build_response(state: AgentState) -> dict:
+        if state.get("is_streaming"):
+            return {}
+
         sources = build_source_dicts(state["search_results"])
         return {"sources": sources}
 

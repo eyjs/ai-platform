@@ -66,3 +66,15 @@ def test_initial_state_defaults():
     assert state["latency_ms"] == 0.0
     assert state["guardrail_results"] == {}
     assert state["sources"] == []
+    assert state["is_streaming"] is False
+
+
+def test_initial_state_streaming_flag():
+    """is_streaming=True 플래그가 정상 설정되는지 확인."""
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        question_type=QuestionType.STANDALONE,
+    )
+    state = create_initial_state("질문", plan, is_streaming=True)
+    assert state["is_streaming"] is True

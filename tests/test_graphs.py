@@ -198,3 +198,51 @@ async def test_graph_executor_agentic_fallback():
 
     response = await executor.execute("안녕", plan, "sess-1")
     assert response.answer == "폴백 답변"
+
+
+@pytest.mark.asyncio
+async def test_streaming_bypass_no_double_llm():
+    """is_streaming=True -> generate/guardrails/build_response 노드가 바이패스되어
+    LLM이 그래프 내부에서 호출되지 않는지 검증 (이중 실행 방지).
+    """
+    mock_llm = AsyncMock()
+    mock_llm.generate = AsyncMock(return_value="이 답변은 호출되면 안됨")
+
+    from src.tools.base import ToolResult
+    mock_registry = AsyncMock()
+    mock_registry.execute = AsyncMock(return_value=ToolResult(
+        success=True,
+        data=[{"document_id": "d1", "title": "약관", "content": "1억", "score": 0.9}],
+    ))
+
+    class FakeTool:
+        name = "rag_search"
+
+    graph = build_deterministic_graph(
+        llm=mock_llm,
+        registry=mock_registry,
+        guardrails={},
+    )
+    app = graph.compile()
+
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tools=[FakeTool()],
+        question_type=QuestionType.STANDALONE,
+        strategy=QuestionStrategy(needs_rag=True, max_vector_chunks=5),
+    )
+    state = create_initial_state("질문", plan, "sess-1", is_streaming=True)
+
+    result = await app.ainvoke(state)
+
+    # Tool은 실행됨
+    assert result["tools_called"] == ["rag_search"]
+    assert len(result["search_results"]) == 1
+
+    # LLM generate는 호출되지 않아야 함 (바이패스)
+    mock_llm.generate.assert_not_called()
+
+    # answer, sources는 빈 상태 (래퍼에서 직접 처리)
+    assert result["answer"] == ""
+    assert result["sources"] == []

@@ -37,6 +37,9 @@ class AgentState(TypedDict):
     # 출처
     sources: list[dict]
 
+    # 스트리밍 모드 플래그 — True이면 LLM/Guardrail 노드가 바이패스
+    is_streaming: bool
+
     # 메타데이터
     latency_ms: float
 
@@ -45,6 +48,7 @@ def create_initial_state(
     question: str,
     plan: ExecutionPlan,
     session_id: str = "",
+    is_streaming: bool = False,
 ) -> AgentState:
     """초기 상태 생성."""
     return AgentState(
@@ -58,5 +62,6 @@ def create_initial_state(
         answer="",
         guardrail_results={},
         sources=[],
+        is_streaming=is_streaming,
         latency_ms=0.0,
     )
