@@ -67,6 +67,10 @@ def main():
     print(f"Documents: {len(docs)}")
     print()
 
+    # API Key (인증 필수)
+    api_key = os.environ.get("AIP_API_KEY", "aip_dev_admin")
+    headers = {"X-API-Key": api_key}
+
     # health check
     try:
         r = httpx.get(f"{args.api_url}/health", timeout=5)
@@ -95,6 +99,7 @@ def main():
                     "file_name": doc["file"],
                     "security_level": "PUBLIC",
                 },
+                headers=headers,
                 timeout=120,
             )
             if r.status_code == 200:

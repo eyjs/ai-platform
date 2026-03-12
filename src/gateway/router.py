@@ -244,7 +244,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                 total_ms=round(setup.trace.total_ms, 1),
             )
         finally:
-            request_context.reset(setup.ctx_token)
+            # SSE 제너레이터는 별도 Task에서 실행되므로
+            # ContextVar 토큰 reset은 안전하게 스킵
+            try:
+                request_context.reset(setup.ctx_token)
+            except ValueError:
+                pass  # 다른 Context에서 생성된 토큰
 
     return EventSourceResponse(event_generator())
 
