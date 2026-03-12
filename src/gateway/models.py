@@ -6,13 +6,15 @@ Gateway 전용 DTO: 요청(ChatRequest, IngestRequest), 응답(IngestResponse), 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field, field_validator
 
 from src.domain.models import (  # noqa: F401 (re-export)
     AgentResponse, SecurityLevel, SourceRef, TraceInfo, UserRole,
 )
+
+MAX_QUESTION_LENGTH = 5000
 
 
 class ChatRequest(BaseModel):
@@ -21,14 +23,14 @@ class ChatRequest(BaseModel):
     question: str
     chatbot_id: str  # = profile_id
     session_id: str | None = None
-    user_id: str | None = None
-    user_role: str | None = None
 
     @field_validator("question")
     @classmethod
     def question_not_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("question must not be empty")
+        if len(v) > MAX_QUESTION_LENGTH:
+            raise ValueError(f"question must be {MAX_QUESTION_LENGTH} characters or less")
         return v
 
 
@@ -59,3 +61,5 @@ class UserContext:
     user_id: str = ""
     user_role: str = UserRole.VIEWER
     security_level_max: str = SecurityLevel.PUBLIC
+    allowed_profiles: list[str] = field(default_factory=list)
+    rate_limit_per_min: int = 60

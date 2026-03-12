@@ -28,6 +28,9 @@ services:
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8104
       AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8105
+      # 인증
+      AIP_AUTH_REQUIRED: "true"
+      AIP_JWT_SECRET: "dev-jwt-secret-change-in-production"
       # 로깅
       AIP_LOG_FORMAT: json
       AIP_LOG_LEVEL: INFO

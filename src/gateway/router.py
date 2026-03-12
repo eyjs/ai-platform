@@ -1,6 +1,10 @@
 """AI Gateway: FastAPI 엔드포인트.
 
 /chat/stream, /chat, /documents/ingest, /profiles, /health
+
+인증:
+- /health, /profiles → 공개 (인증 불필요)
+- /chat, /chat/stream, /documents/ingest → 인증 필수 (JWT 또는 API Key)
 """
 
 import json
@@ -13,7 +17,8 @@ from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from src.domain.models import AgentResponse, UserRole
-from src.gateway.models import ChatRequest, IngestRequest, IngestResponse
+from src.gateway.auth import AuthError
+from src.gateway.models import ChatRequest, IngestRequest, IngestResponse, UserContext
 from src.observability.logging import RequestContext, get_logger, request_context
 from src.observability.trace_logger import RequestTrace
 from src.tools.base import AgentContext
@@ -30,6 +35,21 @@ def _get_app_state(request: Request):
     return request.app.state
 
 
+async def _authenticate(request: Request) -> UserContext:
+    """요청을 인증하고 UserContext를 반환한다."""
+    state = _get_app_state(request)
+    auth_service = state.auth_service
+
+    try:
+        user_ctx = await auth_service.authenticate(
+            authorization=request.headers.get("Authorization"),
+            api_key=request.headers.get("X-API-Key"),
+        )
+        return user_ctx
+    except AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
 @dataclass
 class _ChatSetup:
     """chat/chat_stream 공통 세팅 결과."""
@@ -41,8 +61,12 @@ class _ChatSetup:
     ctx_token: object  # contextvars.Token
 
 
-async def _prepare_chat(req: ChatRequest, request: Request) -> _ChatSetup:
-    """chat/chat_stream 공통 로직: Profile 로딩 -> 세션 -> history -> Router."""
+async def _prepare_chat(
+    req: ChatRequest,
+    request: Request,
+    user_ctx: UserContext,
+) -> _ChatSetup:
+    """chat/chat_stream 공통 로직: 인증 → Profile 로딩 → 세션 → history → Router."""
     state = _get_app_state(request)
     request_id = str(uuid.uuid4())
     session_id = req.session_id or str(uuid.uuid4())
@@ -51,15 +75,23 @@ async def _prepare_chat(req: ChatRequest, request: Request) -> _ChatSetup:
         request_id=request_id,
         session_id=session_id,
         profile_id=req.chatbot_id,
-        user_id=req.user_id or "",
+        user_id=user_ctx.user_id,
     ))
 
     try:
+        # 프로필 접근 권한 확인
+        try:
+            await state.auth_service.check_profile_access(user_ctx, req.chatbot_id)
+        except AuthError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
         logger.info(
             "chat_request",
             question=req.question[:100],
             chatbot_id=req.chatbot_id,
             question_len=len(req.question),
+            user_id=user_ctx.user_id,
+            user_role=user_ctx.user_role,
         )
 
         profile = await state.profile_store.get(req.chatbot_id)
@@ -69,7 +101,7 @@ async def _prepare_chat(req: ChatRequest, request: Request) -> _ChatSetup:
         await state.session_memory.create_session(
             session_id=session_id,
             profile_id=profile.id,
-            user_id=req.user_id or "",
+            user_id=user_ctx.user_id,
             ttl_seconds=profile.memory_ttl_seconds,
         )
         history = await state.session_memory.get_turns(session_id, max_turns=10)
@@ -80,13 +112,13 @@ async def _prepare_chat(req: ChatRequest, request: Request) -> _ChatSetup:
             profile=profile,
             tools=tools,
             history=history,
-            user_security_level=req.user_role or UserRole.VIEWER,
+            user_security_level=user_ctx.user_role,
         )
 
         context = AgentContext(
             session_id=session_id,
-            user_id=req.user_id or "",
-            user_role=req.user_role or UserRole.VIEWER,
+            user_id=user_ctx.user_id,
+            user_role=user_ctx.user_role,
             conversation_history=history,
         )
         trace = RequestTrace(request_id=request_id)
@@ -101,6 +133,9 @@ async def _prepare_chat(req: ChatRequest, request: Request) -> _ChatSetup:
     except Exception:
         request_context.reset(ctx_token)
         raise
+
+
+# --- 공개 엔드포인트 ---
 
 
 @gateway_router.get("/health")
@@ -119,18 +154,22 @@ async def list_profiles(request: Request):
     state = _get_app_state(request)
     profiles = await state.profile_store.list_all()
     return [
-        {"id": p.id, "name": p.name, "mode": p.mode.value, "domains": p.domain_scopes}  # noqa: E501
+        {"id": p.id, "name": p.name, "mode": p.mode.value, "domains": p.domain_scopes}
         for p in profiles
     ]
+
+
+# --- 인증 필수 엔드포인트 ---
 
 
 @gateway_router.post("/chat", response_model=AgentResponse)
 async def chat(req: ChatRequest, request: Request):
     state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
     setup: Optional[_ChatSetup] = None
 
     try:
-        setup = await _prepare_chat(req, request)
+        setup = await _prepare_chat(req, request, user_ctx)
 
         response = await state.agent.execute(
             question=req.question,
@@ -163,9 +202,10 @@ async def chat(req: ChatRequest, request: Request):
 @gateway_router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
 
     try:
-        setup = await _prepare_chat(req, request)
+        setup = await _prepare_chat(req, request, user_ctx)
     except HTTPException:
         raise
     except Exception as e:
@@ -212,11 +252,21 @@ async def chat_stream(req: ChatRequest, request: Request):
 @gateway_router.post("/documents/ingest", response_model=IngestResponse)
 async def ingest_document(req: IngestRequest, request: Request):
     state = _get_app_state(request)
-    request_id = str(uuid.uuid4())
+    user_ctx = await _authenticate(request)
 
+    # EDITOR 이상만 문서 수집 가능
+    role_level = {"VIEWER": 0, "EDITOR": 1, "REVIEWER": 2, "APPROVER": 3, "ADMIN": 4}
+    if role_level.get(user_ctx.user_role, 0) < 1:
+        raise HTTPException(
+            status_code=403,
+            detail="문서 수집은 EDITOR 이상 권한이 필요합니다",
+        )
+
+    request_id = str(uuid.uuid4())
     ctx_token = request_context.set(RequestContext(
         request_id=request_id,
         profile_id="ingest",
+        user_id=user_ctx.user_id,
     ))
 
     try:
@@ -225,6 +275,7 @@ async def ingest_document(req: IngestRequest, request: Request):
             title=req.title,
             domain_code=req.domain_code,
             content_len=len(req.content) if req.content else 0,
+            user_id=user_ctx.user_id,
         )
 
         if not req.content and not req.source_url:
@@ -265,3 +316,45 @@ async def ingest_document(req: IngestRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         request_context.reset(ctx_token)
+
+
+# --- API Key 관리 (ADMIN 전용) ---
+
+
+@gateway_router.post("/api-keys")
+async def create_api_key(request: Request):
+    """새 API Key를 생성한다. ADMIN만 가능."""
+    user_ctx = await _authenticate(request)
+    if user_ctx.user_role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="ADMIN 권한이 필요합니다")
+
+    body = await request.json()
+    name = body.get("name", "unnamed")
+    user_role = body.get("user_role", UserRole.VIEWER)
+    security_level_max = body.get("security_level_max", "PUBLIC")
+    allowed_profiles = body.get("allowed_profiles", [])
+    rate_limit = body.get("rate_limit_per_min", 60)
+
+    from src.gateway.auth import generate_api_key
+    raw_key, key_hash = generate_api_key()
+
+    state = _get_app_state(request)
+    await state.vector_store.pool.execute(
+        """
+        INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
+                              allowed_profiles, rate_limit_per_min)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """,
+        key_hash, name, user_ctx.user_id, user_role, security_level_max,
+        allowed_profiles, rate_limit,
+    )
+
+    logger.info("api_key_created", name=name, user_role=user_role)
+
+    return {
+        "api_key": raw_key,
+        "name": name,
+        "user_role": user_role,
+        "security_level_max": security_level_max,
+        "message": "이 키는 다시 표시되지 않습니다. 안전하게 보관하세요.",
+    }

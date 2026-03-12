@@ -76,7 +76,8 @@ class Settings(BaseSettings):
     # 캐시 정리 주기 (초)
     cache_cleanup_interval: int = 300    # 5분마다 만료 캐시 삭제
 
-    # JWT 인증 (선택)
+    # 인증
+    auth_required: bool = True
     jwt_secret: str = ""
 
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)

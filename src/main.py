@@ -15,6 +15,7 @@ from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
 from src.config import settings
+from src.gateway.auth import AuthService
 from src.gateway.router import APP_VERSION, gateway_router
 from src.infrastructure.fact_store import FactStore
 from src.infrastructure.memory.cache import PgCache
@@ -59,7 +60,15 @@ async def lifespan(app: FastAPI):
     pool = vector_store.pool
     logger.info("vectorstore_connected", pool_min=settings.pg_pool_min, pool_max=settings.pg_pool_max)
 
-    # 2. FactStore
+    # 2. AuthService
+    auth_service = AuthService(
+        pool=pool,
+        jwt_secret=settings.jwt_secret,
+        auth_required=settings.auth_required,
+    )
+    logger.info("auth_initialized", auth_required=settings.auth_required)
+
+    # 3. FactStore
     fact_store = FactStore(pool)
 
     # 3. Memory (PostgreSQL 기반)
@@ -150,8 +159,47 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = asyncio.create_task(periodic_cleanup())
 
+    # api_keys 테이블 생성 + 개발용 키 시드
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                key_hash VARCHAR(64) NOT NULL UNIQUE,
+                name VARCHAR(255) NOT NULL,
+                user_id VARCHAR(255) NOT NULL DEFAULT '',
+                user_role VARCHAR(20) NOT NULL DEFAULT 'VIEWER',
+                security_level_max VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
+                allowed_profiles TEXT[] DEFAULT '{}',
+                rate_limit_per_min INT DEFAULT 60,
+                is_active BOOLEAN DEFAULT TRUE,
+                expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                last_used_at TIMESTAMPTZ
+            );
+        """)
+
+        # 개발용 기본 키 (aip_dev_admin / aip_dev_viewer)
+        import hashlib
+        dev_keys = [
+            ("aip_dev_admin", "dev-admin-key", "dev-admin", "ADMIN", "SECRET", [], 120),
+            ("aip_dev_viewer", "dev-viewer-key", "dev-viewer", "VIEWER", "PUBLIC", [], 60),
+            ("aip_dev_editor", "dev-editor-key", "dev-editor", "EDITOR", "INTERNAL", [], 60),
+        ]
+        for raw_key, name, user_id, role, sec_lvl, profiles, rate in dev_keys:
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            await conn.execute("""
+                INSERT INTO api_keys (key_hash, name, user_id, user_role,
+                                      security_level_max, allowed_profiles, rate_limit_per_min)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (key_hash) DO NOTHING
+            """, key_hash, name, user_id, role, sec_lvl, profiles, rate)
+
+        key_count = await conn.fetchval("SELECT COUNT(*) FROM api_keys WHERE is_active = TRUE")
+        logger.info("api_keys_ready", active_keys=key_count)
+
     # app.state에 컴포넌트 등록
     app.state.settings = settings
+    app.state.auth_service = auth_service
     app.state.vector_store = vector_store
     app.state.fact_store = fact_store
     app.state.session_memory = session_memory
