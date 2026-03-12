@@ -44,6 +44,7 @@ class AuthService:
         self._pool = pool
         self._jwt_secret = jwt_secret
         self._auth_required = auth_required
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def authenticate(
         self,
@@ -128,7 +129,9 @@ class AuthService:
             raise AuthError("만료된 API Key")
 
         # last_used_at 갱신 — 메인 요청 흐름을 막지 않도록 백그라운드 태스크로 분리
-        asyncio.create_task(self._update_last_used(key_hash))
+        task = asyncio.create_task(self._update_last_used(key_hash))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         return UserContext(
             user_id=row["user_id"] or "api-user",
@@ -173,6 +176,47 @@ class AuthService:
             raise AuthError(
                 f"허용되지 않은 Origin: {origin}"
             )
+
+    async def create_key(
+        self,
+        name: str,
+        creator_user_id: str,
+        user_role: str = "VIEWER",
+        security_level_max: str = "PUBLIC",
+        allowed_profiles: list[str] | None = None,
+        allowed_origins: list[str] | None = None,
+        rate_limit_per_min: int = 60,
+    ) -> tuple[str, str]:
+        """새 API Key를 생성하고 DB에 저장한다.
+
+        Returns:
+            (raw_key, key_hash): raw_key는 한 번만 노출
+
+        Raises:
+            AuthError: 유효하지 않은 role/security_level
+        """
+        valid_roles = set(UserRole.__members__.values())
+        if user_role not in valid_roles:
+            raise AuthError(f"유효하지 않은 역할: {user_role} (허용: {valid_roles})")
+
+        valid_levels = set(SecurityLevel.__members__.values())
+        if security_level_max not in valid_levels:
+            raise AuthError(f"유효하지 않은 보안등급: {security_level_max} (허용: {valid_levels})")
+
+        raw_key, key_hash = generate_api_key()
+
+        await self._pool.execute(
+            """
+            INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
+                                  allowed_profiles, allowed_origins, rate_limit_per_min)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+            key_hash, name, creator_user_id, user_role, security_level_max,
+            allowed_profiles or [], allowed_origins or [], rate_limit_per_min,
+        )
+
+        logger.info("api_key_created", name=name, user_role=user_role, origins=allowed_origins or [])
+        return raw_key, key_hash
 
     async def _update_last_used(self, key_hash: str) -> None:
         """API Key 마지막 사용 시각을 백그라운드로 갱신한다."""

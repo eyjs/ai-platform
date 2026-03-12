@@ -25,6 +25,8 @@ from src.tools.base import AgentContext
 
 APP_VERSION = "0.1.0"
 
+ROLE_LEVELS = {"VIEWER": 0, "EDITOR": 1, "REVIEWER": 2, "APPROVER": 3, "ADMIN": 4}
+
 logger = get_logger(__name__)
 
 gateway_router = APIRouter()
@@ -270,8 +272,7 @@ async def ingest_document(req: IngestRequest, request: Request):
     user_ctx = await _authenticate(request)
 
     # EDITOR 이상만 문서 수집 가능
-    role_level = {"VIEWER": 0, "EDITOR": 1, "REVIEWER": 2, "APPROVER": 3, "ADMIN": 4}
-    if role_level.get(user_ctx.user_role, 0) < 1:
+    if ROLE_LEVELS.get(user_ctx.user_role, 0) < 1:
         raise HTTPException(
             status_code=403,
             detail="문서 수집은 EDITOR 이상 권한이 필요합니다",
@@ -339,6 +340,7 @@ async def ingest_document(req: IngestRequest, request: Request):
 @gateway_router.post("/api-keys")
 async def create_api_key(request: Request):
     """새 API Key를 생성한다. ADMIN만 가능."""
+    state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     if user_ctx.user_role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="ADMIN 권한이 필요합니다")
@@ -351,21 +353,18 @@ async def create_api_key(request: Request):
     allowed_origins = body.get("allowed_origins", [])
     rate_limit = body.get("rate_limit_per_min", 60)
 
-    from src.gateway.auth import generate_api_key
-    raw_key, key_hash = generate_api_key()
-
-    state = _get_app_state(request)
-    await state.vector_store.pool.execute(
-        """
-        INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
-                              allowed_profiles, allowed_origins, rate_limit_per_min)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """,
-        key_hash, name, user_ctx.user_id, user_role, security_level_max,
-        allowed_profiles, allowed_origins, rate_limit,
-    )
-
-    logger.info("api_key_created", name=name, user_role=user_role, origins=allowed_origins)
+    try:
+        raw_key, key_hash = await state.auth_service.create_key(
+            name=name,
+            creator_user_id=user_ctx.user_id,
+            user_role=user_role,
+            security_level_max=security_level_max,
+            allowed_profiles=allowed_profiles,
+            allowed_origins=allowed_origins,
+            rate_limit_per_min=rate_limit,
+        )
+    except AuthError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     return {
         "api_key": raw_key,

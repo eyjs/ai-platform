@@ -256,3 +256,40 @@ def test_generate_api_key_unique():
     """매번 다른 키가 생성됨."""
     keys = [generate_api_key()[0] for _ in range(10)]
     assert len(set(keys)) == 10
+
+
+# --- AuthService.create_key 입력 검증 ---
+
+
+@pytest.mark.asyncio
+async def test_create_key_invalid_role(auth_service, mock_pool):
+    """유효하지 않은 역할로 키 생성 시 AuthError."""
+    with pytest.raises(AuthError, match="유효하지 않은 역할"):
+        await auth_service.create_key(
+            name="test", creator_user_id="u1", user_role="SUPERADMIN",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_key_invalid_security_level(auth_service, mock_pool):
+    """유효하지 않은 보안등급으로 키 생성 시 AuthError."""
+    with pytest.raises(AuthError, match="유효하지 않은 보안등급"):
+        await auth_service.create_key(
+            name="test", creator_user_id="u1", security_level_max="TOP_SECRET",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_key_valid(auth_service, mock_pool):
+    """정상 키 생성 → DB INSERT 호출 + raw_key/hash 반환."""
+    raw_key, key_hash = await auth_service.create_key(
+        name="widget-key",
+        creator_user_id="admin-1",
+        user_role="VIEWER",
+        allowed_origins=["https://customer.com"],
+    )
+    assert raw_key.startswith("aip_")
+    assert len(key_hash) == 64
+    assert mock_pool.execute.called
