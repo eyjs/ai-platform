@@ -12,7 +12,6 @@ import time
 from typing import List, Optional, Union
 
 from src.agent.profile import AgentProfile
-from src.domain.models import AgentMode
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.router.context_resolver import ChainResolver, ResolutionResult
@@ -44,6 +43,7 @@ class AIRouter:
         prior_doc_ids: Optional[List[str]] = None,
     ) -> ExecutionPlan:
         """4-Layer 라우팅 실행."""
+        t_start = time.time()
         history = history or []
 
         # Layer 0: Context Resolver
@@ -93,12 +93,14 @@ class AIRouter:
             latency_ms=round(l3_ms, 1),
         )
 
+        total_ms = (time.time() - t_start) * 1000
         logger.info(
             "route_complete",
             question_type=question_type.value,
             mode=mode.value,
             tools_count=len(tools),
             context_method=resolution.method,
+            total_ms=round(total_ms, 1),
         )
 
         return plan

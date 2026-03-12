@@ -47,19 +47,11 @@ async def lifespan(app: FastAPI):
 
     await seed_dev_api_keys(state.vector_store.pool)
 
-    # app.state에 컴포넌트 등록
-    app.state.settings = state.settings
-    app.state.auth_service = state.auth_service
-    app.state.vector_store = state.vector_store
-    app.state.fact_store = state.fact_store
-    app.state.session_memory = state.session_memory
-    app.state.cache = state.cache
-    app.state.profile_store = state.profile_store
-    app.state.tool_registry = state.tool_registry
-    app.state.ai_router = state.ai_router
-    app.state.agent = state.agent
-    app.state.ingest_pipeline = state.ingest_pipeline
-    app.state.provider_factory = state.provider_factory
+    # app.state에 컴포넌트 등록 (AppState 필드 자동 매핑)
+    _INTERNAL_FIELDS = {"cleanup_task", "providers"}
+    for field_name in state.__dataclass_fields__:
+        if field_name not in _INTERNAL_FIELDS:
+            setattr(app.state, field_name, getattr(state, field_name))
 
     logger.info("startup_complete")
     yield

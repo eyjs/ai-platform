@@ -50,7 +50,7 @@ class AppState:
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
-    _providers: list = field(default_factory=list)
+    providers: list = field(default_factory=list)
 
 
 async def create_app_state(settings: Settings) -> AppState:
@@ -165,7 +165,7 @@ async def create_app_state(settings: Settings) -> AppState:
         agent=agent,
         ingest_pipeline=ingest_pipeline,
         provider_factory=provider_factory,
-        _providers=providers,
+        providers=providers,
     )
 
 
@@ -189,7 +189,21 @@ def start_cleanup_task(
 
 
 async def seed_dev_api_keys(pool: Any) -> None:
-    """개발용 API Key를 시드한다. ON CONFLICT DO NOTHING으로 멱등."""
+    """개발용 API Key를 시드한다. ON CONFLICT DO NOTHING으로 멱등.
+
+    api_keys 테이블이 없으면 (마이그레이션 미실행) 경고만 남기고 스킵.
+    """
+    async with pool.acquire() as conn:
+        table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'api_keys'
+            )
+        """)
+        if not table_exists:
+            logger.warning("api_keys_table_missing", hint="alembic upgrade head 실행 필요")
+            return
+
     dev_keys = [
         ("aip_dev_admin", "dev-admin-key", "dev-admin", "ADMIN", "SECRET", [], 120),
         ("aip_dev_viewer", "dev-viewer-key", "dev-viewer", "VIEWER", "PUBLIC", [], 60),
@@ -220,7 +234,7 @@ async def shutdown(state: AppState) -> None:
         except asyncio.CancelledError:
             pass
 
-    for provider in state._providers:
+    for provider in state.providers:
         if provider and hasattr(provider, "close"):
             try:
                 await provider.close()
