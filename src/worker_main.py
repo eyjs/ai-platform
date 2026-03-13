@@ -25,23 +25,6 @@ configure_logging(level=_log_level, json_format=_json_logs)
 logger = get_logger(__name__)
 
 
-async def _ingest_handler(pipeline: IngestPipeline):
-    """IngestPipeline을 클로저로 캡처한 핸들러 팩토리."""
-
-    async def handler(payload: dict) -> dict:
-        return await pipeline.ingest_text(
-            title=payload["title"],
-            content=payload["content"],
-            domain_code=payload["domain_code"],
-            file_name=payload.get("file_name"),
-            security_level=payload.get("security_level", "PUBLIC"),
-            source_url=payload.get("source_url"),
-            metadata=payload.get("metadata", {}),
-        )
-
-    return handler
-
-
 async def run_worker() -> None:
     """워커 프로세스 메인 루프."""
     logger.info(
