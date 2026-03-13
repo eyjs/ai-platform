@@ -115,15 +115,7 @@ async def _prepare_chat(
         if not profile:
             raise HTTPException(status_code=404, detail=f"Profile not found: {req.chatbot_id}")
 
-        await state.session_memory.create_session(
-            session_id=session_id,
-            profile_id=profile.id,
-            user_id=user_ctx.user_id,
-            ttl_seconds=profile.memory_ttl_seconds,
-        )
-        history = await state.session_memory.get_turns(session_id, max_turns=10)
-
-        # 활성 워크플로우 세션이 있으면 Router 바이패스
+        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
         active_wf = state.workflow_engine.get_session(session_id)
         if active_wf and not active_wf.completed:
             logger.info(
@@ -137,7 +129,16 @@ async def _prepare_chat(
                 scope=SearchScope(),
                 workflow_id=active_wf.workflow_id,
             )
+            history = []
         else:
+            await state.session_memory.create_session(
+                session_id=session_id,
+                profile_id=profile.id,
+                user_id=user_ctx.user_id,
+                ttl_seconds=profile.memory_ttl_seconds,
+            )
+            history = await state.session_memory.get_turns(session_id, max_turns=10)
+
             tools = state.tool_registry.resolve(profile.tool_names)
             plan = await state.ai_router.route(
                 query=req.question,

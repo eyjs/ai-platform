@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -251,7 +252,6 @@ class WorkflowEngine:
 
     def _cleanup_expired_sessions(self) -> None:
         """만료된 세션을 정리한다."""
-        import time
         now = time.time()
         expired = [
             sid for sid, session in self._sessions.items()

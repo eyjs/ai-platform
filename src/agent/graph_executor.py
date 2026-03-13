@@ -66,7 +66,7 @@ class GraphExecutor:
         start_time = time.time()
 
         if plan.mode == AgentMode.WORKFLOW:
-            response = self._execute_workflow(question, plan, session_id)
+            response = await self._execute_workflow(question, plan, session_id)
         elif plan.mode == AgentMode.AGENTIC:
             response = await self._execute_agentic(question, plan, session_id)
         else:
@@ -106,7 +106,7 @@ class GraphExecutor:
 
     # --- 워크플로우 모드 ---
 
-    def _execute_workflow(
+    async def _execute_workflow(
         self,
         question: str,
         plan: ExecutionPlan,
@@ -115,7 +115,6 @@ class GraphExecutor:
         """워크플로우 모드 실행. StepResult → AgentResponse 변환."""
         if not self._workflow_engine:
             logger.warning("workflow_engine_missing, falling back to deterministic")
-            # async fallback 불가이므로 빈 응답
             return AgentResponse(
                 answer="워크플로우 엔진이 초기화되지 않았습니다.",
                 sources=[],
@@ -171,7 +170,7 @@ class GraphExecutor:
         engine = self._workflow_engine
         session = engine.get_session(session_id)
 
-        if not session:
+        if not session or session.completed:
             # 새 워크플로우 시작
             workflow_id = plan.workflow_id
             if not workflow_id:
