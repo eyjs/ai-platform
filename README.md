@@ -35,11 +35,14 @@ Profile을 만들고 문서를 밀어넣으면 끝. 코드 변경 없이 새 도
 
 ## Features
 
-- **Profile = Chatbot** -- YAML 하나 추가하면 새 챗봇이 동작. 코드 변경 0줄.
+- **Profile = Chatbot** -- Admin UI 또는 YAML로 챗봇 생성. 코드 변경 0줄.
+- **Admin UI** -- 관리자 페이지에서 챗봇 프로필 CRUD + KMS 도메인 연동.
+- **KMS Integration** -- KMS 도메인 목록 프록시 조회 (Internal Key 인증, Docker 내부 통신).
 - **Embed Anywhere** -- API Key + 헤더만으로 어떤 웹사이트든 챗봇 연동.
 - **4-Layer Router** -- 대명사 해소 > 의도 분류 > 모드 선택 > 실행 계획 조립
 - **Hybrid Search** -- pgvector(ANN) + tsvector(FTS) + pg_trgm(fuzzy) + RRF 병합
 - **Safety Guard Chain** -- Faithfulness, PII Filter, Response Policy (동적 체인)
+- **Workflow Engine** -- 절차 기반 대화 (예약 접수, 상담 안내 등). Admin API로 생성/관리.
 - **SSE Streaming** -- 토큰 단위 스트리밍 + 추론 과정(trace) 실시간 전송
 - **PostgreSQL Only** -- 벡터, 캐시, 세션, 큐 모두 PostgreSQL 단일 스택. Redis 불필요.
 - **Document Ingestion API** -- 외부 시스템이 REST API로 문서를 밀어넣으면 자동 파싱/청킹/임베딩.
@@ -142,6 +145,8 @@ pytest tests/ -x -v
 
 ## API
 
+### Data Plane
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check |
@@ -149,6 +154,22 @@ pytest tests/ -x -v
 | POST | `/api/chat` | Chat (non-streaming) |
 | POST | `/api/chat/stream` | Chat (SSE streaming) |
 | POST | `/api/documents/ingest` | Document ingestion |
+
+### Admin (Control Plane)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/profiles` | 프로필 목록 |
+| GET | `/api/admin/profiles/{id}` | 프로필 상세 |
+| POST | `/api/admin/profiles` | 프로필 생성 |
+| PUT | `/api/admin/profiles/{id}` | 프로필 수정 (부분) |
+| DELETE | `/api/admin/profiles/{id}` | 프로필 삭제 (soft) |
+| GET | `/api/admin/workflows` | 워크플로우 목록 |
+| POST | `/api/admin/workflows` | 워크플로우 생성 |
+| PUT | `/api/admin/workflows/{id}` | 워크플로우 수정 |
+| DELETE | `/api/admin/workflows/{id}` | 워크플로우 삭제 (soft) |
+| GET | `/api/admin/kms/domains` | KMS 도메인 프록시 조회 |
+| POST | `/api/admin/cache/invalidate` | 캐시 전체 무효화 |
 
 ### Chat Example
 
@@ -191,6 +212,17 @@ curl -X POST http://localhost:8000/api/documents/ingest \
 
 ## Creating a Profile
 
+### Option 1: Admin UI (recommended)
+
+`http://localhost:8000/static/admin.html` 에서 관리자 페이지에 접속하여 챗봇을 생성한다.
+
+- API Key 설정 (우측 상단)
+- "+ New Chatbot" 클릭
+- 기본 정보, 모드, 검색 범위(KMS 도메인), 도구, 응답 정책, 메모리 설정
+- KMS 연동 시 도메인 체크박스로 검색 범위 자동 설정
+
+### Option 2: YAML Seed
+
 Add a YAML file to `seeds/profiles/`. Example -- camping reservation chatbot:
 
 ```yaml
@@ -230,8 +262,13 @@ ai-platform/
 │   ├── config.py             # Settings (AIP_ prefix)
 │   ├── domain/               # Shared models, enums
 │   ├── gateway/              # HTTP endpoints, SSE, auth
+│   │   ├── router.py         # Data plane (chat, ingest, health)
+│   │   ├── admin_router.py   # Control plane (profile/workflow CRUD)
+│   │   ├── auth.py           # JWT / API Key / Origin 인증
+│   │   └── streaming.py      # SSE helpers
 │   ├── router/               # 4-Layer intent routing
-│   ├── agent/                # Universal Agent, Profile
+│   ├── agent/                # Universal Agent, Profile, ProfileStore
+│   ├── workflow/              # Workflow Engine + Store + Definition
 │   ├── tools/                # Tool Protocol + Registry
 │   │   └── internal/         # Built-in tools (RAG, Facts)
 │   ├── infrastructure/       # PostgreSQL, providers
@@ -240,12 +277,36 @@ ai-platform/
 │   ├── safety/               # Guardrail chain
 │   ├── observability/        # Structured logging, tracing
 │   └── pipeline/             # Document ingestion pipeline
+├── static/
+│   ├── admin.html            # Admin UI (profile CRUD + KMS 연동)
+│   └── chat-widget.html      # Chat widget (SSE streaming)
 ├── seeds/profiles/           # Profile YAML definitions
 ├── tests/                    # pytest test suite
 ├── alembic/                  # DB migrations
 ├── docker-compose.yml        # PostgreSQL + app
 └── pyproject.toml
 ```
+
+## KMS Integration
+
+ai-platform은 KMS(문서관리 프레임워크)와 연동하여 도메인 정보를 조회한다.
+
+```
+KMS (NestJS)                    ai-platform (FastAPI)
+──────────────                  ─────────────────────
+문서 체계 관리 (SSOT)            AI 프로필 / RAG / 챗봇
+도메인/카테고리/문서              검색 / 임베딩 / 생성
+        │                               │
+        └──── Docker 내부 통신 ──────────┘
+             X-Internal-Key (공유 비밀키)
+```
+
+| 설정 | 환경변수 | 설명 |
+|------|----------|------|
+| KMS API URL | `AIP_KMS_API_URL` | 예: `http://kms-api:3000/api` |
+| Internal Key | `AIP_KMS_INTERNAL_KEY` | KMS `INTERNAL_KEY`와 동일한 값 |
+
+KMS 미연결 시 Admin UI의 도메인 체크박스가 비활성화되며, 수동 입력으로 대체 가능.
 
 ## Design Principles
 
