@@ -54,6 +54,20 @@ class IngestResponse(BaseModel):
     status: str
 
 
+class WorkflowStartRequest(BaseModel):
+    """워크플로우 시작 요청."""
+
+    workflow_id: str
+    session_id: str | None = None
+
+
+class WorkflowAdvanceRequest(BaseModel):
+    """워크플로우 진행 요청."""
+
+    session_id: str
+    input: str = ""
+
+
 @dataclass
 class UserContext:
     """인증 후 생성되는 사용자 맥락."""

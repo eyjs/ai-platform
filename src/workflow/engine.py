@@ -27,6 +27,9 @@ from src.workflow.store import WorkflowStore
 
 logger = get_logger(__name__)
 
+_MAX_MESSAGE_CHAIN = 10  # message 타입 연쇄 최대 깊이
+_SESSION_TTL_SECONDS = 3600  # 세션 만료 시간 (1시간)
+
 
 @dataclass
 class StepResult:
@@ -63,6 +66,8 @@ class WorkflowEngine:
 
     def start(self, workflow_id: str, session_id: str) -> StepResult:
         """워크플로우를 시작하고, 첫 번째 스텝의 봇 메시지를 반환한다."""
+        self._cleanup_expired_sessions()
+
         definition = self._store.get(workflow_id)
         if not definition:
             raise GatewayError(
@@ -185,57 +190,78 @@ class WorkflowEngine:
             return True
         return False
 
+    def _cleanup_expired_sessions(self) -> None:
+        """만료된 세션을 정리한다."""
+        import time
+        now = time.time()
+        expired = [
+            sid for sid, session in self._sessions.items()
+            if now - session.started_at > _SESSION_TTL_SECONDS
+        ]
+        for sid in expired:
+            del self._sessions[sid]
+        if expired:
+            logger.info("workflow_sessions_cleaned", count=len(expired))
+
     def _process_current_step(
         self,
         definition: WorkflowDefinition,
         session: WorkflowSession,
     ) -> StepResult:
-        """현재 스텝을 처리하고 StepResult를 반환한다."""
-        step = definition.get_step(session.current_step_id)
-        if not step:
-            session.completed = True
-            return StepResult(bot_message="스텝 오류", completed=True)
+        """현재 스텝을 처리하고 StepResult를 반환한다.
 
-        # message 타입: 봇이 메시지를 보내고 자동으로 다음 스텝으로 진행
-        if step.type == "message":
-            bot_message = _render_template(step.prompt, session.collected)
-            if step.next:
-                next_step = definition.get_step(step.next)
-                if next_step:
-                    session.current_step_id = step.next
-                    # 다음 스텝도 message면 연쇄 처리
-                    next_result = self._process_current_step(definition, session)
-                    return StepResult(
-                        bot_message=bot_message + "\n\n" + next_result.bot_message,
-                        options=next_result.options,
-                        step_id=next_result.step_id,
-                        step_type=next_result.step_type,
-                        collected=next_result.collected,
-                        completed=next_result.completed,
-                    )
-            # next가 없으면 종료
-            session.completed = True
-            return StepResult(
-                bot_message=bot_message,
-                completed=True,
-                collected=dict(session.collected),
-                step_id=step.id,
-                step_type=step.type,
-            )
+        message 타입은 자동으로 다음 스텝으로 체이닝된다.
+        무한 루프 방지를 위해 _MAX_MESSAGE_CHAIN 깊이 제한을 적용한다.
+        """
+        message_parts: list[str] = []
 
-        bot_message = _render_template(step.prompt, session.collected)
+        for _ in range(_MAX_MESSAGE_CHAIN):
+            step = definition.get_step(session.current_step_id)
+            if not step:
+                session.completed = True
+                return StepResult(bot_message="스텝 오류", completed=True)
 
-        # confirm 타입: 수집된 데이터 요약을 봇 메시지에 포함
-        if step.type == "confirm":
-            summary_lines = [f"- {k}: {v}" for k, v in session.collected.items()]
-            summary = "\n".join(summary_lines)
-            bot_message = f"{bot_message}\n\n{summary}"
+            rendered = _render_template(step.prompt, session.collected)
 
+            # message 이외 타입: 메시지 축적 후 반환
+            if step.type != "message":
+                if step.type == "confirm":
+                    summary_lines = [f"- {k}: {v}" for k, v in session.collected.items()]
+                    rendered = f"{rendered}\n\n{'\n'.join(summary_lines)}"
+
+                message_parts.append(rendered)
+                return StepResult(
+                    bot_message="\n\n".join(message_parts),
+                    options=list(step.options),
+                    step_id=step.id,
+                    step_type=step.type,
+                    collected=dict(session.collected),
+                )
+
+            # message 타입: 축적하고 다음 스텝으로 자동 진행
+            message_parts.append(rendered)
+            if not step.next or not definition.get_step(step.next):
+                session.completed = True
+                return StepResult(
+                    bot_message="\n\n".join(message_parts),
+                    completed=True,
+                    collected=dict(session.collected),
+                    step_id=step.id,
+                    step_type=step.type,
+                )
+            session.current_step_id = step.next
+
+        # 깊이 제한 도달
+        logger.warning(
+            "workflow_message_chain_limit",
+            layer="WORKFLOW",
+            session_id=session.workflow_id,
+            depth=_MAX_MESSAGE_CHAIN,
+        )
+        session.completed = True
         return StepResult(
-            bot_message=bot_message,
-            options=list(step.options),
-            step_id=step.id,
-            step_type=step.type,
+            bot_message="\n\n".join(message_parts),
+            completed=True,
             collected=dict(session.collected),
         )
 
