@@ -13,6 +13,7 @@ from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
 from src.config import Settings
 from src.gateway.auth import AuthService
+from src.gateway.rate_limiter import PGRateLimiter
 from src.infrastructure.fact_store import FactStore
 from src.infrastructure.job_queue import JobQueue
 from src.infrastructure.memory.cache import PgCache
@@ -53,6 +54,7 @@ class AppState:
     workflow_store: WorkflowStore
     provider_factory: ProviderFactory
     job_queue: JobQueue
+    rate_limiter: PGRateLimiter
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -166,6 +168,10 @@ async def create_app_state(settings: Settings) -> AppState:
     # 12. Job Queue (API는 enqueue만, 워커는 별도 프로세스)
     job_queue = JobQueue(pool)
 
+    # 13. Rate Limiter (PostgreSQL Token Bucket)
+    rate_limiter = PGRateLimiter(pool)
+    logger.info("rate_limiter_initialized")
+
     providers = [embedding_provider, router_llm, main_llm, reranker]
 
     return AppState(
@@ -184,6 +190,7 @@ async def create_app_state(settings: Settings) -> AppState:
         workflow_store=workflow_store,
         provider_factory=provider_factory,
         job_queue=job_queue,
+        rate_limiter=rate_limiter,
         providers=providers,
     )
 

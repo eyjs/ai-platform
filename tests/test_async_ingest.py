@@ -38,8 +38,12 @@ def _create_test_app(*, enqueue_result: str = None, get_job_result: dict = None)
     mock_job_queue.enqueue = AsyncMock(return_value=job_id)
     mock_job_queue.get_job = AsyncMock(return_value=get_job_result)
 
+    mock_rate_limiter = AsyncMock()
+    mock_rate_limiter.verify_request = AsyncMock(return_value=None)
+
     app.state.auth_service = mock_auth
     app.state.job_queue = mock_job_queue
+    app.state.rate_limiter = mock_rate_limiter
 
     return app
 

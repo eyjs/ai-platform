@@ -66,6 +66,16 @@ async def _authenticate(request: Request) -> UserContext:
     return user_ctx
 
 
+async def _check_rate_limit(request: Request, user_ctx: UserContext) -> None:
+    """Token Bucket Rate Limiting. UserContext.rate_limit_per_min 기반."""
+    state = _get_app_state(request)
+    client_id = user_ctx.user_id or request.client.host
+    await state.rate_limiter.verify_request(
+        client_id=client_id,
+        rate_limit_per_min=user_ctx.rate_limit_per_min,
+    )
+
+
 @dataclass
 class _ChatSetup:
     """chat/chat_stream 공통 세팅 결과."""
@@ -198,6 +208,7 @@ async def list_profiles(request: Request):
 async def chat(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx)
     setup: Optional[_ChatSetup] = None
 
     try:
@@ -235,6 +246,7 @@ async def chat(req: ChatRequest, request: Request):
 async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx)
 
     try:
         setup = await _prepare_chat(req, request, user_ctx)
@@ -295,6 +307,7 @@ async def ingest_document(req: IngestRequest, request: Request):
     """문서 수집 요청을 큐에 등록하고 job_id를 즉시 반환한다 (202 Accepted)."""
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx)
 
     # EDITOR 이상만 문서 수집 가능
     if ROLE_LEVELS.get(user_ctx.user_role, 0) < 1:
