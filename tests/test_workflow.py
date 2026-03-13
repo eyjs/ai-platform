@@ -303,6 +303,45 @@ class TestEscapeHatch:
         assert result.escaped
         assert result.collected["type"] == "A"
 
+    def test_graceful_fallback_after_3_retries(self):
+        """검증 실패 3회 시 자동 취소 (Graceful Fallback)."""
+        wf = WorkflowDefinition(
+            id="test_retry",
+            name="리트라이 테스트",
+            steps=[
+                WorkflowStep(id="ask_phone", type="input", prompt="전화번호를 입력하세요.",
+                             save_as="phone", validation="phone", next="done"),
+                WorkflowStep(id="done", type="message", prompt="완료."),
+            ],
+        )
+        engine = WorkflowEngine(_build_store(wf))
+        engine.start("test_retry", "s1")
+
+        # 1회 실패
+        result = engine.advance("s1", "abc")
+        assert "전화번호" in result.bot_message
+        assert not result.completed
+
+        # 2회 실패
+        result = engine.advance("s1", "xyz")
+        assert not result.completed
+
+        # 3회 실패 → 자동 취소
+        result = engine.advance("s1", "!!!")
+        assert result.completed
+        assert result.escaped
+        assert "취소" in result.bot_message
+
+    def test_retry_resets_on_success(self):
+        """스텝 통과 후 retry 카운터가 리셋된다."""
+        engine = WorkflowEngine(_build_store(_simple_workflow()))
+        engine.start("test_simple", "s1")
+
+        # select 스텝은 validation 없으므로 바로 통과
+        engine.advance("s1", "A")
+        session = engine.get_session("s1")
+        assert session.retry_count == 0
+
     def test_escape_blocked_by_policy(self):
         """escape_policy='block'이면 이탈 키워드가 무시된다."""
         wf = WorkflowDefinition(

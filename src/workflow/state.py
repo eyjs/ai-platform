@@ -19,6 +19,7 @@ class WorkflowSession:
     collected: dict = field(default_factory=dict)  # save_as → 답변 값
     started_at: float = field(default_factory=time.time)
     completed: bool = False
+    retry_count: int = 0  # 현재 스텝 연속 실패 횟수
 
     @property
     def elapsed_seconds(self) -> float:

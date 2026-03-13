@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 _MAX_MESSAGE_CHAIN = 10  # message 타입 연쇄 최대 깊이
 _SESSION_TTL_SECONDS = 3600  # 세션 만료 시간 (1시간)
+_MAX_RETRIES = 3  # 같은 스텝에서 연속 검증 실패 시 자동 취소
 
 # 이탈(escape) 키워드 — escape_policy="allow"일 때 워크플로우 즉시 종료
 _ESCAPE_KEYWORDS = {"취소", "처음으로", "나가기", "중단", "그만", "exit", "cancel", "quit"}
@@ -140,6 +141,22 @@ class WorkflowEngine:
         # 입력 검증
         validation_error = _validate_input(current_step, user_input)
         if validation_error:
+            session.retry_count += 1
+            if session.retry_count >= _MAX_RETRIES:
+                logger.info(
+                    "workflow_retry_limit",
+                    layer="WORKFLOW",
+                    session_id=session_id,
+                    step_id=current_step.id,
+                    retries=session.retry_count,
+                )
+                session.completed = True
+                return StepResult(
+                    bot_message="입력이 지연되어 진행을 취소합니다. 다른 도움이 필요하시면 말씀해주세요.",
+                    completed=True,
+                    escaped=True,
+                    collected=dict(session.collected),
+                )
             return StepResult(
                 bot_message=validation_error,
                 options=current_step.options,
@@ -147,6 +164,9 @@ class WorkflowEngine:
                 step_type=current_step.type,
                 collected=dict(session.collected),
             )
+
+        # 검증 통과 → retry 카운터 리셋
+        session.retry_count = 0
 
         # 데이터 수집
         if current_step.save_as:
