@@ -8,6 +8,7 @@ job_queue에서 SKIP LOCKED로 문서를 꺼내 파싱 → 임베딩 → VectorS
 """
 
 import asyncio
+import base64
 import os
 import signal
 
@@ -65,7 +66,6 @@ async def run_worker() -> None:
         # file_bytes는 base64로 전달됨 (API에서 인코딩)
         file_bytes = None
         if payload.get("file_base64"):
-            import base64
             file_bytes = base64.b64decode(payload["file_base64"])
 
         return await ingest_pipeline.ingest_text(

@@ -63,7 +63,7 @@ class IngestPipeline:
             parse_ms = (time.time() - t_parse) * 1000
             logger.info("parsed", title=title, mime_type=mime_type, chars=len(content), latency_ms=round(parse_ms, 1))
 
-        if not content:
+        if not content or not content.strip():
             raise ValueError("content or file_bytes is required")
 
         file_hash = hashlib.sha256(content.encode()).hexdigest()

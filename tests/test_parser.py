@@ -96,12 +96,10 @@ class TestLlamaParseProvider:
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=upload_resp)
         mock_client.get = AsyncMock(side_effect=[status_resp, result_resp])
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.infrastructure.providers.parsing.llama_parse.httpx.AsyncClient", return_value=mock_client):
-            with patch("src.infrastructure.providers.parsing.llama_parse.asyncio.sleep", new_callable=AsyncMock):
-                markdown = await parser.parse(b"%PDF-fake", "application/pdf")
+        parser._client = mock_client
+        with patch("src.infrastructure.providers.parsing.llama_parse.asyncio.sleep", new_callable=AsyncMock):
+            markdown = await parser.parse(b"%PDF-fake", "application/pdf")
 
         assert "# Parsed" in markdown
         assert "Col1" in markdown
@@ -122,13 +120,11 @@ class TestLlamaParseProvider:
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=upload_resp)
         mock_client.get = AsyncMock(return_value=error_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.infrastructure.providers.parsing.llama_parse.httpx.AsyncClient", return_value=mock_client):
-            with patch("src.infrastructure.providers.parsing.llama_parse.asyncio.sleep", new_callable=AsyncMock):
-                with pytest.raises(RuntimeError, match="Bad PDF"):
-                    await parser.parse(b"%PDF-fake", "application/pdf")
+        parser._client = mock_client
+        with patch("src.infrastructure.providers.parsing.llama_parse.asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="Bad PDF"):
+                await parser.parse(b"%PDF-fake", "application/pdf")
 
 
 # --- ProviderFactory ---
