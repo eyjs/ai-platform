@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_cleanup_task
-from src.common.exceptions import INFRA, AppError
+from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
 from src.gateway.router import APP_VERSION, gateway_router
 from src.observability.logging import configure_logging, get_logger
@@ -92,7 +92,7 @@ async def app_error_handler(request: Request, exc: AppError):
         details=exc.details,
         exc_info=True,
     )
-    status_code = 500 if exc.layer == INFRA else 400
+    status_code = 500 if exc.layer in {INFRA, PIPELINE} else 400
     return JSONResponse(
         status_code=status_code,
         content={"error": "요청 처리 중 문제가 발생했습니다.", "code": exc.error_code},

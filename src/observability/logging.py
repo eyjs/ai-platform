@@ -50,10 +50,10 @@ def _extract_app_error_fields(exc_info) -> dict[str, str]:
     if not exc_info or not exc_info[1]:
         return {}
     exc = exc_info[1]
-    # 순환 import 방지: duck typing으로 체크
-    if hasattr(exc, "layer") and hasattr(exc, "error_code"):
+    from src.common.exceptions import AppError
+    if isinstance(exc, AppError):
         result = {"layer": exc.layer, "error_code": exc.error_code}
-        if hasattr(exc, "component") and exc.component:
+        if exc.component:
             result["component"] = exc.component
         return result
     return {}

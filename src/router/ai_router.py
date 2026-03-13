@@ -28,6 +28,10 @@ logger = get_logger(__name__)
 
 # AI 결함으로 간주하여 Fallback 처리할 예외 목록
 # LLM 파싱 실패, JSON 형식 오류, 의도 분류 이상 등
+#
+# 주의: ValueError/KeyError/TypeError는 범위가 넓다.
+# 이 튜플은 _run_l0/_run_l1처럼 LLM 호출 직후의 좁은 try 블록에서만 사용할 것.
+# 넓은 범위에서 사용하면 프로그래밍 버그를 삼킬 위험이 있다.
 _AI_RECOVERABLE = (
     AIError,          # 우리 예외 계층
     ValueError,       # JSON 파싱, enum 변환 실패
