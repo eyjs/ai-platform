@@ -227,7 +227,8 @@ class WorkflowEngine:
             if step.type != "message":
                 if step.type == "confirm":
                     summary_lines = [f"- {k}: {v}" for k, v in session.collected.items()]
-                    rendered = f"{rendered}\n\n{'\n'.join(summary_lines)}"
+                    summary = "\n".join(summary_lines)
+                    rendered = f"{rendered}\n\n{summary}"
 
                 message_parts.append(rendered)
                 return StepResult(
