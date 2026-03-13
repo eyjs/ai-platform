@@ -17,7 +17,7 @@ from src.workflow.store import WorkflowStore
 def _build_store(*definitions: WorkflowDefinition) -> WorkflowStore:
     store = WorkflowStore()
     for d in definitions:
-        store._definitions[d.id] = d
+        store._cache[d.id] = d
     return store
 
 

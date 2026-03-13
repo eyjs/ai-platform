@@ -374,9 +374,10 @@ def _step_to_response(result: StepResult) -> dict:
 async def list_workflows(request: Request):
     """사용 가능한 워크플로우 목록."""
     state = _get_app_state(request)
+    workflows = await state.workflow_store.list_all_async()
     return [
         {"id": w.id, "name": w.name, "steps": len(w.steps)}
-        for w in state.workflow_store.list_all()
+        for w in workflows
     ]
 
 

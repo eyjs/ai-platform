@@ -51,9 +51,10 @@ class AgentProfile:
 
     id: str
     name: str
+    description: str = ""
 
     # 도메인 스코프
-    domain_scopes: list[str]
+    domain_scopes: list[str] = field(default_factory=list)
     category_scopes: list[str] = field(default_factory=list)
     security_level_max: str = SecurityLevel.PUBLIC
     include_common: bool = True  # 플랫폼 공통 지식(_common) 포함 여부

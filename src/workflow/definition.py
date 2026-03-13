@@ -38,9 +38,11 @@ class WorkflowDefinition:
 
     id: str
     name: str
+    description: str = ""
     first_step: str = ""  # 시작 step id (비어있으면 steps[0])
     steps: list[WorkflowStep] = field(default_factory=list)
     escape_policy: str = "allow"  # "allow" | "block" | "queue"
+    max_retries: int = 3  # 같은 스텝에서 연속 검증 실패 시 자동 취소
 
     def get_step(self, step_id: str) -> WorkflowStep | None:
         """step_id로 단계를 찾는다."""

@@ -57,7 +57,8 @@ class ProfileStore:
             return self._cache[profile_id]
 
         row = await self._pool.fetchrow(
-            "SELECT id, name, config FROM agent_profiles WHERE id = $1",
+            "SELECT id, name, description, config FROM agent_profiles "
+            "WHERE id = $1 AND (is_active IS NULL OR is_active = TRUE)",
             profile_id,
         )
         if not row:
@@ -66,43 +67,86 @@ class ProfileStore:
         config = json.loads(row["config"]) if isinstance(row["config"], str) else row["config"]
         config["id"] = row["id"]
         config["name"] = row["name"]
+        config["description"] = row.get("description", "")
         profile = self._parse_profile(config)
         self._cache[profile_id] = profile
         return profile
 
     async def list_all(self) -> list[AgentProfile]:
-        """모든 프로필 목록."""
-        rows = await self._pool.fetch("SELECT id, name, config FROM agent_profiles")
+        """모든 활성 프로필 목록."""
+        rows = await self._pool.fetch(
+            "SELECT id, name, description, config FROM agent_profiles "
+            "WHERE is_active IS NULL OR is_active = TRUE ORDER BY name"
+        )
         profiles = []
         for row in rows:
             config = json.loads(row["config"]) if isinstance(row["config"], str) else row["config"]
             config["id"] = row["id"]
             config["name"] = row["name"]
+            config["description"] = row.get("description", "")
             profiles.append(self._parse_profile(config))
         return profiles
+
+    def parse_profile(self, data: dict) -> AgentProfile:
+        """dict에서 AgentProfile을 생성한다. Admin API용 public 팩토리."""
+        return self._parse_profile(data)
+
+    def profile_to_dict(self, profile: AgentProfile) -> dict:
+        """AgentProfile을 dict로 변환한다. Admin API용 public 직렬화."""
+        result = self._profile_to_dict(profile)
+        result["id"] = profile.id
+        result["name"] = profile.name
+        result["description"] = profile.description
+        return result
 
     async def create(self, profile: AgentProfile) -> None:
         """프로필 생성."""
         await self._upsert(profile)
         self._cache[profile.id] = profile
 
-    async def delete(self, profile_id: str) -> bool:
+    async def update(self, profile: AgentProfile) -> bool:
+        """프로필 업데이트."""
+        config_json = json.dumps(self._profile_to_dict(profile), ensure_ascii=False)
         result = await self._pool.execute(
-            "DELETE FROM agent_profiles WHERE id = $1", profile_id,
+            """
+            UPDATE agent_profiles
+            SET name = $2, description = $3, config = $4::jsonb, updated_at = NOW()
+            WHERE id = $1
+            """,
+            profile.id, profile.name, profile.description, config_json,
+        )
+        updated = int(result.split()[-1]) > 0
+        if updated:
+            self._cache[profile.id] = profile
+        return updated
+
+    async def delete(self, profile_id: str) -> bool:
+        """프로필 비활성화 (soft delete)."""
+        result = await self._pool.execute(
+            "UPDATE agent_profiles SET is_active = FALSE, updated_at = NOW() WHERE id = $1",
+            profile_id,
         )
         self._cache.pop(profile_id, None)
         return int(result.split()[-1]) > 0
+
+    def invalidate_cache(self, profile_id: Optional[str] = None) -> None:
+        """캐시 무효화. profile_id가 None이면 전체 클리어."""
+        if profile_id:
+            self._cache.pop(profile_id, None)
+        else:
+            self._cache.clear()
 
     async def _upsert(self, profile: AgentProfile) -> None:
         config = self._profile_to_dict(profile)
         config_json = json.dumps(config, ensure_ascii=False)
         await self._pool.execute(
             """
-            INSERT INTO agent_profiles (id, name, config)
-            VALUES ($1, $2, $3::jsonb)
-            ON CONFLICT (id) DO UPDATE SET name = $2, config = $3::jsonb, updated_at = NOW()
+            INSERT INTO agent_profiles (id, name, description, config)
+            VALUES ($1, $2, $3, $4::jsonb)
+            ON CONFLICT (id) DO UPDATE
+                SET name = $2, description = $3, config = $4::jsonb, updated_at = NOW()
             """,
-            profile.id, profile.name, config_json,
+            profile.id, profile.name, profile.description, config_json,
         )
 
     @staticmethod
@@ -131,6 +175,7 @@ class ProfileStore:
         return AgentProfile(
             id=data["id"],
             name=data["name"],
+            description=data.get("description", ""),
             domain_scopes=data.get("domain_scopes", []),
             category_scopes=data.get("category_scopes", []),
             security_level_max=data.get("security_level_max", "PUBLIC"),

@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_cleanup_task
 from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
+from src.gateway.admin_router import admin_router
 from src.gateway.router import APP_VERSION, gateway_router
 from src.observability.logging import configure_logging, get_logger
 
@@ -78,6 +79,7 @@ app.add_middleware(
 )
 
 app.include_router(gateway_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 @app.exception_handler(AppError)

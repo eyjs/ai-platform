@@ -141,8 +141,8 @@ async def create_app_state(settings: Settings) -> AppState:
         logger.warning("chat_model_unavailable, agentic mode disabled")
 
     # 10. Workflow Engine (Agent보다 먼저 — Agent가 의존)
-    workflow_store = WorkflowStore()
-    await workflow_store.load_from_directory("seeds/workflows")
+    workflow_store = WorkflowStore(pool=pool, seed_dir="seeds/workflows")
+    await workflow_store.load_seeds()
     workflow_engine = WorkflowEngine(workflow_store)
     logger.info("workflows_loaded", count=workflow_store.count)
 
