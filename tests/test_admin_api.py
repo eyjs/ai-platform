@@ -5,7 +5,7 @@ DB 없이 ProfileStore/WorkflowStore의 메모리 캐시만 사용한다.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -292,3 +292,60 @@ class TestCacheInvalidation:
         resp = client.post("/api/admin/cache/invalidate", headers={"X-API-Key": "test"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+# --- KMS Proxy ---
+
+
+class TestKmsProxy:
+
+    def test_kms_domains_returns_empty_when_not_configured(self, client):
+        """KMS 미연결 시 빈 배열을 반환한다."""
+        with patch("src.config.settings") as mock_settings:
+            mock_settings.kms_api_url = ""
+            mock_settings.kms_internal_key = ""
+            resp = client.get("/api/admin/kms/domains", headers={"X-API-Key": "test"})
+            assert resp.status_code == 200
+            assert resp.json() == []
+
+    def test_kms_domains_proxies_successfully(self, client):
+        """KMS 연결 성공 시 도메인 목록을 프록시 반환한다."""
+        mock_domains = [
+            {"code": "D01", "displayName": "Insurance", "isActive": True},
+            {"code": "D02", "displayName": "Contract", "isActive": True},
+        ]
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_domains
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.config.settings") as mock_settings, \
+             patch("httpx.AsyncClient", return_value=mock_client_instance):
+            mock_settings.kms_api_url = "http://kms-api:3000/api"
+            mock_settings.kms_internal_key = "test-internal-key"
+            resp = client.get("/api/admin/kms/domains", headers={"X-API-Key": "test"})
+            assert resp.status_code == 200
+            assert len(resp.json()) == 2
+            assert resp.json()[0]["code"] == "D01"
+
+    def test_kms_domains_returns_empty_on_error(self, client):
+        """KMS 연결 실패 시 빈 배열을 반환한다 (graceful degradation)."""
+        mock_client_instance = AsyncMock()
+        import httpx
+        mock_client_instance.get = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.config.settings") as mock_settings, \
+             patch("httpx.AsyncClient", return_value=mock_client_instance):
+            mock_settings.kms_api_url = "http://kms-api:3000/api"
+            mock_settings.kms_internal_key = "test-key"
+            resp = client.get("/api/admin/kms/domains", headers={"X-API-Key": "test"})
+            assert resp.status_code == 200
+            assert resp.json() == []

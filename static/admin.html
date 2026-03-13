@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Platform Admin</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0f2f5;
+  min-height: 100vh;
+  color: #333;
+}
+
+/* --- Header --- */
+.header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header h1 {
+  font-size: 17px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.header .api-key-btn {
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.header .api-key-btn:hover { background: rgba(255,255,255,0.25); }
+
+.header .kms-status {
+  font-size: 12px;
+  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header .kms-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #666;
+}
+
+.header .kms-dot.connected { background: #4caf50; }
+
+/* --- Content --- */
+.content {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.toolbar h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #555;
+}
+
+.btn-primary {
+  background: #1a1a2e;
+  color: #fff;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-primary:hover { opacity: 0.85; }
+
+/* --- Cards Grid --- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  transition: box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.card-id {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.badge-deterministic { background: #e3f2fd; color: #1565c0; }
+.badge-agentic { background: #fce4ec; color: #c62828; }
+.badge-workflow { background: #e8f5e9; color: #2e7d32; }
+.badge-hybrid { background: #fff3e0; color: #e65100; }
+
+.card-meta {
+  font-size: 12px;
+  color: #777;
+  line-height: 1.6;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-sm:hover { background: #f5f5f5; }
+.btn-sm.danger { color: #c62828; border-color: #ffcdd2; }
+.btn-sm.danger:hover { background: #ffebee; }
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 14px;
+}
+
+/* --- Modal --- */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 100;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 40px;
+  overflow-y: auto;
+}
+
+.modal-overlay.active { display: flex; }
+
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  width: 600px;
+  max-width: 95vw;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.2);
+  margin-bottom: 40px;
+}
+
+.modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  z-index: 1;
+}
+
+.modal-header h3 { font-size: 15px; }
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+  padding: 4px;
+}
+
+.modal-body { padding: 24px; }
+
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-radius: 0 0 16px 16px;
+}
+
+/* --- Form --- */
+.section {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.field input[type="text"],
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus { border-color: #1a1a2e; }
+
+.field textarea { resize: vertical; min-height: 80px; }
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #999;
+  margin-top: 3px;
+}
+
+/* --- Checkbox Group --- */
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.checkbox-item input { margin: 0; }
+
+/* --- Radio Group --- */
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.radio-item input { margin: 0; }
+
+/* --- Collapsible --- */
+.collapsible-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collapsible-header .arrow {
+  transition: transform 0.2s;
+  font-size: 12px;
+}
+
+.collapsible-header.open .arrow { transform: rotate(90deg); }
+
+.collapsible-body {
+  display: none;
+  margin-top: 12px;
+}
+
+.collapsible-body.open { display: block; }
+
+/* --- Toast --- */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #333;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.toast.show { opacity: 1; }
+.toast.error { background: #c62828; }
+
+/* --- Loading --- */
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>AI Platform Admin</h1>
+  <div class="kms-status" id="kmsStatus">
+    <span class="kms-dot" id="kmsDot"></span>
+    <span id="kmsLabel">KMS: --</span>
+  </div>
+  <button class="api-key-btn" onclick="showApiKeyModal()">API Key</button>
+</div>
+
+<div class="content">
+  <div class="toolbar">
+    <h2 id="profileCount">--</h2>
+    <button class="btn-primary" onclick="openCreateModal()">+ New Chatbot</button>
+  </div>
+  <div class="cards" id="cardGrid">
+    <div class="loading">Loading...</div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profileModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">New Chatbot</h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- 1. Basic Info -->
+      <div class="section">
+        <div class="section-title">Basic Info</div>
+        <div class="field" id="fieldId">
+          <label>ID (slug)</label>
+          <input type="text" id="fId" placeholder="my-chatbot" pattern="^[a-z0-9-]+$">
+          <div class="field-hint">Lowercase, numbers, hyphens only</div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Name</label>
+            <input type="text" id="fName" placeholder="Customer Support Bot">
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <input type="text" id="fDesc" placeholder="Short description">
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Mode -->
+      <div class="section">
+        <div class="section-title">Mode</div>
+        <div class="radio-group">
+          <label class="radio-item"><input type="radio" name="fMode" value="deterministic" checked> Deterministic</label>
+          <label class="radio-item"><input type="radio" name="fMode" value="agentic"> Agentic</label>
+        </div>
+      </div>
+
+      <!-- 3. Search Scope -->
+      <div class="section">
+        <div class="section-title">Search Scope</div>
+        <div class="field">
+          <label>Domains (KMS)</label>
+          <div class="checkbox-group" id="domainCheckboxes"></div>
+        </div>
+        <div class="field">
+          <label>Categories (comma separated)</label>
+          <input type="text" id="fCategories" placeholder="insurance, contract, support">
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Security Level</label>
+            <select id="fSecLevel">
+              <option value="PUBLIC">PUBLIC</option>
+              <option value="INTERNAL" selected>INTERNAL</option>
+              <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+              <option value="SECRET">SECRET</option>
+            </select>
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:2px;">
+            <label class="checkbox-item">
+              <input type="checkbox" id="fIncludeCommon" checked>
+              Include common domain
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Tools -->
+      <div class="section">
+        <div class="section-title">Tools</div>
+        <div class="checkbox-group">
+          <label class="checkbox-item"><input type="checkbox" id="toolRag" checked> rag_search</label>
+          <label class="checkbox-item"><input type="checkbox" id="toolFact"> fact_lookup</label>
+        </div>
+      </div>
+
+      <!-- 5. Response -->
+      <div class="section">
+        <div class="section-title">Response</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Policy</label>
+            <select id="fPolicy">
+              <option value="strict">strict</option>
+              <option value="balanced" selected>balanced</option>
+            </select>
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:2px;">
+            <label class="checkbox-item">
+              <input type="checkbox" id="fGuardrails" checked>
+              Guardrails enabled
+            </label>
+          </div>
+        </div>
+        <div class="field">
+          <label>System Prompt</label>
+          <textarea id="fPrompt" rows="4" placeholder="You are a helpful assistant..."></textarea>
+        </div>
+      </div>
+
+      <!-- 6. Memory -->
+      <div class="section">
+        <div class="section-title">Memory</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Type</label>
+            <select id="fMemType">
+              <option value="short" selected>short</option>
+              <option value="session">session</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>TTL (minutes)</label>
+            <input type="text" id="fMemTtl" value="60">
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. Advanced (agentic only) -->
+      <div class="section">
+        <div class="collapsible-header" onclick="toggleAdvanced()">
+          <div class="section-title" style="margin:0;border:0;padding:0;">Advanced (Agentic)</div>
+          <span class="arrow">&#9654;</span>
+        </div>
+        <div class="collapsible-body" id="advancedSection">
+          <div class="field-row" style="margin-top:12px;">
+            <div class="field">
+              <label>Max Tool Calls</label>
+              <input type="text" id="fMaxTools" value="5">
+            </div>
+            <div class="field">
+              <label>Timeout (seconds)</label>
+              <input type="text" id="fTimeout" value="30">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" id="saveBtn" onclick="saveProfile()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- API Key Modal -->
+<div class="modal-overlay" id="apiKeyModal">
+  <div class="modal" style="width:400px;">
+    <div class="modal-header">
+      <h3>API Key Settings</h3>
+      <button class="modal-close" onclick="closeApiKeyModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Admin API Key</label>
+        <input type="text" id="apiKeyInput" placeholder="aip_dev_admin">
+      </div>
+      <div class="field">
+        <label>API Base URL</label>
+        <input type="text" id="apiBaseInput" placeholder="http://localhost:8010/api">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm" onclick="closeApiKeyModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveApiKey()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// --- State ---
+var API_BASE = localStorage.getItem('aip_api_base') || 'http://localhost:8010/api';
+var API_KEY = localStorage.getItem('aip_api_key') || 'aip_dev_admin';
+var profiles = [];
+var kmsDomains = [];
+var editingId = null;
+
+// --- Init ---
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('apiKeyInput').value = API_KEY;
+  document.getElementById('apiBaseInput').value = API_BASE;
+  loadAll();
+});
+
+async function loadAll() {
+  await Promise.all([loadProfiles(), loadKmsDomains()]);
+}
+
+// --- API Helpers ---
+function apiHeaders() {
+  return { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
+}
+
+async function apiFetch(path, opts) {
+  opts = opts || {};
+  opts.headers = apiHeaders();
+  var resp = await fetch(API_BASE + path, opts);
+  if (!resp.ok) {
+    var text = await resp.text();
+    throw new Error('HTTP ' + resp.status + ': ' + text);
+  }
+  return resp.json();
+}
+
+// --- DOM Helpers ---
+function el(tag, attrs, children) {
+  var node = document.createElement(tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function(k) {
+      if (k === 'className') node.className = attrs[k];
+      else if (k === 'textContent') node.textContent = attrs[k];
+      else if (k === 'onclick') node.onclick = attrs[k];
+      else if (k === 'style') node.style.cssText = attrs[k];
+      else node.setAttribute(k, attrs[k]);
+    });
+  }
+  if (children) {
+    children.forEach(function(c) {
+      if (typeof c === 'string') node.appendChild(document.createTextNode(c));
+      else if (c) node.appendChild(c);
+    });
+  }
+  return node;
+}
+
+// --- Profiles ---
+async function loadProfiles() {
+  try {
+    profiles = await apiFetch('/admin/profiles');
+    renderCards();
+  } catch (e) {
+    var grid = document.getElementById('cardGrid');
+    grid.textContent = '';
+    grid.appendChild(el('div', { className: 'empty-state', textContent: 'Failed to load: ' + e.message }));
+    document.getElementById('profileCount').textContent = 'Error';
+  }
+}
+
+function renderCards() {
+  var grid = document.getElementById('cardGrid');
+  grid.textContent = '';
+  document.getElementById('profileCount').textContent = profiles.length + ' Chatbots';
+
+  if (profiles.length === 0) {
+    grid.appendChild(el('div', { className: 'empty-state', textContent: 'No chatbots yet. Click "+ New Chatbot" to create one.' }));
+    return;
+  }
+
+  profiles.forEach(function(p) {
+    var domains = (p.domain_scopes || []).join(', ') || '-';
+    var secLevel = p.security_level_max || 'PUBLIC';
+    var tools = (p.tools || []).map(function(t) { return t.name; }).join(', ') || '-';
+
+    var editBtn = el('button', { className: 'btn-sm', textContent: 'Edit' });
+    editBtn.addEventListener('click', function(e) { e.stopPropagation(); openEditModal(p.id); });
+
+    var delBtn = el('button', { className: 'btn-sm danger', textContent: 'Delete' });
+    delBtn.addEventListener('click', function(e) { e.stopPropagation(); deleteProfile(p.id); });
+
+    var card = el('div', { className: 'card' }, [
+      el('div', { className: 'card-top' }, [
+        el('div', {}, [
+          el('div', { className: 'card-title', textContent: p.name }),
+          el('div', { className: 'card-id', textContent: p.id }),
+        ]),
+        el('span', { className: 'badge badge-' + p.mode, textContent: p.mode }),
+      ]),
+      el('div', { className: 'card-meta' }, [
+        'Domains: ' + domains,
+        el('br'),
+        'Security: ' + secLevel + ' | Tools: ' + tools,
+      ]),
+      el('div', { className: 'card-actions' }, [editBtn, delBtn]),
+    ]);
+    card.addEventListener('click', function() { openEditModal(p.id); });
+    grid.appendChild(card);
+  });
+}
+
+// --- KMS Domains ---
+async function loadKmsDomains() {
+  try {
+    kmsDomains = await apiFetch('/admin/kms/domains');
+    var dot = document.getElementById('kmsDot');
+    var label = document.getElementById('kmsLabel');
+    if (kmsDomains.length > 0) {
+      dot.classList.add('connected');
+      label.textContent = 'KMS: ' + kmsDomains.length + ' domains';
+    } else {
+      dot.classList.remove('connected');
+      label.textContent = 'KMS: not connected';
+    }
+  } catch (e) {
+    kmsDomains = [];
+    document.getElementById('kmsDot').classList.remove('connected');
+    document.getElementById('kmsLabel').textContent = 'KMS: error';
+  }
+}
+
+function renderDomainCheckboxes(selected) {
+  var container = document.getElementById('domainCheckboxes');
+  container.textContent = '';
+  selected = selected || [];
+
+  if (kmsDomains.length === 0) {
+    container.appendChild(el('span', { style: 'font-size:12px;color:#999;', textContent: 'KMS not connected' }));
+    return;
+  }
+
+  kmsDomains.forEach(function(d) {
+    var code = d.code || d.id || '';
+    var name = d.displayName || d.name || code;
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = code;
+    cb.checked = selected.indexOf(code) >= 0;
+    var lbl = el('label', { className: 'checkbox-item' }, [cb, ' ' + name]);
+    container.appendChild(lbl);
+  });
+}
+
+function getSelectedDomains() {
+  var checks = document.querySelectorAll('#domainCheckboxes input[type="checkbox"]:checked');
+  return Array.from(checks).map(function(c) { return c.value; });
+}
+
+// --- Modal ---
+function openCreateModal() {
+  editingId = null;
+  document.getElementById('modalTitle').textContent = 'New Chatbot';
+  document.getElementById('saveBtn').textContent = 'Create';
+  document.getElementById('fieldId').style.display = '';
+  clearForm();
+  renderDomainCheckboxes([]);
+  document.getElementById('profileModal').classList.add('active');
+}
+
+async function openEditModal(id) {
+  editingId = id;
+  document.getElementById('modalTitle').textContent = 'Edit Chatbot';
+  document.getElementById('saveBtn').textContent = 'Save';
+  document.getElementById('fieldId').style.display = 'none';
+
+  try {
+    var p = await apiFetch('/admin/profiles/' + id);
+    document.getElementById('fId').value = p.id;
+    document.getElementById('fName').value = p.name || '';
+    document.getElementById('fDesc').value = p.description || '';
+
+    var radios = document.querySelectorAll('input[name="fMode"]');
+    radios.forEach(function(r) { r.checked = r.value === p.mode; });
+
+    renderDomainCheckboxes(p.domain_scopes || []);
+    document.getElementById('fCategories').value = (p.category_scopes || []).join(', ');
+    document.getElementById('fSecLevel').value = p.security_level_max || 'PUBLIC';
+    document.getElementById('fIncludeCommon').checked = p.include_common !== false;
+
+    var toolNames = (p.tools || []).map(function(t) { return t.name; });
+    document.getElementById('toolRag').checked = toolNames.indexOf('rag_search') >= 0;
+    document.getElementById('toolFact').checked = toolNames.indexOf('fact_lookup') >= 0;
+
+    document.getElementById('fPolicy').value = p.response_policy || 'balanced';
+    document.getElementById('fGuardrails').checked = (p.guardrails || []).length > 0;
+    document.getElementById('fPrompt').value = p.system_prompt || '';
+
+    document.getElementById('fMemType').value = p.memory_type || 'short';
+    document.getElementById('fMemTtl').value = Math.round((p.memory_ttl_seconds || 3600) / 60);
+
+    document.getElementById('fMaxTools').value = p.max_tool_calls || 5;
+    document.getElementById('fTimeout').value = p.agent_timeout_seconds || 30;
+
+    document.getElementById('profileModal').classList.add('active');
+  } catch (e) {
+    showToast('Failed to load profile: ' + e.message, true);
+  }
+}
+
+function closeModal() {
+  document.getElementById('profileModal').classList.remove('active');
+  editingId = null;
+}
+
+function clearForm() {
+  document.getElementById('fId').value = '';
+  document.getElementById('fName').value = '';
+  document.getElementById('fDesc').value = '';
+  document.querySelectorAll('input[name="fMode"]').forEach(function(r) { r.checked = r.value === 'deterministic'; });
+  document.getElementById('fCategories').value = '';
+  document.getElementById('fSecLevel').value = 'INTERNAL';
+  document.getElementById('fIncludeCommon').checked = true;
+  document.getElementById('toolRag').checked = true;
+  document.getElementById('toolFact').checked = false;
+  document.getElementById('fPolicy').value = 'balanced';
+  document.getElementById('fGuardrails').checked = true;
+  document.getElementById('fPrompt').value = '';
+  document.getElementById('fMemType').value = 'short';
+  document.getElementById('fMemTtl').value = '60';
+  document.getElementById('fMaxTools').value = '5';
+  document.getElementById('fTimeout').value = '30';
+}
+
+function collectForm() {
+  var mode = document.querySelector('input[name="fMode"]:checked').value;
+  var tools = [];
+  if (document.getElementById('toolRag').checked) tools.push({ name: 'rag_search', config: {} });
+  if (document.getElementById('toolFact').checked) tools.push({ name: 'fact_lookup', config: {} });
+
+  var guardrails = document.getElementById('fGuardrails').checked ? ['no_pii', 'on_topic'] : [];
+
+  var cats = document.getElementById('fCategories').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  var ttlMin = parseInt(document.getElementById('fMemTtl').value, 10) || 60;
+
+  var data = {
+    name: document.getElementById('fName').value.trim(),
+    description: document.getElementById('fDesc').value.trim(),
+    mode: mode,
+    domain_scopes: getSelectedDomains(),
+    category_scopes: cats,
+    security_level_max: document.getElementById('fSecLevel').value,
+    include_common: document.getElementById('fIncludeCommon').checked,
+    tools: tools,
+    response_policy: document.getElementById('fPolicy').value,
+    guardrails: guardrails,
+    system_prompt: document.getElementById('fPrompt').value,
+    memory_type: document.getElementById('fMemType').value,
+    memory_ttl_seconds: Math.max(60, Math.min(86400, ttlMin * 60)),
+    max_tool_calls: parseInt(document.getElementById('fMaxTools').value, 10) || 5,
+    agent_timeout_seconds: parseInt(document.getElementById('fTimeout').value, 10) || 30,
+  };
+
+  if (!editingId) {
+    data.id = document.getElementById('fId').value.trim();
+  }
+
+  return data;
+}
+
+async function saveProfile() {
+  var data = collectForm();
+
+  if (!editingId && !data.id) { showToast('ID is required', true); return; }
+  if (!data.name) { showToast('Name is required', true); return; }
+
+  try {
+    if (editingId) {
+      await apiFetch('/admin/profiles/' + editingId, { method: 'PUT', body: JSON.stringify(data) });
+      showToast('Profile updated');
+    } else {
+      await apiFetch('/admin/profiles', { method: 'POST', body: JSON.stringify(data) });
+      showToast('Profile created');
+    }
+    closeModal();
+    await loadProfiles();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, true);
+  }
+}
+
+async function deleteProfile(id) {
+  if (!confirm('Delete chatbot "' + id + '"?')) return;
+  try {
+    await apiFetch('/admin/profiles/' + id, { method: 'DELETE' });
+    showToast('Deleted');
+    await loadProfiles();
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, true);
+  }
+}
+
+// --- Advanced Toggle ---
+function toggleAdvanced() {
+  var header = document.querySelector('.collapsible-header');
+  var body = document.getElementById('advancedSection');
+  header.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+// --- API Key Modal ---
+function showApiKeyModal() {
+  document.getElementById('apiKeyInput').value = API_KEY;
+  document.getElementById('apiBaseInput').value = API_BASE;
+  document.getElementById('apiKeyModal').classList.add('active');
+}
+
+function closeApiKeyModal() {
+  document.getElementById('apiKeyModal').classList.remove('active');
+}
+
+function saveApiKey() {
+  API_KEY = document.getElementById('apiKeyInput').value.trim();
+  API_BASE = document.getElementById('apiBaseInput').value.trim().replace(/\/$/, '');
+  localStorage.setItem('aip_api_key', API_KEY);
+  localStorage.setItem('aip_api_base', API_BASE);
+  closeApiKeyModal();
+  showToast('Settings saved');
+  loadAll();
+}
+
+// --- Toast ---
+function showToast(msg, isError) {
+  var toastEl = document.getElementById('toast');
+  toastEl.textContent = msg;
+  toastEl.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastEl._timer);
+  toastEl._timer = setTimeout(function() { toastEl.className = 'toast'; }, 3000);
+}
+</script>
+</body>
+</html>

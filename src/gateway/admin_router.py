@@ -9,6 +9,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+import httpx
+
 from src.domain.models import UserRole
 from src.gateway.auth import AuthError
 from src.gateway.models import UserContext
@@ -367,6 +369,32 @@ async def invalidate_cache(request: Request):
 
     logger.info("admin_cache_invalidated", by=user_ctx.user_id)
     return {"status": "ok", "message": "모든 캐시가 무효화되었습니다"}
+
+
+# --- KMS Proxy ---
+
+
+@admin_router.get("/kms/domains")
+async def list_kms_domains(request: Request):
+    """KMS에서 도메인 목록을 프록시 조회한다."""
+    await _require_admin(request)
+
+    from src.config import settings
+
+    if not settings.kms_api_url or not settings.kms_internal_key:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.kms_api_url}/domains",
+                headers={"X-Internal-Key": settings.kms_internal_key},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except (httpx.HTTPError, OSError) as e:
+        logger.warning("kms_proxy_failed", error=str(e))
+        return []
 
 
 # --- Response Helpers ---

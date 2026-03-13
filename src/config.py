@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     auth_required: bool = True
     jwt_secret: str = ""
 
+    # KMS 연동 (도메인 SSOT)
+    kms_api_url: str = ""              # 예: http://kms-api:3000/api
+    kms_internal_key: str = ""         # INTERNAL_KEY 공유 비밀키
+
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
     cors_origins: list[str] = []
 
