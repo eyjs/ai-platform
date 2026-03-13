@@ -9,11 +9,13 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_cleanup_task
+from src.common.exceptions import INFRA, AppError
 from src.config import settings
 from src.gateway.router import APP_VERSION, gateway_router
 from src.observability.logging import configure_logging, get_logger
@@ -76,6 +78,25 @@ app.add_middleware(
 )
 
 app.include_router(gateway_router, prefix="/api")
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    """Layer-Aware 예외를 잡아서 구조화 로그 + 안전한 HTTP 응답으로 변환."""
+    logger.error(
+        "app_error",
+        layer=exc.layer,
+        component=exc.component,
+        error_code=exc.error_code,
+        error=str(exc),
+        details=exc.details,
+        exc_info=True,
+    )
+    status_code = 500 if exc.layer == INFRA else 400
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": "요청 처리 중 문제가 발생했습니다.", "code": exc.error_code},
+    )
 
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 if _static_dir.exists():

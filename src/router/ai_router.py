@@ -5,13 +5,16 @@ Layer 1: Intent Classifier (QuestionType 분류)
 Layer 2: Mode Selector (agentic/workflow)
 Layer 3: Strategy Builder (전략 + SearchScope + conversation_context + ExecutionPlan 조립)
 
-각 Layer 실패 시 안전한 기본값으로 폴백하여 전체 라우팅이 죽지 않도록 보장.
+예외 정책:
+- AIError(LLM 파싱 실패, 의도 분류 오류) → 잡아서 안전한 기본값으로 Fallback
+- InfraError/시스템 에러(DB, 네트워크) → 잡지 않고 상위로 전파
 """
 
 import time
 from typing import List, Optional, Union
 
 from src.agent.profile import AgentProfile
+from src.common.exceptions import AIError, RouterAIError
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.router.context_resolver import ChainResolver, ResolutionResult
@@ -22,6 +25,15 @@ from src.router.strategy_builder import StrategyBuilder
 from src.tools.base import ScopedTool, Tool
 
 logger = get_logger(__name__)
+
+# AI 결함으로 간주하여 Fallback 처리할 예외 목록
+# LLM 파싱 실패, JSON 형식 오류, 의도 분류 이상 등
+_AI_RECOVERABLE = (
+    AIError,          # 우리 예외 계층
+    ValueError,       # JSON 파싱, enum 변환 실패
+    KeyError,         # LLM 응답에서 필수 필드 누락
+    TypeError,        # LLM 응답 타입 불일치
+)
 
 
 class AIRouter:
@@ -62,6 +74,7 @@ class AIRouter:
         l2_ms = (time.time() - t2) * 1000
         logger.info(
             "L2_mode_select",
+            layer="ROUTER", component="ModeSelector",
             mode=mode.value,
             workflow_id=workflow_id,
             latency_ms=round(l2_ms, 1),
@@ -84,6 +97,7 @@ class AIRouter:
         l3_ms = (time.time() - t3) * 1000
         logger.info(
             "L3_strategy_build",
+            layer="ROUTER", component="StrategyBuilder",
             tools_count=len(plan.tools),
             guardrails=plan.guardrail_chain,
             scope_domains=plan.scope.domain_codes,
@@ -96,6 +110,7 @@ class AIRouter:
         total_ms = (time.time() - t_start) * 1000
         logger.info(
             "route_complete",
+            layer="ROUTER",
             question_type=question_type.value,
             mode=mode.value,
             tools_count=len(tools),
@@ -108,13 +123,22 @@ class AIRouter:
     async def _run_l0(
         self, query: str, history: List[dict],
     ) -> tuple[str, ResolutionResult]:
-        """Layer 0 실행. 실패 시 원본 쿼리를 passthrough로 반환."""
+        """Layer 0 실행.
+
+        AI 결함(LLM 파싱 실패 등) → 원본 쿼리로 Fallback.
+        시스템 결함(DB, 네트워크) → 상위로 전파.
+        """
         t0 = time.time()
         try:
             resolution = await self._resolver.resolve(query, history)
             resolved_query = resolution.resolved_query
-        except Exception as e:
-            logger.warning("L0_fallback", error=str(e))
+        except _AI_RECOVERABLE as e:
+            logger.warning(
+                "L0_fallback",
+                layer="ROUTER", component="ContextResolver",
+                error_code="ERR_ROUTER_L0_FALLBACK",
+                error=str(e),
+            )
             resolution = ResolutionResult(
                 resolved_query=query,
                 original_query=query,
@@ -125,6 +149,7 @@ class AIRouter:
         l0_ms = (time.time() - t0) * 1000
         logger.info(
             "L0_context_resolve",
+            layer="ROUTER", component="ContextResolver",
             method=resolution.method,
             confidence=resolution.confidence,
             changed=resolution.original_query != resolved_query,
@@ -138,19 +163,29 @@ class AIRouter:
         history: List[dict],
         profile: AgentProfile,
     ) -> tuple[QuestionType, Optional[str]]:
-        """Layer 1 실행. 실패 시 STANDALONE으로 폴백."""
+        """Layer 1 실행.
+
+        AI 결함 → STANDALONE으로 Fallback.
+        시스템 결함 → 상위로 전파.
+        """
         t1 = time.time()
         try:
             question_type, custom_intent = await self._classifier.classify(
                 query, history, profile,
             )
-        except Exception as e:
-            logger.warning("L1_fallback", error=str(e))
+        except _AI_RECOVERABLE as e:
+            logger.warning(
+                "L1_fallback",
+                layer="ROUTER", component="IntentClassifier",
+                error_code="ERR_ROUTER_L1_FALLBACK",
+                error=str(e),
+            )
             question_type = QuestionType.STANDALONE
             custom_intent = None
         l1_ms = (time.time() - t1) * 1000
         logger.info(
             "L1_intent_classify",
+            layer="ROUTER", component="IntentClassifier",
             question_type=question_type.value,
             custom_intent=custom_intent,
             latency_ms=round(l1_ms, 1),
