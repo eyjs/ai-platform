@@ -154,7 +154,7 @@ async def _prepare_chat(
                 profile=profile,
                 tools=tools,
                 history=history,
-                user_security_level=user_ctx.user_role,
+                user_security_level=user_ctx.security_level_max,
             )
 
         context = AgentContext(

@@ -78,7 +78,7 @@ class PGRateLimiter:
                 # 토큰 충전: 경과 시간 * 충전율, capacity 상한
                 current_tokens = min(
                     capacity,
-                    row["tokens"] + (row["elapsed"] * refill_rate),
+                    float(row["tokens"]) + (float(row["elapsed"]) * refill_rate),
                 )
 
                 if current_tokens >= cost:
