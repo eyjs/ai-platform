@@ -15,11 +15,12 @@ services:
       timeout: 3s
       retries: 5
 
-  ai-platform:
+  api:
     build: .
     ports:
       - "8010:8000"
-    environment:
+    command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       AIP_PROVIDER_MODE: development
       # MLX GPU 서버 (호스트에서 실행 중)
@@ -38,6 +39,22 @@ services:
         condition: service_healthy
     volumes:
       - ./seeds:/app/seeds
+
+  worker:
+    build: .
+    command: ["python", "-m", "src.worker_main"]
+    environment:
+      <<: *shared-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./seeds:/app/seeds
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
 
 volumes:
   pgdata:
