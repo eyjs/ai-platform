@@ -140,25 +140,26 @@ async def create_app_state(settings: Settings) -> AppState:
     except ImportError:
         logger.warning("chat_model_unavailable, agentic mode disabled")
 
+    # 10. Workflow Engine (Agent보다 먼저 — Agent가 의존)
+    workflow_store = WorkflowStore()
+    await workflow_store.load_from_directory("seeds/workflows")
+    workflow_engine = WorkflowEngine(workflow_store)
+    logger.info("workflows_loaded", count=workflow_store.count)
+
     agent = GraphExecutor(
         main_llm=main_llm,
         tool_registry=tool_registry,
         guardrails=guardrails,
         chat_model=chat_model,
+        workflow_engine=workflow_engine,
     )
 
-    # 10. Ingest Pipeline
+    # 11. Ingest Pipeline
     ingest_pipeline = IngestPipeline(
         vector_store=vector_store,
         embedding_provider=embedding_provider,
         settings=settings,
     )
-
-    # 11. Workflow Engine
-    workflow_store = WorkflowStore()
-    await workflow_store.load_from_directory("seeds/workflows")
-    workflow_engine = WorkflowEngine(workflow_store)
-    logger.info("workflows_loaded", count=workflow_store.count)
 
     providers = [embedding_provider, router_llm, main_llm, reranker]
 

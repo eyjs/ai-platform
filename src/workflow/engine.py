@@ -30,6 +30,9 @@ logger = get_logger(__name__)
 _MAX_MESSAGE_CHAIN = 10  # message 타입 연쇄 최대 깊이
 _SESSION_TTL_SECONDS = 3600  # 세션 만료 시간 (1시간)
 
+# 이탈(escape) 키워드 — escape_policy="allow"일 때 워크플로우 즉시 종료
+_ESCAPE_KEYWORDS = {"취소", "처음으로", "나가기", "중단", "그만", "exit", "cancel", "quit"}
+
 
 @dataclass
 class StepResult:
@@ -41,6 +44,7 @@ class StepResult:
     step_type: str = ""
     collected: dict = field(default_factory=dict)  # 지금까지 수집된 데이터
     completed: bool = False  # 워크플로우 종료 여부
+    escaped: bool = False  # 사용자가 이탈(취소)했는지
     action_result: dict = field(default_factory=dict)  # action 타입 결과
 
 
@@ -128,6 +132,11 @@ class WorkflowEngine:
                 error_code="ERR_WORKFLOW_STEP_MISSING",
             )
 
+        # 이탈 감지 (escape_policy="allow"일 때만)
+        escape_result = self._check_escape(user_input, session, definition)
+        if escape_result:
+            return escape_result
+
         # 입력 검증
         validation_error = _validate_input(current_step, user_input)
         if validation_error:
@@ -189,6 +198,36 @@ class WorkflowEngine:
             logger.info("workflow_cancel", layer="WORKFLOW", session_id=session_id)
             return True
         return False
+
+    def _check_escape(
+        self,
+        user_input: str,
+        session: WorkflowSession,
+        definition: WorkflowDefinition,
+    ) -> Optional[StepResult]:
+        """이탈 키워드를 감지한다. escape_policy에 따라 처리."""
+        if definition.escape_policy != "allow":
+            return None
+
+        normalized = user_input.strip().lower()
+        if normalized not in _ESCAPE_KEYWORDS:
+            return None
+
+        # 워크플로우 취소
+        logger.info(
+            "workflow_escape",
+            layer="WORKFLOW",
+            workflow_id=session.workflow_id,
+            trigger=normalized,
+            collected_keys=list(session.collected.keys()),
+        )
+        session.completed = True
+        return StepResult(
+            bot_message="워크플로우가 취소되었습니다. 다른 질문이 있으시면 말씀해주세요.",
+            completed=True,
+            escaped=True,
+            collected=dict(session.collected),
+        )
 
     def _cleanup_expired_sessions(self) -> None:
         """만료된 세션을 정리한다."""

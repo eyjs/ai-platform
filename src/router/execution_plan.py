@@ -43,6 +43,7 @@ class ExecutionPlan:
     guardrail_chain: list[str] = field(default_factory=list)
     question_type: QuestionType = QuestionType.STANDALONE
     strategy: QuestionStrategy = field(default_factory=QuestionStrategy)
+    workflow_id: str | None = None
     workflow_step: str | None = None
     conversation_context: str = ""
     response_policy: str = ResponsePolicy.BALANCED

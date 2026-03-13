@@ -269,6 +269,61 @@ class TestErrors:
         assert engine.get_session("s1") is None
 
 
+# --- 이탈 감지 (Escape Hatch) ---
+
+
+class TestEscapeHatch:
+
+    def test_escape_cancels_workflow(self):
+        """'취소' 입력 시 워크플로우가 종료되고 escaped=True."""
+        engine = WorkflowEngine(_build_store(_simple_workflow()))
+        engine.start("test_simple", "s1")
+        engine.advance("s1", "A")  # select → ask_name
+
+        result = engine.advance("s1", "취소")
+        assert result.completed
+        assert result.escaped
+        assert "취소" in result.bot_message
+
+    def test_escape_keywords_all(self):
+        """모든 이탈 키워드가 동작한다."""
+        for keyword in ["취소", "처음으로", "나가기", "중단", "그만", "exit", "cancel", "quit"]:
+            engine = WorkflowEngine(_build_store(_simple_workflow()))
+            engine.start("test_simple", f"s_{keyword}")
+            result = engine.advance(f"s_{keyword}", keyword)
+            assert result.escaped, f"'{keyword}' should trigger escape"
+
+    def test_escape_preserves_collected(self):
+        """이탈 시에도 수집된 데이터가 보존된다."""
+        engine = WorkflowEngine(_build_store(_simple_workflow()))
+        engine.start("test_simple", "s1")
+        engine.advance("s1", "A")  # type=A 수집됨
+
+        result = engine.advance("s1", "그만")
+        assert result.escaped
+        assert result.collected["type"] == "A"
+
+    def test_escape_blocked_by_policy(self):
+        """escape_policy='block'이면 이탈 키워드가 무시된다."""
+        wf = WorkflowDefinition(
+            id="test_block",
+            name="블록 테스트",
+            escape_policy="block",
+            steps=[
+                WorkflowStep(id="ask", type="input", prompt="입력하세요.",
+                             save_as="val", next="done"),
+                WorkflowStep(id="done", type="message", prompt="완료."),
+            ],
+        )
+        engine = WorkflowEngine(_build_store(wf))
+        engine.start("test_block", "s1")
+
+        result = engine.advance("s1", "취소")
+        # escape_policy=block이므로 취소가 아닌 일반 입력으로 처리
+        assert not result.escaped
+        assert result.completed  # "취소"가 val로 저장되고 done으로 진행
+
+
 # --- YAML 시드 통합 테스트 ---
 
 
@@ -307,6 +362,24 @@ class TestYAMLSeeds:
         assert result.completed
         assert "홍길동" in result.bot_message
         assert "자동차보험" in result.bot_message
+
+    @pytest.mark.asyncio
+    async def test_escape_mid_flow(self):
+        """워크플로우 도중 이탈 후 재시작 불가 확인."""
+        store = WorkflowStore()
+        await store.load_from_directory("seeds/workflows")
+        engine = WorkflowEngine(store)
+
+        engine.start("camping_reservation", "s_escape")
+        engine.advance("s_escape", "글램핑")
+        result = engine.advance("s_escape", "취소")
+        assert result.escaped
+        assert result.collected["site_type"] == "글램핑"
+
+        # 이탈 후 세션은 completed 상태
+        result = engine.advance("s_escape", "다시 시작")
+        assert result.completed
+        assert "이미 완료" in result.bot_message
 
     @pytest.mark.asyncio
     async def test_camping_reservation_full_flow(self):

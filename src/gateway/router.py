@@ -16,13 +16,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from src.domain.models import AgentResponse, UserRole
+from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
 from src.gateway.auth import AuthError
 from src.gateway.models import (
     ChatRequest, IngestRequest, IngestResponse, UserContext,
     WorkflowAdvanceRequest, WorkflowStartRequest,
 )
 from src.observability.logging import RequestContext, get_logger, request_context
+from src.router.execution_plan import ExecutionPlan
 from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
 from src.tools.base import AgentContext
@@ -122,14 +123,29 @@ async def _prepare_chat(
         )
         history = await state.session_memory.get_turns(session_id, max_turns=10)
 
-        tools = state.tool_registry.resolve(profile.tool_names)
-        plan = await state.ai_router.route(
-            query=req.question,
-            profile=profile,
-            tools=tools,
-            history=history,
-            user_security_level=user_ctx.user_role,
-        )
+        # 활성 워크플로우 세션이 있으면 Router 바이패스
+        active_wf = state.workflow_engine.get_session(session_id)
+        if active_wf and not active_wf.completed:
+            logger.info(
+                "workflow_session_active",
+                session_id=session_id,
+                workflow_id=active_wf.workflow_id,
+                current_step=active_wf.current_step_id,
+            )
+            plan = ExecutionPlan(
+                mode=AgentMode.WORKFLOW,
+                scope=SearchScope(),
+                workflow_id=active_wf.workflow_id,
+            )
+        else:
+            tools = state.tool_registry.resolve(profile.tool_names)
+            plan = await state.ai_router.route(
+                query=req.question,
+                profile=profile,
+                tools=tools,
+                history=history,
+                user_security_level=user_ctx.user_role,
+            )
 
         context = AgentContext(
             session_id=session_id,

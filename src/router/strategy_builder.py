@@ -54,6 +54,7 @@ class StrategyBuilder:
         history: Optional[List[dict]] = None,
         user_security_level: str = "PUBLIC",
         prior_doc_ids: Optional[List[str]] = None,
+        workflow_id: Optional[str] = None,
         workflow_step: Optional[str] = None,
     ) -> ExecutionPlan:
         # SearchScope 생성
@@ -92,6 +93,7 @@ class StrategyBuilder:
             guardrail_chain=profile.guardrails,
             question_type=question_type,
             strategy=strategy,
+            workflow_id=workflow_id,
             workflow_step=workflow_step,
             conversation_context=conversation_context,
             response_policy=profile.response_policy,

@@ -21,6 +21,7 @@ from src.safety.base import GuardrailContext
 from src.safety.base import Guardrail
 from src.tools.base import AgentContext
 from src.tools.registry import ToolRegistry
+from src.workflow.engine import StepResult, WorkflowEngine
 
 logger = get_logger(__name__)
 
@@ -38,11 +39,13 @@ class GraphExecutor:
         tool_registry: ToolRegistry,
         guardrails: Optional[dict[str, Guardrail]] = None,
         chat_model: Optional[BaseChatModel] = None,
+        workflow_engine: Optional[WorkflowEngine] = None,
     ):
         self._main_llm = main_llm
         self._registry = tool_registry
         self._guardrails = guardrails or {}
         self._chat_model = chat_model
+        self._workflow_engine = workflow_engine
 
         # 결정론적 그래프 (한 번 컴파일, 재사용)
         det_graph = build_deterministic_graph(
@@ -62,7 +65,9 @@ class GraphExecutor:
         """ExecutionPlan 기반 실행."""
         start_time = time.time()
 
-        if plan.mode == AgentMode.AGENTIC:
+        if plan.mode == AgentMode.WORKFLOW:
+            response = self._execute_workflow(question, plan, session_id)
+        elif plan.mode == AgentMode.AGENTIC:
             response = await self._execute_agentic(question, plan, session_id)
         else:
             response = await self._execute_deterministic(question, plan, session_id)
@@ -85,7 +90,10 @@ class GraphExecutor:
         """SSE 스트리밍 실행."""
         start_time = time.time()
 
-        if plan.mode == AgentMode.AGENTIC:
+        if plan.mode == AgentMode.WORKFLOW:
+            async for event in self._stream_workflow(question, plan, session_id):
+                yield event
+        elif plan.mode == AgentMode.AGENTIC:
             async for event in self._stream_agentic(question, plan, session_id):
                 yield event
         else:
@@ -95,6 +103,123 @@ class GraphExecutor:
         if trace:
             total_ms = (time.time() - start_time) * 1000
             trace.add_node("graph_stream", duration_ms=round(total_ms, 1))
+
+    # --- 워크플로우 모드 ---
+
+    def _execute_workflow(
+        self,
+        question: str,
+        plan: ExecutionPlan,
+        session_id: str,
+    ) -> AgentResponse:
+        """워크플로우 모드 실행. StepResult → AgentResponse 변환."""
+        if not self._workflow_engine:
+            logger.warning("workflow_engine_missing, falling back to deterministic")
+            # async fallback 불가이므로 빈 응답
+            return AgentResponse(
+                answer="워크플로우 엔진이 초기화되지 않았습니다.",
+                sources=[],
+                trace=TraceInfo(mode="workflow"),
+            )
+
+        step_result = self._run_workflow_step(question, plan, session_id)
+        return self._step_result_to_response(step_result, plan)
+
+    async def _stream_workflow(
+        self,
+        question: str,
+        plan: ExecutionPlan,
+        session_id: str,
+    ) -> AsyncIterator[dict]:
+        """워크플로우 모드 스트리밍. 워크플로우는 즉시 응답이므로 한 번에 전송."""
+        if not self._workflow_engine:
+            yield {"type": "token", "data": "워크플로우 엔진이 초기화되지 않았습니다."}
+            yield {"type": "done", "data": {"tools_called": [], "sources": []}}
+            return
+
+        step_result = self._run_workflow_step(question, plan, session_id)
+
+        yield {"type": "trace", "data": {
+            "step": "workflow",
+            "workflow_id": plan.workflow_id,
+            "step_id": step_result.step_id,
+            "step_type": step_result.step_type,
+            "completed": step_result.completed,
+            "escaped": step_result.escaped,
+        }}
+        yield {"type": "token", "data": step_result.bot_message}
+        yield {"type": "done", "data": {
+            "tools_called": [],
+            "sources": [],
+            "workflow": {
+                "options": step_result.options,
+                "step_id": step_result.step_id,
+                "step_type": step_result.step_type,
+                "collected": step_result.collected,
+                "completed": step_result.completed,
+                "escaped": step_result.escaped,
+            },
+        }}
+
+    def _run_workflow_step(
+        self,
+        question: str,
+        plan: ExecutionPlan,
+        session_id: str,
+    ) -> StepResult:
+        """워크플로우 시작 또는 진행."""
+        engine = self._workflow_engine
+        session = engine.get_session(session_id)
+
+        if not session:
+            # 새 워크플로우 시작
+            workflow_id = plan.workflow_id
+            if not workflow_id:
+                return StepResult(
+                    bot_message="워크플로우 ID가 지정되지 않았습니다.",
+                    completed=True,
+                )
+            logger.info(
+                "workflow_start_via_chat",
+                layer="AGENT",
+                workflow_id=workflow_id,
+                session_id=session_id,
+            )
+            return engine.start(workflow_id, session_id)
+
+        # 기존 세션 진행
+        return engine.advance(session_id, question)
+
+    @staticmethod
+    def _step_result_to_response(
+        step_result: StepResult,
+        plan: ExecutionPlan,
+    ) -> AgentResponse:
+        """StepResult를 AgentResponse로 변환."""
+        # 선택지가 있으면 메시지에 번호 목록 추가
+        answer = step_result.bot_message
+        if step_result.options:
+            options_text = "\n".join(
+                f"{i+1}. {opt}" for i, opt in enumerate(step_result.options)
+            )
+            answer = f"{answer}\n\n{options_text}"
+
+        return AgentResponse(
+            answer=answer,
+            sources=[],
+            trace=TraceInfo(
+                question_type=plan.question_type.value if plan.question_type else "",
+                mode="workflow",
+                tools_called=[],
+                router_decision={
+                    "workflow_id": plan.workflow_id,
+                    "step_id": step_result.step_id,
+                    "step_type": step_result.step_type,
+                    "completed": step_result.completed,
+                    "escaped": step_result.escaped,
+                },
+            ),
+        )
 
     # --- 결정론적 모드 ---
 

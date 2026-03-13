@@ -96,6 +96,7 @@ class AIRouter:
             history=history,
             user_security_level=user_security_level,
             prior_doc_ids=prior_doc_ids,
+            workflow_id=workflow_id,
             workflow_step=None,
         )
         l3_ms = (time.time() - t3) * 1000

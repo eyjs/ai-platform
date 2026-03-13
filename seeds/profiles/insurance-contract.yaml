@@ -1,4 +1,6 @@
 # 보험 계약 어시스턴트 프로필 (Hybrid 모드)
+# "계약", "가입" 키워드 → 워크플로우 모드 자동 진입
+# 일반 질문 → RAG 기반 agentic 모드
 id: "insurance-contract"
 name: "보험 계약 어시스턴트"
 
@@ -10,10 +12,12 @@ category_scopes:
   - "상품안내"
 security_level_max: "INTERNAL"
 
-mode: "deterministic"
+mode: "hybrid"
 workflow_id: null
-# hybrid_triggers: hybrid 모드 재활성화 시 사용 (현재 deterministic)
-hybrid_triggers: []
+hybrid_triggers:
+  - keyword_patterns: ["계약", "가입", "신청"]
+    intent_types: ["CONTRACT_REQUEST"]
+    workflow_id: "insurance_contract"
 
 tools:
   - name: "rag_search"
