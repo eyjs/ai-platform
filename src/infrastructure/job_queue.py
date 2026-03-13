@@ -75,14 +75,16 @@ class JobQueue:
             "max_attempts": row["max_attempts"],
         }
 
-    async def complete(self, job_id: str) -> None:
+    async def complete(self, job_id: str, result: Optional[dict] = None) -> None:
         await self._pool.execute(
             """
             UPDATE job_queue
-            SET status = 'completed', completed_at = NOW(), locked_by = NULL
+            SET status = 'completed', completed_at = NOW(), locked_by = NULL,
+                result = $2::jsonb
             WHERE id = $1
             """,
             uuid.UUID(job_id),
+            json.dumps(result, ensure_ascii=False) if result else None,
         )
 
     async def fail(self, job_id: str, error: str) -> None:
@@ -119,6 +121,32 @@ class JobQueue:
                 uuid.UUID(job_id), attempts, error,
             )
             logger.warning("Job %s permanently failed after %d attempts", job_id, attempts)
+
+    async def get_job(self, job_id: str) -> Optional[dict]:
+        """작업 상태를 조회한다."""
+        row = await self._pool.fetchrow(
+            """
+            SELECT id, queue_name, payload, status, attempts, max_attempts,
+                   last_error, result, created_at, completed_at
+            FROM job_queue WHERE id = $1
+            """,
+            uuid.UUID(job_id),
+        )
+        if not row:
+            return None
+        result_raw = row["result"]
+        return {
+            "id": str(row["id"]),
+            "queue_name": row["queue_name"],
+            "payload": json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"],
+            "status": row["status"],
+            "attempts": row["attempts"],
+            "max_attempts": row["max_attempts"],
+            "last_error": row["last_error"],
+            "result": json.loads(result_raw) if isinstance(result_raw, str) else result_raw,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+        }
 
     async def cleanup_stale(self, stale_seconds: int = 600) -> int:
         """오래된 processing 작업을 pending으로 복구 (워커 비정상 종료 대응)."""
@@ -181,8 +209,8 @@ class QueueWorker:
     async def _process_job(self, job: dict) -> None:
         job_id = job["id"]
         try:
-            await self._handler(job["payload"])
-            await self._queue.complete(job_id)
+            result = await self._handler(job["payload"])
+            await self._queue.complete(job_id, result=result)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)
             await self._queue.fail(job_id, str(e))

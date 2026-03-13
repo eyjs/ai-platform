@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     state.cleanup_task = start_cleanup_task(
         cache=state.cache,
         session_memory=state.session_memory,
+        job_queue=state.job_queue,
         interval=settings.cache_cleanup_interval,
     )
 

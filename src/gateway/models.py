@@ -47,11 +47,21 @@ class IngestRequest(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    """문서 수집 응답."""
+    """문서 수집 응답 (비동기 — 즉시 반환)."""
 
-    document_id: str
-    chunks: int
-    status: str
+    job_id: str
+    status: str = "queued"
+
+
+class IngestJobStatus(BaseModel):
+    """문서 수집 작업 상태 조회 응답."""
+
+    job_id: str
+    status: str  # queued | processing | completed | failed
+    result: dict | None = None  # 완료 시 document_id, chunks 등
+    error: str | None = None  # 실패 시 에러 메시지
+    attempts: int = 0
+    created_at: str | None = None
 
 
 class WorkflowStartRequest(BaseModel):

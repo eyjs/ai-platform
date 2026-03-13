@@ -8,7 +8,6 @@
 """
 
 import json
-import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -19,7 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
 from src.gateway.auth import AuthError
 from src.gateway.models import (
-    ChatRequest, IngestRequest, IngestResponse, UserContext,
+    ChatRequest, IngestJobStatus, IngestRequest, IngestResponse, UserContext,
     WorkflowAdvanceRequest, WorkflowStartRequest,
 )
 from src.observability.logging import RequestContext, get_logger, request_context
@@ -287,8 +286,13 @@ async def chat_stream(req: ChatRequest, request: Request):
     return EventSourceResponse(event_generator())
 
 
-@gateway_router.post("/documents/ingest", response_model=IngestResponse)
+@gateway_router.post(
+    "/documents/ingest",
+    response_model=IngestResponse,
+    status_code=202,
+)
 async def ingest_document(req: IngestRequest, request: Request):
+    """문서 수집 요청을 큐에 등록하고 job_id를 즉시 반환한다 (202 Accepted)."""
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
 
@@ -299,60 +303,72 @@ async def ingest_document(req: IngestRequest, request: Request):
             detail="문서 수집은 EDITOR 이상 권한이 필요합니다",
         )
 
-    request_id = str(uuid.uuid4())
-    ctx_token = request_context.set(RequestContext(
-        request_id=request_id,
-        profile_id="ingest",
+    if not req.content and not req.source_url:
+        raise HTTPException(status_code=400, detail="content or source_url required")
+
+    if req.source_url and not req.content:
+        raise HTTPException(status_code=501, detail="URL ingest not yet implemented")
+
+    logger.info(
+        "ingest_enqueue",
+        title=req.title,
+        domain_code=req.domain_code,
+        content_len=len(req.content) if req.content else 0,
         user_id=user_ctx.user_id,
-    ))
+    )
 
     try:
-        logger.info(
-            "ingest_request",
-            title=req.title,
-            domain_code=req.domain_code,
-            content_len=len(req.content) if req.content else 0,
-            user_id=user_ctx.user_id,
+        job_id = await state.job_queue.enqueue(
+            queue_name="ingest",
+            payload={
+                "title": req.title,
+                "content": req.content,
+                "domain_code": req.domain_code,
+                "file_name": req.file_name,
+                "security_level": req.security_level,
+                "source_url": req.source_url,
+                "metadata": req.metadata or {},
+            },
         )
-
-        if not req.content and not req.source_url:
-            raise HTTPException(status_code=400, detail="content or source_url required")
-
-        content = req.content or ""
-        if req.source_url and not content:
-            raise HTTPException(status_code=501, detail="URL ingest not yet implemented")
-
-        start = time.time()
-        result = await state.ingest_pipeline.ingest_text(
-            title=req.title,
-            content=content,
-            domain_code=req.domain_code,
-            file_name=req.file_name,
-            security_level=req.security_level,
-            source_url=req.source_url,
-            metadata=req.metadata,
-        )
-        elapsed = (time.time() - start) * 1000
-
-        logger.info(
-            "ingest_complete",
-            document_id=result["document_id"],
-            chunks=result["chunks"],
-            latency_ms=round(elapsed, 1),
-        )
-
-        return IngestResponse(
-            document_id=result["document_id"],
-            chunks=result["chunks"],
-            status=result["status"],
-        )
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("ingest_error", error=str(e), exc_info=True)
+        logger.error("ingest_enqueue_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        request_context.reset(ctx_token)
+
+    return IngestResponse(job_id=job_id, status="queued")
+
+
+@gateway_router.get("/documents/ingest/{job_id}", response_model=IngestJobStatus)
+async def get_ingest_status(job_id: str, request: Request):
+    """문서 수집 작업 상태를 조회한다 (폴링 엔드포인트)."""
+    state = _get_app_state(request)
+    await _authenticate(request)
+
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid job_id format: {job_id}")
+
+    try:
+        job = await state.job_queue.get_job(job_id)
+    except Exception as e:
+        logger.error("ingest_status_error", error=str(e), job_id=job_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    # pending → queued (외부 API 용어 통일)
+    status = "queued" if job["status"] == "pending" else job["status"]
+    result = job.get("result") if job["status"] == "completed" else None
+
+    return IngestJobStatus(
+        job_id=job["id"],
+        status=status,
+        result=result,
+        error=job.get("last_error"),
+        attempts=job["attempts"],
+        created_at=job.get("created_at"),
+    )
 
 
 # --- 워크플로우 (순차적 챗봇) ---

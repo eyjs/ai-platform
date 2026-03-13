@@ -14,6 +14,7 @@ from src.agent.profile_store import ProfileStore
 from src.config import Settings
 from src.gateway.auth import AuthService
 from src.infrastructure.fact_store import FactStore
+from src.infrastructure.job_queue import JobQueue, QueueWorker
 from src.infrastructure.memory.cache import PgCache
 from src.infrastructure.memory.session import SessionMemory
 from src.infrastructure.providers.factory import ProviderFactory
@@ -51,9 +52,12 @@ class AppState:
     workflow_engine: WorkflowEngine
     workflow_store: WorkflowStore
     provider_factory: ProviderFactory
+    job_queue: JobQueue
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
+    ingest_worker: Optional[QueueWorker] = None
+    ingest_worker_task: Optional[asyncio.Task] = None
     providers: list = field(default_factory=list)
 
 
@@ -161,6 +165,31 @@ async def create_app_state(settings: Settings) -> AppState:
         settings=settings,
     )
 
+    # 12. Job Queue + Ingest Worker
+    job_queue = JobQueue(pool)
+
+    async def _ingest_handler(payload: dict) -> dict:
+        """QueueWorker가 호출하는 문서 수집 핸들러. 결과를 반환하여 job에 저장."""
+        return await ingest_pipeline.ingest_text(
+            title=payload["title"],
+            content=payload["content"],
+            domain_code=payload["domain_code"],
+            file_name=payload.get("file_name"),
+            security_level=payload.get("security_level", "PUBLIC"),
+            source_url=payload.get("source_url"),
+            metadata=payload.get("metadata", {}),
+        )
+
+    ingest_worker = QueueWorker(
+        queue=job_queue,
+        queue_name="ingest",
+        handler=_ingest_handler,
+        poll_interval=2.0,
+        max_concurrent=3,
+    )
+    ingest_worker_task = asyncio.create_task(ingest_worker.start())
+    logger.info("ingest_worker_started", max_concurrent=3, poll_interval=2.0)
+
     providers = [embedding_provider, router_llm, main_llm, reranker]
 
     return AppState(
@@ -178,6 +207,9 @@ async def create_app_state(settings: Settings) -> AppState:
         workflow_engine=workflow_engine,
         workflow_store=workflow_store,
         provider_factory=provider_factory,
+        job_queue=job_queue,
+        ingest_worker=ingest_worker,
+        ingest_worker_task=ingest_worker_task,
         providers=providers,
     )
 
@@ -185,9 +217,10 @@ async def create_app_state(settings: Settings) -> AppState:
 def start_cleanup_task(
     cache: PgCache,
     session_memory: SessionMemory,
+    job_queue: JobQueue,
     interval: int,
 ) -> asyncio.Task:
-    """만료 캐시/세션 주기적 정리 태스크를 시작한다."""
+    """만료 캐시/세션/stale 작업 주기적 정리 태스크를 시작한다."""
 
     async def _periodic_cleanup():
         while True:
@@ -195,6 +228,7 @@ def start_cleanup_task(
             try:
                 await cache.cleanup_expired()
                 await session_memory.cleanup_expired()
+                await job_queue.cleanup_stale(stale_seconds=600)
             except Exception as e:
                 logger.warning("cleanup_failed", error=str(e))
 
@@ -239,6 +273,15 @@ async def seed_dev_api_keys(pool: Any) -> None:
 async def shutdown(state: AppState) -> None:
     """앱 정리: 태스크 취소 + 커넥션 종료."""
     logger.info("shutdown_start")
+
+    if state.ingest_worker:
+        await state.ingest_worker.stop(timeout=30.0)
+    if state.ingest_worker_task:
+        state.ingest_worker_task.cancel()
+        try:
+            await state.ingest_worker_task
+        except asyncio.CancelledError:
+            pass
 
     if state.cleanup_task:
         state.cleanup_task.cancel()
