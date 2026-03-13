@@ -1,0 +1,63 @@
+# 캠핑장 예약 워크플로우
+id: "camping_reservation"
+name: "캠핑장 예약"
+escape_policy: "allow"
+
+steps:
+  - id: "welcome"
+    type: "message"
+    prompt: "캠핑장 예약을 시작합니다."
+    next: "select_site"
+
+  - id: "select_site"
+    type: "select"
+    prompt: "어떤 캠핑 사이트를 원하시나요?"
+    save_as: "site_type"
+    options: ["오토캠핑", "글램핑", "카라반", "백패킹(텐트)"]
+    next: "ask_date"
+
+  - id: "ask_date"
+    type: "input"
+    prompt: "체크인 날짜를 알려주세요. (예: 2026-04-15)"
+    save_as: "checkin_date"
+    validation: "date"
+    next: "ask_nights"
+
+  - id: "ask_nights"
+    type: "select"
+    prompt: "몇 박 예약하시겠어요?"
+    save_as: "nights"
+    options: ["1박", "2박", "3박", "4박 이상"]
+    next: "ask_people"
+
+  - id: "ask_people"
+    type: "input"
+    prompt: "인원수를 알려주세요. (숫자만)"
+    save_as: "people_count"
+    validation: "number"
+    next: "ask_name"
+
+  - id: "ask_name"
+    type: "input"
+    prompt: "예약자 성함을 알려주세요."
+    save_as: "reserver_name"
+    next: "ask_phone"
+
+  - id: "ask_phone"
+    type: "input"
+    prompt: "{{reserver_name}}님, 연락처를 알려주세요."
+    save_as: "phone"
+    validation: "phone"
+    next: "confirm"
+
+  - id: "confirm"
+    type: "confirm"
+    prompt: "아래 내용으로 예약을 진행할까요? (예/아니오)"
+    save_as: "confirmed"
+    branches:
+      "예": "complete"
+      "아니오": "select_site"
+
+  - id: "complete"
+    type: "message"
+    prompt: "{{reserver_name}}님의 {{site_type}} {{nights}} 예약이 완료되었습니다. {{checkin_date}} 체크인입니다."

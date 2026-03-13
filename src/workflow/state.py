@@ -1,0 +1,25 @@
+"""Workflow Session State: 세션별 워크플로우 진행 상태.
+
+"이 사용자가 지금 어떤 워크플로우의 몇 단계에 있고,
+ 지금까지 뭘 수집했는가"를 추적한다.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class WorkflowSession:
+    """워크플로우 진행 상태."""
+
+    workflow_id: str
+    current_step_id: str
+    collected: dict = field(default_factory=dict)  # save_as → 답변 값
+    started_at: float = field(default_factory=time.time)
+    completed: bool = False
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.time() - self.started_at

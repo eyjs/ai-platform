@@ -20,6 +20,7 @@ from src.domain.models import AgentResponse, UserRole
 from src.gateway.auth import AuthError
 from src.gateway.models import ChatRequest, IngestRequest, IngestResponse, UserContext
 from src.observability.logging import RequestContext, get_logger, request_context
+from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
 from src.tools.base import AgentContext
 
@@ -332,6 +333,85 @@ async def ingest_document(req: IngestRequest, request: Request):
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         request_context.reset(ctx_token)
+
+
+# --- 워크플로우 (순차적 챗봇) ---
+
+
+def _step_to_response(result: StepResult) -> dict:
+    """StepResult를 JSON 응답으로 변환한다."""
+    return {
+        "message": result.bot_message,
+        "options": result.options,
+        "step_id": result.step_id,
+        "step_type": result.step_type,
+        "collected": result.collected,
+        "completed": result.completed,
+    }
+
+
+@gateway_router.get("/workflows")
+async def list_workflows(request: Request):
+    """사용 가능한 워크플로우 목록."""
+    state = _get_app_state(request)
+    return [
+        {"id": w.id, "name": w.name, "steps": len(w.steps)}
+        for w in state.workflow_store.list_all()
+    ]
+
+
+@gateway_router.post("/workflow/start")
+async def workflow_start(request: Request):
+    """워크플로우를 시작하고 첫 번째 스텝을 반환한다."""
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+
+    body = await request.json()
+    workflow_id = body.get("workflow_id")
+    session_id = body.get("session_id") or str(uuid.uuid4())
+
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="workflow_id는 필수입니다")
+
+    logger.info(
+        "workflow_start_request",
+        workflow_id=workflow_id,
+        session_id=session_id,
+        user_id=user_ctx.user_id,
+    )
+
+    try:
+        result = state.workflow_engine.start(workflow_id, session_id)
+    except Exception as e:
+        logger.error("workflow_start_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    response = _step_to_response(result)
+    response["session_id"] = session_id
+    response["workflow_id"] = workflow_id
+    return response
+
+
+@gateway_router.post("/workflow/advance")
+async def workflow_advance(request: Request):
+    """사용자 입력을 받아 다음 스텝으로 진행한다."""
+    state = _get_app_state(request)
+    await _authenticate(request)
+
+    body = await request.json()
+    session_id = body.get("session_id")
+    user_input = body.get("input", "")
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id는 필수입니다")
+
+    try:
+        result = state.workflow_engine.advance(session_id, user_input)
+    except Exception as e:
+        logger.error("workflow_advance_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return _step_to_response(result)
 
 
 # --- API Key 관리 (ADMIN 전용) ---

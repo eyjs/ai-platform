@@ -27,6 +27,8 @@ from src.safety.response_policy import ResponsePolicyGuard
 from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
+from src.workflow.engine import WorkflowEngine
+from src.workflow.store import WorkflowStore
 
 logger = get_logger(__name__)
 
@@ -46,6 +48,8 @@ class AppState:
     ai_router: AIRouter
     agent: GraphExecutor
     ingest_pipeline: IngestPipeline
+    workflow_engine: WorkflowEngine
+    workflow_store: WorkflowStore
     provider_factory: ProviderFactory
 
     # 내부 관리용
@@ -150,6 +154,12 @@ async def create_app_state(settings: Settings) -> AppState:
         settings=settings,
     )
 
+    # 11. Workflow Engine
+    workflow_store = WorkflowStore()
+    await workflow_store.load_from_directory("seeds/workflows")
+    workflow_engine = WorkflowEngine(workflow_store)
+    logger.info("workflows_loaded", count=workflow_store.count)
+
     providers = [embedding_provider, router_llm, main_llm, reranker]
 
     return AppState(
@@ -164,6 +174,8 @@ async def create_app_state(settings: Settings) -> AppState:
         ai_router=ai_router,
         agent=agent,
         ingest_pipeline=ingest_pipeline,
+        workflow_engine=workflow_engine,
+        workflow_store=workflow_store,
         provider_factory=provider_factory,
         providers=providers,
     )
