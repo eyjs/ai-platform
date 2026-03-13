@@ -112,8 +112,8 @@ class TestTokenBucketAlgorithm:
         assert remaining == 2.0
 
     @pytest.mark.asyncio
-    async def test_verify_request_raises_429(self, limiter, mock_pool):
-        """토큰 소진 시 429를 반환한다."""
+    async def test_verify_request_raises_429_with_retry_after(self, limiter, mock_pool):
+        """토큰 소진 시 429 + Retry-After 헤더를 반환한다."""
         self._mock_conn(mock_pool, fetchrow_result={
             "tokens": 0.0,
             "elapsed": 0.0,
@@ -123,6 +123,8 @@ class TestTokenBucketAlgorithm:
             await limiter.verify_request("client-1", rate_limit_per_min=60)
 
         assert exc_info.value.status_code == 429
+        assert "Retry-After" in exc_info.value.headers
+        assert int(exc_info.value.headers["Retry-After"]) == 1
 
     @pytest.mark.asyncio
     async def test_verify_request_passes(self, limiter, mock_pool):

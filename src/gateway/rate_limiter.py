@@ -4,6 +4,7 @@ Redis 없이 SELECT FOR UPDATE로 원자적 동시성 제어.
 UserContext.rate_limit_per_min 기반 per-client 제한.
 """
 
+import math
 from typing import Tuple
 
 import asyncpg
@@ -60,9 +61,17 @@ class PGRateLimiter:
                         """
                         INSERT INTO api_rate_limits (client_id, tokens, last_updated)
                         VALUES ($1, $2, NOW())
+                        ON CONFLICT (client_id) DO UPDATE
+                        SET tokens = LEAST($3, api_rate_limits.tokens
+                                     + EXTRACT(EPOCH FROM (NOW() - api_rate_limits.last_updated)) * $4)
+                                     - $5,
+                            last_updated = NOW()
                         """,
                         client_id,
                         remaining,
+                        capacity,
+                        refill_rate,
+                        cost,
                     )
                     return True, remaining
 
@@ -109,14 +118,19 @@ class PGRateLimiter:
         )
 
         if not allowed:
+            tokens_needed = 1 - remaining
+            retry_after = math.ceil(tokens_needed / refill_rate)
+
             logger.warning(
                 "rate_limit_exceeded",
                 layer="GATEWAY",
                 client_id=client_id,
                 remaining=round(remaining, 2),
                 capacity=rate_limit_per_min,
+                retry_after=retry_after,
             )
             raise HTTPException(
                 status_code=HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too Many Requests. Please try again later.",
+                headers={"Retry-After": str(retry_after)},
             )
