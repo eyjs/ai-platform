@@ -42,30 +42,42 @@ async def run_worker() -> None:
     pool = vector_store.pool
     logger.info("worker_db_connected")
 
-    # 2. Embedding Provider (워커에 필요한 유일한 ML 프로바이더)
+    # 2. Providers (Embedding + Parsing)
     provider_factory = ProviderFactory(settings)
     embedding_provider = provider_factory.get_embedding_provider()
     logger.info("worker_embedding_ready", type=type(embedding_provider).__name__)
+
+    parsing_provider = provider_factory.get_parsing_provider()
+    logger.info("worker_parser_ready", type=type(parsing_provider).__name__)
 
     # 3. Ingest Pipeline
     ingest_pipeline = IngestPipeline(
         vector_store=vector_store,
         embedding_provider=embedding_provider,
         settings=settings,
+        parsing_provider=parsing_provider,
     )
 
     # 4. Job Queue + Worker
     job_queue = JobQueue(pool)
 
     async def handler(payload: dict) -> dict:
+        # file_bytes는 base64로 전달됨 (API에서 인코딩)
+        file_bytes = None
+        if payload.get("file_base64"):
+            import base64
+            file_bytes = base64.b64decode(payload["file_base64"])
+
         return await ingest_pipeline.ingest_text(
             title=payload["title"],
-            content=payload["content"],
+            content=payload.get("content"),
             domain_code=payload["domain_code"],
             file_name=payload.get("file_name"),
             security_level=payload.get("security_level", "PUBLIC"),
             source_url=payload.get("source_url"),
             metadata=payload.get("metadata", {}),
+            file_bytes=file_bytes,
+            mime_type=payload.get("mime_type"),
         )
 
     worker = QueueWorker(

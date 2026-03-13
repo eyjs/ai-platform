@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"
 
+    # 파서 (Vision Parser)
+    parser_provider: str = "text"      # text | llamaparse
+    llamaparse_api_key: str = ""
+    parser_timeout: float = 120.0
+
     # 청킹
     chunk_size: int = 1000
     chunk_overlap: int = 200

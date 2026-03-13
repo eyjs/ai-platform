@@ -158,11 +158,15 @@ async def create_app_state(settings: Settings) -> AppState:
         workflow_engine=workflow_engine,
     )
 
-    # 11. Ingest Pipeline
+    # 11. Parsing Provider + Ingest Pipeline
+    parsing_provider = provider_factory.get_parsing_provider()
+    logger.info("parser_initialized", type=type(parsing_provider).__name__)
+
     ingest_pipeline = IngestPipeline(
         vector_store=vector_store,
         embedding_provider=embedding_provider,
         settings=settings,
+        parsing_provider=parsing_provider,
     )
 
     # 12. Job Queue (API는 enqueue만, 워커는 별도 프로세스)

@@ -13,7 +13,7 @@ from typing import List, Optional
 import tiktoken
 
 from src.config import Settings
-from src.infrastructure.providers.base import EmbeddingProvider
+from src.infrastructure.providers.base import EmbeddingProvider, ParsingProvider
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.pipeline.chunker import MarkdownChunker, TextChunker
@@ -31,9 +31,11 @@ class IngestPipeline:
         vector_store: VectorStore,
         embedding_provider: EmbeddingProvider,
         settings: Settings,
+        parsing_provider: Optional[ParsingProvider] = None,
     ):
         self._store = vector_store
         self._embedder = embedding_provider
+        self._parser = parsing_provider
         self._chunker = TextChunker(settings.chunk_size, settings.chunk_overlap)
         self._md_chunker = MarkdownChunker(settings.chunk_size, settings.chunk_overlap)
         self._settings = settings
@@ -41,14 +43,29 @@ class IngestPipeline:
     async def ingest_text(
         self,
         title: str,
-        content: str,
-        domain_code: str,
+        content: Optional[str] = None,
+        domain_code: str = "",
         file_name: Optional[str] = None,
         security_level: str = "PUBLIC",
         source_url: Optional[str] = None,
         metadata: Optional[dict] = None,
+        file_bytes: Optional[bytes] = None,
+        mime_type: Optional[str] = None,
     ) -> dict:
-        """텍스트 문서 수집."""
+        """문서 수집. file_bytes가 있으면 파서로 마크다운 변환 후 청킹."""
+
+        # 파일 바이너리 → 파서 → 마크다운 텍스트
+        if file_bytes and mime_type:
+            if not self._parser:
+                raise RuntimeError("ParsingProvider not configured. Set AIP_PARSER_PROVIDER.")
+            t_parse = time.time()
+            content = await self._parser.parse(file_bytes, mime_type)
+            parse_ms = (time.time() - t_parse) * 1000
+            logger.info("parsed", title=title, mime_type=mime_type, chars=len(content), latency_ms=round(parse_ms, 1))
+
+        if not content:
+            raise ValueError("content or file_bytes is required")
+
         file_hash = hashlib.sha256(content.encode()).hexdigest()
 
         # 1. 문서 레코드 생성

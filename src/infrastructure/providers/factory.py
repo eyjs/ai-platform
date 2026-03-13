@@ -10,7 +10,7 @@ import httpx
 
 from src.config import ProviderMode, Settings
 
-from .base import EmbeddingProvider, LLMProvider, RerankerProvider
+from .base import EmbeddingProvider, LLMProvider, ParsingProvider, RerankerProvider
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,25 @@ class ProviderFactory:
             api_key=self._settings.openai_api_key,
             model=self._settings.prod_llm_model,
         )
+
+    def get_parsing_provider(self) -> ParsingProvider:
+        parser_type = self._settings.parser_provider.lower()
+
+        if parser_type == "llamaparse":
+            if not self._settings.llamaparse_api_key:
+                raise ValueError("AIP_LLAMAPARSE_API_KEY is required for llamaparse provider")
+            from .parsing.llama_parse import LlamaParseProvider
+
+            logger.info("Using LlamaParse vision parser")
+            return LlamaParseProvider(
+                api_key=self._settings.llamaparse_api_key,
+                timeout=self._settings.parser_timeout,
+            )
+
+        from .parsing.text import TextParsingProvider
+
+        logger.info("Using text-based parser (fallback)")
+        return TextParsingProvider()
 
     def get_reranker(self) -> RerankerProvider:
         if self._settings.reranker_server_url:
