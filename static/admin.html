@@ -746,7 +746,7 @@ async function openEditModal(id) {
   document.getElementById('fieldId').style.display = 'none';
 
   try {
-    var p = await apiFetch('/admin/profiles/' + id);
+    var p = await apiFetch('/admin/profiles/' + encodeURIComponent(id));
     document.getElementById('fId').value = p.id;
     document.getElementById('fName').value = p.name || '';
     document.getElementById('fDesc').value = p.description || '';
@@ -847,7 +847,7 @@ async function saveProfile() {
 
   try {
     if (editingId) {
-      await apiFetch('/admin/profiles/' + editingId, { method: 'PUT', body: JSON.stringify(data) });
+      await apiFetch('/admin/profiles/' + encodeURIComponent(editingId), { method: 'PUT', body: JSON.stringify(data) });
       showToast('Profile updated');
     } else {
       await apiFetch('/admin/profiles', { method: 'POST', body: JSON.stringify(data) });
@@ -863,7 +863,7 @@ async function saveProfile() {
 async function deleteProfile(id) {
   if (!confirm('Delete chatbot "' + id + '"?')) return;
   try {
-    await apiFetch('/admin/profiles/' + id, { method: 'DELETE' });
+    await apiFetch('/admin/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
     showToast('Deleted');
     await loadProfiles();
   } catch (e) {
@@ -899,6 +899,14 @@ function saveApiKey() {
   showToast('Settings saved');
   loadAll();
 }
+
+// --- Keyboard ---
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('apiKeyModal').classList.contains('active')) closeApiKeyModal();
+    else if (document.getElementById('profileModal').classList.contains('active')) closeModal();
+  }
+});
 
 // --- Toast ---
 function showToast(msg, isError) {
