@@ -1,11 +1,13 @@
-"""Orchestrator LLM 어댑터: 최상위 모델 호출.
+"""Orchestrator LLM 어댑터: Tier 3 최후 수단.
 
 OpenAI / Anthropic API를 통한 Function Calling으로 프로필을 선택한다.
+Tier 1(패턴), Tier 2(키워드 스코어링)에서 해결되지 않은 질문만 도달한다.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from src.observability.logging import get_logger
@@ -19,11 +21,28 @@ from src.orchestrator.prompts import (
 
 logger = get_logger(__name__)
 
+# 텍스트에서 프로필 ID를 추출하는 패턴
+_PROFILE_ID_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+")
+
+
+def _extract_profile_from_text(text: str, valid_ids: set[str]) -> str | None:
+    """LLM 텍스트 응답에서 프로필 ID를 추출한다.
+
+    tool_calls=null일 때 폴백으로 사용. MLX 서버가 tool_choice를 무시하는 경우 대비.
+    """
+    if not text:
+        return None
+    for match in _PROFILE_ID_PATTERN.finditer(text):
+        candidate = match.group()
+        if candidate in valid_ids:
+            return candidate
+    return None
+
 
 class OrchestratorLLM:
     """오케스트레이터 전용 LLM 어댑터.
 
-    OpenAI 호환 API의 Function Calling을 사용하여 프로필 선택 또는 일반 응답을 결정한다.
+    OpenAI 호환 API의 Function Calling을 사용하여 프로필을 선택한다.
     MLX, Ollama, OpenAI, Anthropic을 지원한다.
     """
 
@@ -95,7 +114,7 @@ class OrchestratorLLM:
         Returns:
             {"function": "select_profile", "profile_id": "...", "reason": "..."}
             또는
-            {"function": "general_response", "message": "..."}
+            {"function": "no_tool_call", "text": "...", "profile_id": "..."}
         """
         if not self._client:
             raise RuntimeError("Orchestrator LLM이 초기화되지 않았습니다")
@@ -110,14 +129,16 @@ class OrchestratorLLM:
             question=question,
         )
 
+        valid_ids = {p["id"] for p in profiles}
+
         if self._provider in ("openai", "ollama", "mlx"):
-            return await self._call_openai(user_message)
+            return await self._call_openai(user_message, valid_ids)
         elif self._provider == "anthropic":
-            return await self._call_anthropic(user_message)
+            return await self._call_anthropic(user_message, valid_ids)
 
         raise RuntimeError(f"지원하지 않는 프로바이더: {self._provider}")
 
-    async def _call_openai(self, user_message: str) -> dict:
+    async def _call_openai(self, user_message: str, valid_ids: set[str]) -> dict:
         """OpenAI Function Calling."""
         response = await self._client.chat.completions.create(
             model=self._model,
@@ -131,37 +152,78 @@ class OrchestratorLLM:
         )
 
         message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
+
+        logger.debug(
+            "orchestrator_llm_response",
+            has_tool_calls=bool(message.tool_calls),
+            finish_reason=finish_reason,
+            model=self._model,
+            content_preview=(message.content or "")[:100],
+        )
+
         if not message.tool_calls:
+            # MLX 서버가 tool_choice를 무시하는 경우 텍스트에서 추출 시도
+            extracted = _extract_profile_from_text(message.content, valid_ids)
+            if extracted:
+                logger.info(
+                    "orchestrator_text_extraction",
+                    extracted_profile=extracted,
+                )
+                return {
+                    "function": "no_tool_call",
+                    "text": message.content or "",
+                    "profile_id": extracted,
+                    "reason": "텍스트에서 프로필 ID 추출",
+                }
             return {
-                "function": "general_response",
-                "message": message.content or "무엇을 도와드릴까요?",
+                "function": "no_tool_call",
+                "text": message.content or "",
+                "profile_id": "",
+                "reason": "tool_calls 없음, 텍스트 추출 실패",
             }
 
         tool_call = message.tool_calls[0]
         fn_name = tool_call.function.name
-        args = json.loads(tool_call.function.arguments)
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "orchestrator_json_parse_error",
+                raw=tool_call.function.arguments[:200],
+                error=str(e),
+            )
+            return {
+                "function": "no_tool_call",
+                "text": tool_call.function.arguments or "",
+                "profile_id": "",
+                "reason": f"JSON 파싱 실패: {e}",
+            }
 
         if fn_name == "select_profile":
             return {
                 "function": "select_profile",
-                "profile_id": args["profile_id"],
+                "profile_id": args.get("profile_id", ""),
                 "reason": args.get("reason", ""),
             }
-        elif fn_name == "general_response":
-            return {
-                "function": "general_response",
-                "message": args.get("message", ""),
-            }
 
-        return {"function": "general_response", "message": "무엇을 도와드릴까요?"}
+        # 예상치 못한 function name
+        return {
+            "function": "no_tool_call",
+            "text": str(args),
+            "profile_id": "",
+            "reason": f"예상치 못한 function: {fn_name}",
+        }
 
-    async def _call_anthropic(self, user_message: str) -> dict:
+    async def _call_anthropic(self, user_message: str, valid_ids: set[str]) -> dict:
         """Anthropic Tool Use."""
-        # Anthropic 형식의 tool 정의
         anthropic_tools = [
             {
                 "name": "select_profile",
-                "description": "사용자 질문에 가장 적합한 프로필을 선택한다.",
+                "description": (
+                    "사용자 질문에 가장 적합한 프로필을 선택한다. "
+                    "인사/잡담도 general-chat으로 라우팅한다."
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -175,20 +237,6 @@ class OrchestratorLLM:
                         },
                     },
                     "required": ["profile_id", "reason"],
-                },
-            },
-            {
-                "name": "general_response",
-                "description": "인사, 잡담 등 프로필이 필요 없는 질문에 직접 응답한다.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "사용자에게 보낼 응답 메시지",
-                        },
-                    },
-                    "required": ["message"],
                 },
             },
         ]
@@ -207,16 +255,23 @@ class OrchestratorLLM:
                 if block.name == "select_profile":
                     return {
                         "function": "select_profile",
-                        "profile_id": block.input["profile_id"],
+                        "profile_id": block.input.get("profile_id", ""),
                         "reason": block.input.get("reason", ""),
                     }
-                elif block.name == "general_response":
-                    return {
-                        "function": "general_response",
-                        "message": block.input.get("message", ""),
-                    }
 
-        return {"function": "general_response", "message": "무엇을 도와드릴까요?"}
+        # Anthropic이 tool을 호출하지 않은 경우 텍스트에서 추출
+        text_content = ""
+        for block in response.content:
+            if block.type == "text":
+                text_content += block.text
+
+        extracted = _extract_profile_from_text(text_content, valid_ids)
+        return {
+            "function": "no_tool_call",
+            "text": text_content,
+            "profile_id": extracted or "",
+            "reason": "Anthropic tool 미호출",
+        }
 
     async def close(self) -> None:
         """리소스 정리."""

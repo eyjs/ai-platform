@@ -1,15 +1,20 @@
-"""Orchestrator LLM 프롬프트 + Function 정의."""
+"""Orchestrator LLM 프롬프트 + Function 정의.
+
+Tier 3 전용: Tier 1(패턴), Tier 2(키워드 스코어링)에서 해결되지 않은
+질문만 LLM에 도달한다. general_response tool은 제거되었으며,
+반드시 프로필을 선택해야 한다.
+"""
 
 from __future__ import annotations
 
 SYSTEM_PROMPT = """\
 당신은 사용자 질문을 적절한 전문 에이전트(프로필)에게 라우팅하는 오케스트레이터입니다.
 
-사용 가능한 프로필 목록이 주어지면, 사용자의 질문 의도를 분석하여:
-1. 가장 적합한 프로필을 선택하거나
-2. 인사/잡담 등 프로필이 필요 없는 경우 직접 응답합니다.
-
-대화 이력을 참고하여 맥락을 유지하세요.
+규칙:
+1. 반드시 select_profile 도구를 호출하여 프로필을 선택하세요.
+2. 인사, 잡담, 일반 대화도 general-chat 또는 general-assistant 프로필로 보내세요.
+3. 어떤 질문이든 가장 관련성 높은 프로필을 선택하세요. "해당 없음"은 불가합니다.
+4. 대화 이력을 참고하여 맥락을 유지하세요.
 """
 
 PROFILE_LIST_TEMPLATE = """\
@@ -51,13 +56,16 @@ def format_history(turns: list[dict], max_turns: int = 5) -> str:
     return "\n".join(lines)
 
 
-# OpenAI Function Calling 도구 정의
+# OpenAI Function Calling 도구 정의 — select_profile만 제공
 ORCHESTRATOR_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "select_profile",
-            "description": "사용자 질문에 가장 적합한 프로필을 선택한다.",
+            "description": (
+                "사용자 질문에 가장 적합한 프로필을 선택한다. "
+                "인사/잡담도 general-chat으로 라우팅한다."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -71,23 +79,6 @@ ORCHESTRATOR_TOOLS = [
                     },
                 },
                 "required": ["profile_id", "reason"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "general_response",
-            "description": "인사, 잡담 등 프로필이 필요 없는 질문에 직접 응답한다.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "사용자에게 보낼 응답 메시지",
-                    },
-                },
-                "required": ["message"],
             },
         },
     },

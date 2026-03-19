@@ -22,6 +22,14 @@ def _make_profile(pid, name="test", description="", domain_scopes=None, intent_h
     return p
 
 
+def _make_hint(name, patterns, description=""):
+    h = MagicMock()
+    h.name = name
+    h.patterns = patterns
+    h.description = description
+    return h
+
+
 @pytest.fixture
 def deps():
     llm = AsyncMock()
@@ -78,6 +86,48 @@ async def test_route_continuation_pronoun(orchestrator, deps):
 
 
 @pytest.mark.asyncio
+async def test_route_continuation_short_question(orchestrator, deps):
+    """짧은 후속 질문 (<15자)은 현재 프로필을 유지한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [_make_profile("food-recipe")]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {"current_profile_id": "food-recipe"}
+    sm.get_turns.return_value = [{"role": "user", "content": "김치찌개 레시피"}]
+
+    result = await orchestrator.route("칼로리 얼마야?", "sess-1", FakeUserCtx())
+
+    assert result.is_continuation
+    assert result.selected_profile_id == "food-recipe"
+
+
+@pytest.mark.asyncio
+async def test_route_continuation_past_reference(orchestrator, deps):
+    """'아까' + 키워드로 과거 프로필을 참조한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("food-recipe", domain_scopes=["요리", "레시피"],
+                      intent_hints=[_make_hint("RECIPE", ["레시피", "요리법"])]),
+        _make_profile("insurance-qa", domain_scopes=["자동차보험"]),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {
+        "current_profile_id": "insurance-qa",
+        "profile_history": [
+            {"profile_id": "food-recipe", "switched_at": 1000},
+            {"profile_id": "insurance-qa", "switched_at": 2000},
+        ],
+    }
+    sm.get_turns.return_value = [{"role": "user", "content": "보험료 알려줘"}]
+
+    result = await orchestrator.route("아까 레시피에서 두부 넣어도 돼?", "sess-1", FakeUserCtx())
+
+    assert result.selected_profile_id == "food-recipe"
+    llm.select_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_route_resume_workflow(orchestrator, deps):
     """워크플로우 재개 키워드를 감지한다."""
     llm, ps, sm, we, ts = deps
@@ -103,13 +153,75 @@ async def test_route_resume_workflow(orchestrator, deps):
 
 
 @pytest.mark.asyncio
-async def test_route_llm_select_profile(orchestrator, deps):
-    """LLM이 프로필을 선택한다."""
+async def test_route_tier1_keyword_match(orchestrator, deps):
+    """Tier 1: intent_hints 키워드로 LLM 없이 프로필을 선택한다."""
     llm, ps, sm, we, ts = deps
 
     ps.list_all.return_value = [
-        _make_profile("insurance-qa", name="보험 Q&A"),
-        _make_profile("fee-calc", name="수수료 계산"),
+        _make_profile("food-recipe", name="요리",
+                      intent_hints=[_make_hint("RECIPE", ["레시피", "만드는 법"])]),
+        _make_profile("insurance-qa", name="보험"),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {}
+    sm.get_turns.return_value = []
+
+    result = await orchestrator.route("김치찌개 레시피 알려줘", "sess-1", FakeUserCtx())
+
+    assert result.selected_profile_id == "food-recipe"
+    assert "Tier 1" in result.reason
+    llm.select_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_route_tier1_greeting(orchestrator, deps):
+    """Tier 1: 인사를 general-chat으로 라우팅한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("insurance-qa", name="보험"),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {}
+    sm.get_turns.return_value = []
+
+    result = await orchestrator.route("안녕하세요", "sess-1", FakeUserCtx())
+
+    assert result.selected_profile_id == "general-chat"
+    assert "Tier 1" in result.reason
+    llm.select_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_route_tier2_domain_scope(orchestrator, deps):
+    """Tier 2: domain_scopes 키워드로 프로필을 선택한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("insurance-qa", name="보험",
+                      domain_scopes=["자동차보험", "실손보험"]),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {}
+    sm.get_turns.return_value = []
+
+    result = await orchestrator.route("자동차보험 보장 내용이 뭐야?", "sess-1", FakeUserCtx())
+
+    assert result.selected_profile_id == "insurance-qa"
+    assert "Tier" in result.reason
+    llm.select_profile.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_route_tier3_llm_fallback(orchestrator, deps):
+    """Tier 3: 키워드 매칭 실패 시 LLM으로 폴백한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("insurance-qa", name="보험"),
     ]
     ts.get_allowed_profiles.return_value = []
     sm.get_orchestrator_metadata.return_value = {}
@@ -121,32 +233,36 @@ async def test_route_llm_select_profile(orchestrator, deps):
         "reason": "보험 관련 질문",
     }
 
-    result = await orchestrator.route("삼성 종신보험 보장 내용 알려줘", "sess-1", FakeUserCtx())
+    result = await orchestrator.route("내 건강이 걱정되는데 어떤 상품이 좋을까", "sess-1", FakeUserCtx())
 
     assert result.selected_profile_id == "insurance-qa"
-    assert not result.is_general_response
+    assert "Tier 3" in result.reason
     llm.select_profile.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_route_llm_general_response(orchestrator, deps):
-    """LLM이 일반 응답을 선택한다."""
+async def test_route_tier3_no_tool_call_fallback(orchestrator, deps):
+    """Tier 3: tool_calls 없으면 텍스트 추출 또는 폴백한다."""
     llm, ps, sm, we, ts = deps
 
-    ps.list_all.return_value = [_make_profile("insurance-qa")]
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("food-recipe", name="요리"),
+    ]
     ts.get_allowed_profiles.return_value = []
     sm.get_orchestrator_metadata.return_value = {}
     sm.get_turns.return_value = []
 
     llm.select_profile.return_value = {
-        "function": "general_response",
-        "message": "안녕하세요!",
+        "function": "no_tool_call",
+        "text": "food-recipe 프로필이 적합합니다",
+        "profile_id": "food-recipe",
+        "reason": "텍스트에서 추출",
     }
 
-    result = await orchestrator.route("안녕하세요", "sess-1", FakeUserCtx())
+    result = await orchestrator.route("뭔가 맛있는 거 먹고 싶어", "sess-1", FakeUserCtx())
 
-    assert result.is_general_response
-    assert result.general_message == "안녕하세요!"
+    assert result.selected_profile_id == "food-recipe"
 
 
 @pytest.mark.asyncio
@@ -165,7 +281,7 @@ async def test_route_no_profiles(orchestrator, deps):
 
 @pytest.mark.asyncio
 async def test_route_llm_error_fallback(orchestrator, deps):
-    """LLM 오류 시 첫 번째 프로필로 폴백한다."""
+    """LLM 오류 시 현재 프로필 -> 첫 번째 프로필로 폴백한다."""
     llm, ps, sm, we, ts = deps
 
     ps.list_all.return_value = [_make_profile("fallback-qa")]
