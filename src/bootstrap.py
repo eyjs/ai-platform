@@ -189,12 +189,17 @@ async def create_app_state(settings: Settings) -> AppState:
     orchestrator_llm = None
     if settings.orchestrator_enabled:
         api_key = settings.orchestrator_api_key or settings.openai_api_key
-        if api_key:
+        # MLX/Ollama는 API Key 불필요
+        needs_key = settings.orchestrator_provider in ("openai", "anthropic")
+        if not needs_key or api_key:
+            server_url = settings.orchestrator_server_url or settings.router_llm_server_url
             orchestrator_llm = OrchestratorLLM(
                 provider=settings.orchestrator_provider,
                 model=settings.orchestrator_model,
                 api_key=api_key,
                 timeout=settings.orchestrator_timeout,
+                server_url=server_url,
+                ollama_host=settings.ollama_host,
             )
             await orchestrator_llm.initialize()
             orchestrator = MasterOrchestrator(

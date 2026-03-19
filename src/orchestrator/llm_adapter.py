@@ -23,31 +23,51 @@ logger = get_logger(__name__)
 class OrchestratorLLM:
     """오케스트레이터 전용 LLM 어댑터.
 
-    OpenAI API의 Function Calling을 사용하여 프로필 선택 또는 일반 응답을 결정한다.
+    OpenAI 호환 API의 Function Calling을 사용하여 프로필 선택 또는 일반 응답을 결정한다.
+    MLX, Ollama, OpenAI, Anthropic을 지원한다.
     """
 
     def __init__(
         self,
-        provider: str = "openai",
-        model: str = "gpt-4o",
+        provider: str = "mlx",
+        model: str = "mlx-community/Qwen2.5-7B-Instruct-4bit",
         api_key: str = "",
-        timeout: float = 10.0,
+        timeout: float = 30.0,
+        server_url: str = "",
+        ollama_host: str = "http://localhost:11434",
     ):
         self._provider = provider
         self._model = model
         self._api_key = api_key
         self._timeout = timeout
+        self._server_url = server_url
+        self._ollama_host = ollama_host
         self._client: Any = None
 
     async def initialize(self) -> None:
         """LLM 클라이언트를 초기화한다."""
-        if self._provider == "openai":
+        if self._provider in ("openai", "ollama", "mlx"):
             try:
                 from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    api_key=self._api_key,
-                    timeout=self._timeout,
-                )
+
+                if self._provider == "mlx":
+                    base_url = f"{self._server_url}/v1" if self._server_url else None
+                    self._client = AsyncOpenAI(
+                        base_url=base_url,
+                        api_key="mlx",
+                        timeout=self._timeout,
+                    )
+                elif self._provider == "ollama":
+                    self._client = AsyncOpenAI(
+                        base_url=f"{self._ollama_host}/v1",
+                        api_key="ollama",
+                        timeout=self._timeout,
+                    )
+                else:
+                    self._client = AsyncOpenAI(
+                        api_key=self._api_key,
+                        timeout=self._timeout,
+                    )
             except ImportError:
                 logger.warning("openai 패키지 미설치, orchestrator LLM 비활성")
         elif self._provider == "anthropic":
@@ -86,7 +106,7 @@ class OrchestratorLLM:
             question=question,
         )
 
-        if self._provider == "openai":
+        if self._provider in ("openai", "ollama", "mlx"):
             return await self._call_openai(user_message)
         elif self._provider == "anthropic":
             return await self._call_anthropic(user_message)

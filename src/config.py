@@ -89,11 +89,12 @@ class Settings(BaseSettings):
     kms_webhook_secret: str = ""       # Webhook HMAC-SHA256 비밀키
 
     # 오케스트레이터 (Master Router)
-    orchestrator_model: str = "gpt-4o"
-    orchestrator_provider: str = "openai"  # openai | anthropic
+    orchestrator_model: str = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+    orchestrator_provider: str = "mlx"  # mlx | ollama | openai | anthropic
+    orchestrator_server_url: str = ""  # MLX 서버 URL (미설정 시 router_llm_server_url 사용)
     orchestrator_api_key: str = ""  # 별도 API Key (미설정 시 openai_api_key 사용)
     orchestrator_enabled: bool = True  # 글로벌 킬 스위치
-    orchestrator_timeout: float = 10.0  # 프로필 선택 타임아웃
+    orchestrator_timeout: float = 30.0  # 프로필 선택 타임아웃 (로컬 LLM은 느림)
 
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
     cors_origins: list[str] = []
