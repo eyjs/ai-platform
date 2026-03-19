@@ -19,6 +19,7 @@ from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
 from src.gateway.admin_router import admin_router
 from src.gateway.router import APP_VERSION, gateway_router
+from src.gateway.webhook_router import webhook_router
 from src.observability.logging import configure_logging, get_logger
 
 # 로깅 설정: Docker/프로덕션에서는 JSON, 로컬 개발에서는 사람이 읽기 쉬운 포맷
@@ -81,6 +82,7 @@ app.add_middleware(
 
 app.include_router(gateway_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(webhook_router, prefix="/api")
 
 
 @app.exception_handler(AppError)

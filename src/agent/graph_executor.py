@@ -63,6 +63,14 @@ class GraphExecutor:
         trace: Optional[RequestTrace] = None,
     ) -> AgentResponse:
         """ExecutionPlan 기반 실행."""
+        # Orchestrator 직접 응답 (인사/잡담)
+        if plan.direct_answer is not None:
+            return AgentResponse(
+                answer=plan.direct_answer,
+                sources=[],
+                trace=TraceInfo(mode="orchestrator"),
+            )
+
         start_time = time.time()
 
         if plan.mode == AgentMode.WORKFLOW:
@@ -88,6 +96,12 @@ class GraphExecutor:
         trace: Optional[RequestTrace] = None,
     ) -> AsyncIterator[dict]:
         """SSE 스트리밍 실행."""
+        # Orchestrator 직접 응답 (인사/잡담)
+        if plan.direct_answer is not None:
+            yield {"type": "token", "data": plan.direct_answer}
+            yield {"type": "done", "data": {"tools_called": [], "sources": []}}
+            return
+
         start_time = time.time()
 
         if plan.mode == AgentMode.WORKFLOW:

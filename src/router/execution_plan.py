@@ -49,3 +49,4 @@ class ExecutionPlan:
     response_policy: str = ResponsePolicy.BALANCED
     max_tool_calls: int = 5
     agent_timeout_seconds: int = 30
+    direct_answer: str | None = None  # Orchestrator 직접 응답 (인사/잡담)

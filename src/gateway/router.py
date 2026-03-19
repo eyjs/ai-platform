@@ -22,6 +22,7 @@ from src.gateway.models import (
     WorkflowAdvanceRequest, WorkflowStartRequest,
 )
 from src.observability.logging import RequestContext, get_logger, request_context
+from src.orchestrator.models import OrchestratorResult
 from src.router.execution_plan import ExecutionPlan
 from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
@@ -92,37 +93,114 @@ async def _prepare_chat(
     request: Request,
     user_ctx: UserContext,
 ) -> _ChatSetup:
-    """chat/chat_stream 공통 로직: 인증 → Profile 로딩 → 세션 → history → Router."""
+    """chat/chat_stream 공통 로직: 인증 → Orchestrator/Profile 로딩 → 세션 → history → Router."""
     state = _get_app_state(request)
     request_id = str(uuid.uuid4())
     session_id = req.session_id or str(uuid.uuid4())
 
+    # Orchestrator 분기: chatbot_id가 없으면 자동 라우팅
+    chatbot_id = req.chatbot_id
+    orchestrator_result: Optional[OrchestratorResult] = None
+
+    if chatbot_id is None and hasattr(state, "orchestrator") and state.orchestrator:
+        orchestrator_result = await state.orchestrator.route(
+            question=req.question,
+            session_id=session_id,
+            user_ctx=user_ctx,
+        )
+
+        if orchestrator_result.is_general_response:
+            # 인사/잡담 → 직접 응답 (프로필 없이)
+            ctx_token = request_context.set(RequestContext(
+                request_id=request_id,
+                session_id=session_id,
+                profile_id="orchestrator",
+                user_id=user_ctx.user_id,
+            ))
+            try:
+                plan = ExecutionPlan(
+                    mode=AgentMode.DETERMINISTIC,
+                    scope=SearchScope(),
+                    direct_answer=orchestrator_result.general_message,
+                )
+                context = AgentContext(
+                    session_id=session_id,
+                    user_id=user_ctx.user_id,
+                    user_role=user_ctx.user_role,
+                    conversation_history=[],
+                )
+                trace = RequestTrace(request_id=request_id)
+                return _ChatSetup(
+                    session_id=session_id,
+                    plan=plan,
+                    context=context,
+                    trace=trace,
+                    ctx_token=ctx_token,
+                )
+            except Exception:
+                request_context.reset(ctx_token)
+                raise
+
+        chatbot_id = orchestrator_result.selected_profile_id
+
+    # chatbot_id가 여전히 없으면 에러
+    if not chatbot_id:
+        raise HTTPException(
+            status_code=400,
+            detail="chatbot_id가 필요합니다. orchestrator가 비활성 상태입니다.",
+        )
+
     ctx_token = request_context.set(RequestContext(
         request_id=request_id,
         session_id=session_id,
-        profile_id=req.chatbot_id,
+        profile_id=chatbot_id,
         user_id=user_ctx.user_id,
     ))
 
     try:
         # 프로필 접근 권한 확인
         try:
-            await state.auth_service.check_profile_access(user_ctx, req.chatbot_id)
+            await state.auth_service.check_profile_access(user_ctx, chatbot_id)
         except AuthError as e:
             raise HTTPException(status_code=403, detail=str(e))
 
         logger.info(
             "chat_request",
             question=req.question[:100],
-            chatbot_id=req.chatbot_id,
+            chatbot_id=chatbot_id,
+            orchestrated=orchestrator_result is not None,
             question_len=len(req.question),
             user_id=user_ctx.user_id,
             user_role=user_ctx.user_role,
         )
 
-        profile = await state.profile_store.get(req.chatbot_id)
+        profile = await state.profile_store.get(chatbot_id)
         if not profile:
-            raise HTTPException(status_code=404, detail=f"Profile not found: {req.chatbot_id}")
+            raise HTTPException(status_code=404, detail=f"Profile not found: {chatbot_id}")
+
+        # 오케스트레이터 세션 메타 업데이트
+        if orchestrator_result:
+            await state.session_memory.create_session(
+                session_id=session_id,
+                profile_id=chatbot_id,
+                user_id=user_ctx.user_id,
+                ttl_seconds=profile.memory_ttl_seconds,
+            )
+            await state.session_memory.update_current_profile(session_id, chatbot_id)
+
+        # 워크플로우 재개 처리
+        if orchestrator_result and orchestrator_result.should_resume_workflow:
+            paused = orchestrator_result.paused_state
+            state.workflow_engine.resume(
+                paused["workflow_id"],
+                session_id,
+                paused["step_id"],
+                paused["collected"],
+            )
+            # paused_workflow 메타 클리어
+            meta = await state.session_memory.get_orchestrator_metadata(session_id)
+            meta.pop("paused_workflow", None)
+            await state.session_memory.save_orchestrator_metadata(session_id, meta)
 
         # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
         active_wf = state.workflow_engine.get_session(session_id)
@@ -140,12 +218,13 @@ async def _prepare_chat(
             )
             history = []
         else:
-            await state.session_memory.create_session(
-                session_id=session_id,
-                profile_id=profile.id,
-                user_id=user_ctx.user_id,
-                ttl_seconds=profile.memory_ttl_seconds,
-            )
+            if not orchestrator_result:
+                await state.session_memory.create_session(
+                    session_id=session_id,
+                    profile_id=profile.id,
+                    user_id=user_ctx.user_id,
+                    ttl_seconds=profile.memory_ttl_seconds,
+                )
             history = await state.session_memory.get_turns(session_id, max_turns=10)
 
             tools = state.tool_registry.resolve(profile.tool_names)

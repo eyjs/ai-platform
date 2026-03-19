@@ -116,6 +116,7 @@ async def test_api_key_valid(auth_service, mock_pool):
         "allowed_origins": ["https://customer.com"],
         "rate_limit_per_min": 100,
         "expires_at": None,
+        "tenant_id": None,
     }
 
     ctx = await auth_service.authenticate(api_key=raw_key)
@@ -148,6 +149,7 @@ async def test_api_key_expired(auth_service, mock_pool):
         "allowed_origins": [],
         "rate_limit_per_min": 60,
         "expires_at": datetime.now(timezone.utc) - timedelta(days=1),
+        "tenant_id": None,
     }
     with pytest.raises(AuthError, match="만료된 API Key"):
         await auth_service.authenticate(api_key="some_key")

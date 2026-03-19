@@ -111,6 +111,25 @@ class WorkflowUpdateRequest(BaseModel):
     first_step: str | None = None
 
 
+class TenantCreateRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-z0-9-]+$")
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    orchestrator_enabled: bool = True
+    default_chatbot_id: str | None = None
+
+
+class TenantUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    orchestrator_enabled: bool | None = None
+    default_chatbot_id: str | None = None
+
+
+class TenantProfilesRequest(BaseModel):
+    profile_ids: list[str]
+
+
 # --- Helpers ---
 
 
@@ -353,6 +372,170 @@ async def delete_workflow(workflow_id: str, request: Request):
 
     logger.info("admin_workflow_deleted", workflow_id=workflow_id, by=user_ctx.user_id)
     return {"status": "deleted", "id": workflow_id}
+
+
+# --- Tenant CRUD ---
+
+
+@admin_router.get("/tenants")
+async def list_tenants(request: Request):
+    """모든 활성 테넌트 목록."""
+    await _require_admin(request)
+    state = _get_app_state(request)
+    tenants = await state.tenant_service.list_all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "orchestrator_enabled": t.orchestrator_enabled,
+            "default_chatbot_id": t.default_chatbot_id,
+            "is_active": t.is_active,
+        }
+        for t in tenants
+    ]
+
+
+@admin_router.get("/tenants/{tenant_id}")
+async def get_tenant(tenant_id: str, request: Request):
+    """테넌트 상세 조회."""
+    await _require_admin(request)
+    state = _get_app_state(request)
+    tenant = await state.tenant_service.get(tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"테넌트를 찾을 수 없습니다: {tenant_id}")
+
+    profiles = await state.tenant_service.get_allowed_profiles(tenant_id)
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "orchestrator_enabled": tenant.orchestrator_enabled,
+        "default_chatbot_id": tenant.default_chatbot_id,
+        "is_active": tenant.is_active,
+        "profiles": profiles,
+    }
+
+
+@admin_router.post("/tenants", status_code=201)
+async def create_tenant(req: TenantCreateRequest, request: Request):
+    """테넌트 생성."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    existing = await state.tenant_service.get(req.id)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 테넌트입니다: {req.id}")
+
+    tenant = await state.tenant_service.create(
+        tenant_id=req.id,
+        name=req.name,
+        description=req.description,
+        orchestrator_enabled=req.orchestrator_enabled,
+        default_chatbot_id=req.default_chatbot_id,
+    )
+    logger.info("admin_tenant_created", tenant_id=req.id, by=user_ctx.user_id)
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "orchestrator_enabled": tenant.orchestrator_enabled,
+        "default_chatbot_id": tenant.default_chatbot_id,
+    }
+
+
+@admin_router.put("/tenants/{tenant_id}")
+async def update_tenant(tenant_id: str, req: TenantUpdateRequest, request: Request):
+    """테넌트 업데이트 (부분 수정)."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    existing = await state.tenant_service.get(tenant_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"테넌트를 찾을 수 없습니다: {tenant_id}")
+
+    updated = await state.tenant_service.update(
+        tenant_id=tenant_id,
+        name=req.name,
+        description=req.description,
+        orchestrator_enabled=req.orchestrator_enabled,
+        default_chatbot_id=req.default_chatbot_id,
+    )
+    if not updated:
+        raise HTTPException(status_code=400, detail="변경 사항이 없습니다")
+
+    logger.info("admin_tenant_updated", tenant_id=tenant_id, by=user_ctx.user_id)
+    return {"status": "updated", "id": tenant_id}
+
+
+@admin_router.delete("/tenants/{tenant_id}")
+async def delete_tenant(tenant_id: str, request: Request):
+    """테넌트 비활성화 (soft delete)."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    deleted = await state.tenant_service.deactivate(tenant_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"테넌트를 찾을 수 없습니다: {tenant_id}")
+
+    logger.info("admin_tenant_deleted", tenant_id=tenant_id, by=user_ctx.user_id)
+    return {"status": "deleted", "id": tenant_id}
+
+
+@admin_router.put("/tenants/{tenant_id}/profiles")
+async def set_tenant_profiles(tenant_id: str, req: TenantProfilesRequest, request: Request):
+    """테넌트 프로필 할당 (전체 교체)."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    existing = await state.tenant_service.get(tenant_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"테넌트를 찾을 수 없습니다: {tenant_id}")
+
+    await state.tenant_service.set_profiles(tenant_id, req.profile_ids)
+    logger.info(
+        "admin_tenant_profiles_set",
+        tenant_id=tenant_id,
+        count=len(req.profile_ids),
+        by=user_ctx.user_id,
+    )
+    return {"status": "updated", "tenant_id": tenant_id, "profiles": req.profile_ids}
+
+
+@admin_router.post("/tenants/{tenant_id}/profiles/{profile_id}", status_code=201)
+async def add_tenant_profile(tenant_id: str, profile_id: str, request: Request):
+    """테넌트에 프로필 추가."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    existing = await state.tenant_service.get(tenant_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"테넌트를 찾을 수 없습니다: {tenant_id}")
+
+    await state.tenant_service.add_profile(tenant_id, profile_id)
+    logger.info(
+        "admin_tenant_profile_added",
+        tenant_id=tenant_id,
+        profile_id=profile_id,
+        by=user_ctx.user_id,
+    )
+    return {"status": "added", "tenant_id": tenant_id, "profile_id": profile_id}
+
+
+@admin_router.delete("/tenants/{tenant_id}/profiles/{profile_id}")
+async def remove_tenant_profile(tenant_id: str, profile_id: str, request: Request):
+    """테넌트에서 프로필 제거."""
+    user_ctx = await _require_admin(request)
+    state = _get_app_state(request)
+
+    removed = await state.tenant_service.remove_profile(tenant_id, profile_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="해당 프로필이 테넌트에 없습니다")
+
+    logger.info(
+        "admin_tenant_profile_removed",
+        tenant_id=tenant_id,
+        profile_id=profile_id,
+        by=user_ctx.user_id,
+    )
+    return {"status": "removed", "tenant_id": tenant_id, "profile_id": profile_id}
 
 
 # --- Cache Management ---

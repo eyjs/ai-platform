@@ -21,7 +21,7 @@ class ChatRequest(BaseModel):
     """챗봇 요청 모델."""
 
     question: str
-    chatbot_id: str  # = profile_id
+    chatbot_id: str | None = None  # None이면 orchestrator 모드
     session_id: str | None = None
 
     @field_validator("question")
@@ -88,3 +88,4 @@ class UserContext:
     allowed_profiles: list[str] = field(default_factory=list)
     allowed_origins: list[str] = field(default_factory=list)
     rate_limit_per_min: int = 60
+    tenant_id: str | None = None

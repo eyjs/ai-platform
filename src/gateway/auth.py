@@ -114,7 +114,8 @@ class AuthService:
         row = await self._pool.fetchrow(
             """
             SELECT user_id, user_role, security_level_max,
-                   allowed_profiles, allowed_origins, rate_limit_per_min, expires_at
+                   allowed_profiles, allowed_origins, rate_limit_per_min,
+                   expires_at, tenant_id
             FROM api_keys
             WHERE key_hash = $1 AND is_active = TRUE
             """,
@@ -140,6 +141,7 @@ class AuthService:
             allowed_profiles=row["allowed_profiles"] or [],
             allowed_origins=row["allowed_origins"] or [],
             rate_limit_per_min=row["rate_limit_per_min"] or 60,
+            tenant_id=row["tenant_id"],
         )
 
     async def check_profile_access(

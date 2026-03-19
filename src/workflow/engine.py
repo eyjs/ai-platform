@@ -219,6 +219,46 @@ class WorkflowEngine:
             return True
         return False
 
+    def resume(
+        self,
+        workflow_id: str,
+        session_id: str,
+        step_id: str,
+        collected: dict,
+    ) -> StepResult:
+        """일시 중지된 워크플로우를 재개한다."""
+        definition = self._store.get(workflow_id)
+        if not definition:
+            raise GatewayError(
+                f"워크플로우를 찾을 수 없습니다: {workflow_id}",
+                error_code="ERR_WORKFLOW_NOT_FOUND",
+            )
+
+        step = definition.get_step(step_id)
+        if not step:
+            raise GatewayError(
+                f"스텝을 찾을 수 없습니다: {step_id}",
+                error_code="ERR_WORKFLOW_STEP_MISSING",
+            )
+
+        session = WorkflowSession(
+            workflow_id=workflow_id,
+            current_step_id=step_id,
+            collected=dict(collected),
+        )
+        self._sessions[session_id] = session
+
+        logger.info(
+            "workflow_resume",
+            layer="WORKFLOW",
+            workflow_id=workflow_id,
+            session_id=session_id,
+            step_id=step_id,
+            collected_keys=list(collected.keys()),
+        )
+
+        return self._process_current_step(definition, session)
+
     def _check_escape(
         self,
         user_input: str,

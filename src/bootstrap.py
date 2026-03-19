@@ -29,6 +29,9 @@ from src.safety.response_policy import ResponsePolicyGuard
 from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
+from src.orchestrator.llm_adapter import OrchestratorLLM
+from src.orchestrator.orchestrator import MasterOrchestrator
+from src.orchestrator.tenant import TenantService
 from src.workflow.engine import WorkflowEngine
 from src.workflow.store import WorkflowStore
 
@@ -55,6 +58,8 @@ class AppState:
     provider_factory: ProviderFactory
     job_queue: JobQueue
     rate_limiter: PGRateLimiter
+    tenant_service: Optional[TenantService] = None
+    orchestrator: Optional[MasterOrchestrator] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -176,7 +181,40 @@ async def create_app_state(settings: Settings) -> AppState:
     rate_limiter = PGRateLimiter(pool)
     logger.info("rate_limiter_initialized")
 
-    providers = [embedding_provider, router_llm, main_llm, reranker]
+    # 14. TenantService
+    tenant_service = TenantService(pool)
+
+    # 15. MasterOrchestrator (최상위 모델)
+    orchestrator = None
+    orchestrator_llm = None
+    if settings.orchestrator_enabled:
+        api_key = settings.orchestrator_api_key or settings.openai_api_key
+        if api_key:
+            orchestrator_llm = OrchestratorLLM(
+                provider=settings.orchestrator_provider,
+                model=settings.orchestrator_model,
+                api_key=api_key,
+                timeout=settings.orchestrator_timeout,
+            )
+            await orchestrator_llm.initialize()
+            orchestrator = MasterOrchestrator(
+                llm=orchestrator_llm,
+                profile_store=profile_store,
+                session_memory=session_memory,
+                workflow_engine=workflow_engine,
+                tenant_service=tenant_service,
+            )
+            logger.info(
+                "orchestrator_initialized",
+                provider=settings.orchestrator_provider,
+                model=settings.orchestrator_model,
+            )
+        else:
+            logger.info("orchestrator_skipped", reason="API key 미설정")
+    else:
+        logger.info("orchestrator_disabled")
+
+    providers = [embedding_provider, router_llm, main_llm, reranker, orchestrator_llm]
 
     return AppState(
         settings=settings,
@@ -195,6 +233,8 @@ async def create_app_state(settings: Settings) -> AppState:
         provider_factory=provider_factory,
         job_queue=job_queue,
         rate_limiter=rate_limiter,
+        tenant_service=tenant_service,
+        orchestrator=orchestrator,
         providers=providers,
     )
 
