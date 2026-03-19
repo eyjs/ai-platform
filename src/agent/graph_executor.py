@@ -160,7 +160,17 @@ class GraphExecutor:
             "completed": step_result.completed,
             "escaped": step_result.escaped,
         }}
-        yield {"type": "token", "data": step_result.bot_message}
+        # 선택지가 있으면 메시지에 번호 목록 추가
+        message = step_result.bot_message
+        if step_result.options:
+            options_text = "\n".join(
+                f"{i+1}. {opt}" for i, opt in enumerate(step_result.options)
+            )
+            message = f"{message}\n\n{options_text}"
+        # 워크플로우 진행 중이면 나가기 안내 추가
+        if not step_result.completed and not step_result.escaped:
+            message += '\n\n_(\"나가기\" 또는 \"취소\"를 입력하면 워크플로우를 종료합니다)_'
+        yield {"type": "token", "data": message}
         yield {"type": "done", "data": {
             "tools_called": [],
             "sources": [],

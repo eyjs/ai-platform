@@ -86,6 +86,8 @@ class _ChatSetup:
     context: AgentContext
     trace: RequestTrace
     ctx_token: object  # contextvars.Token
+    profile_id: str = ""
+    orchestrated: bool = False
 
 
 async def _prepare_chat(
@@ -250,6 +252,8 @@ async def _prepare_chat(
             context=context,
             trace=trace,
             ctx_token=ctx_token,
+            profile_id=chatbot_id,
+            orchestrated=orchestrator_result is not None,
         )
     except Exception:
         request_context.reset(ctx_token)
@@ -354,7 +358,10 @@ async def chat_stream(req: ChatRequest, request: Request):
                 elif event_type == "trace":
                     yield {"event": "trace", "data": json.dumps(event["data"], ensure_ascii=False)}
                 elif event_type == "done":
-                    yield {"event": "done", "data": json.dumps(event["data"], ensure_ascii=False)}
+                    done_data = event["data"]
+                    done_data["profile_id"] = setup.profile_id
+                    done_data["orchestrated"] = setup.orchestrated
+                    yield {"event": "done", "data": json.dumps(done_data, ensure_ascii=False)}
 
             full_answer = "".join(answer_parts)
             await state.session_memory.add_turn(setup.session_id, "user", req.question)

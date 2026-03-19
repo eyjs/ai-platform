@@ -17,6 +17,7 @@ class WorkflowSession:
     workflow_id: str
     current_step_id: str
     collected: dict = field(default_factory=dict)  # save_as → 답변 값
+    step_history: list = field(default_factory=list)  # 이전 스텝 ID 스택 (뒤로가기)
     started_at: float = field(default_factory=time.time)
     completed: bool = False
     retry_count: int = 0  # 현재 스텝 연속 실패 횟수

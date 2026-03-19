@@ -34,6 +34,9 @@ _SESSION_TTL_SECONDS = 3600  # 세션 만료 시간 (1시간)
 # 이탈(escape) 키워드 — escape_policy="allow"일 때 워크플로우 즉시 종료
 _ESCAPE_KEYWORDS = {"취소", "처음으로", "나가기", "중단", "그만", "exit", "cancel", "quit"}
 
+# 뒤로가기 키워드
+_BACK_KEYWORDS = {"뒤로", "이전", "돌아가기", "back", "prev"}
+
 
 @dataclass
 class StepResult:
@@ -138,6 +141,35 @@ class WorkflowEngine:
         if escape_result:
             return escape_result
 
+        # 뒤로가기 감지
+        if user_input.strip().lower() in _BACK_KEYWORDS or any(
+            kw in user_input for kw in _BACK_KEYWORDS
+        ):
+            if session.step_history:
+                prev_step_id = session.step_history.pop()
+                prev_step = definition.get_step(prev_step_id)
+                # 이전 스텝에서 수집한 데이터 제거
+                if prev_step and prev_step.save_as and prev_step.save_as in session.collected:
+                    del session.collected[prev_step.save_as]
+                session.current_step_id = prev_step_id
+                session.retry_count = 0
+                logger.info(
+                    "workflow_back",
+                    layer="WORKFLOW",
+                    session_id=session_id,
+                    from_step=current_step.id,
+                    to_step=prev_step_id,
+                )
+                return self._process_current_step(definition, session)
+            else:
+                return StepResult(
+                    bot_message="첫 번째 단계입니다. 더 이상 뒤로 갈 수 없습니다.",
+                    options=current_step.options,
+                    step_id=current_step.id,
+                    step_type=current_step.type,
+                    collected=dict(session.collected),
+                )
+
         # 입력 검증
         validation_error = _validate_input(current_step, user_input)
         if validation_error:
@@ -204,6 +236,7 @@ class WorkflowEngine:
                 collected=dict(session.collected),
             )
 
+        session.step_history.append(current_step.id)
         session.current_step_id = next_step_id
         return self._process_current_step(definition, session)
 
