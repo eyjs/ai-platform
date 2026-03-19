@@ -18,6 +18,7 @@ from src.infrastructure.providers.factory import ProviderFactory
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import configure_logging, get_logger
 from src.pipeline.ingest import IngestPipeline
+from src.services.kms_sync import KmsSyncService
 
 _json_logs = os.getenv("AIP_LOG_FORMAT", "json") == "json"
 _log_level = os.getenv("AIP_LOG_LEVEL", "INFO")
@@ -59,10 +60,17 @@ async def run_worker() -> None:
         parsing_provider=parsing_provider,
     )
 
-    # 4. Job Queue + Worker
+    # 4. KMS Sync Service
+    kms_sync = KmsSyncService(
+        settings=settings,
+        vector_store=vector_store,
+        ingest_pipeline=ingest_pipeline,
+    )
+
+    # 5. Job Queue + Workers
     job_queue = JobQueue(pool)
 
-    async def handler(payload: dict) -> dict:
+    async def ingest_handler(payload: dict) -> dict:
         # file_bytes는 base64로 전달됨 (API에서 인코딩)
         file_bytes = None
         if payload.get("file_base64"):
@@ -80,15 +88,37 @@ async def run_worker() -> None:
             mime_type=payload.get("mime_type"),
         )
 
-    worker = QueueWorker(
+    async def kms_sync_handler(payload: dict) -> dict:
+        action = payload.get("action", "")
+        document_id = payload.get("document_id", "")
+
+        if action == "sync":
+            return await kms_sync.sync_document(document_id, payload.get("data", {}))
+        elif action == "delete":
+            return await kms_sync.delete_document(document_id)
+        elif action == "lifecycle":
+            return await kms_sync.update_lifecycle(document_id, payload.get("status", ""))
+        else:
+            logger.warning("kms_sync_unknown_action", action=action)
+            return {"status": "ignored", "action": action}
+
+    ingest_worker = QueueWorker(
         queue=job_queue,
         queue_name="ingest",
-        handler=handler,
+        handler=ingest_handler,
         poll_interval=2.0,
         max_concurrent=3,
     )
 
-    # 5. Stale job 주기적 정리
+    kms_sync_worker = QueueWorker(
+        queue=job_queue,
+        queue_name="kms_sync",
+        handler=kms_sync_handler,
+        poll_interval=2.0,
+        max_concurrent=2,
+    )
+
+    # 6. Stale job 주기적 정리
     async def _periodic_cleanup():
         while True:
             await asyncio.sleep(300)
@@ -101,7 +131,7 @@ async def run_worker() -> None:
 
     cleanup_task = asyncio.create_task(_periodic_cleanup())
 
-    # 6. Graceful shutdown
+    # 7. Graceful shutdown
     shutdown_event = asyncio.Event()
 
     def _signal_handler():
@@ -112,20 +142,23 @@ async def run_worker() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
-    # 7. 워커 시작 + 종료 대기
-    worker_task = asyncio.create_task(worker.start())
-    logger.info("worker_ready", queue="ingest", max_concurrent=3, poll_interval=2.0)
+    # 8. 워커 시작 + 종료 대기
+    ingest_task = asyncio.create_task(ingest_worker.start())
+    kms_sync_task = asyncio.create_task(kms_sync_worker.start())
+    logger.info("workers_ready", queues=["ingest", "kms_sync"])
 
     await shutdown_event.wait()
 
-    # 8. 정리
+    # 9. 정리
     logger.info("worker_draining")
-    await worker.stop(timeout=30.0)
-    worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
+    await ingest_worker.stop(timeout=30.0)
+    await kms_sync_worker.stop(timeout=30.0)
+    for task in (ingest_task, kms_sync_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     cleanup_task.cancel()
     try:
