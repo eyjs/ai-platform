@@ -51,9 +51,13 @@ class OrchestratorLLM:
                 from openai import AsyncOpenAI
 
                 if self._provider == "mlx":
-                    base_url = f"{self._server_url}/v1" if self._server_url else None
+                    if not self._server_url:
+                        raise ValueError(
+                            "MLX provider에는 server_url이 필수입니다 "
+                            "(예: http://localhost:8105)"
+                        )
                     self._client = AsyncOpenAI(
-                        base_url=base_url,
+                        base_url=f"{self._server_url}/v1",
                         api_key="mlx",
                         timeout=self._timeout,
                     )
