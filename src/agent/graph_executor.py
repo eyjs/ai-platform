@@ -313,6 +313,8 @@ class GraphExecutor:
             initial_state, stream_mode="updates",
         ):
             for node_name, state_update in chunk.items():
+                if not state_update:
+                    continue
                 if node_name == "execute_tools":
                     tools_called = state_update.get("tools_called", [])
                     search_results = state_update.get("search_results", [])
