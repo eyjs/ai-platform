@@ -40,6 +40,9 @@ class AgentState(TypedDict):
     # 스트리밍 모드 플래그 — True이면 LLM/Guardrail 노드가 바이패스
     is_streaming: bool
 
+    # 그래프 보강
+    graph_enrichment: dict
+
     # 메타데이터
     latency_ms: float
 
@@ -63,5 +66,6 @@ def create_initial_state(
         guardrail_results={},
         sources=[],
         is_streaming=is_streaming,
+        graph_enrichment={},
         latency_ms=0.0,
     )

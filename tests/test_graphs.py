@@ -246,3 +246,48 @@ async def test_streaming_bypass_no_double_llm():
     # answer, sources는 빈 상태 (래퍼에서 직접 처리)
     assert result["answer"] == ""
     assert result["sources"] == []
+
+
+# --- graph_enrich 통합 테스트 ---
+
+
+def test_graph_enrich_node_exists_when_kms_configured():
+    """kms_graph_client + vector_store 전달 시 graph_enrich 노드 포함."""
+    mock_llm = MagicMock()
+    mock_registry = MagicMock()
+    mock_kms = MagicMock()
+    mock_kms.is_configured = True
+    mock_vs = MagicMock()
+
+    graph = build_deterministic_graph(
+        llm=mock_llm,
+        registry=mock_registry,
+        guardrails={},
+        kms_graph_client=mock_kms,
+        vector_store=mock_vs,
+    )
+    node_names = set(graph.nodes.keys())
+    assert "graph_enrich" in node_names
+    assert "execute_tools" in node_names
+    assert "generate_with_context" in node_names
+
+
+def test_backward_compat_no_kms():
+    """kms_graph_client=None -> graph_enrich 노드 없이 기존 5개 노드만."""
+    mock_llm = MagicMock()
+    mock_registry = MagicMock()
+
+    graph = build_deterministic_graph(
+        llm=mock_llm,
+        registry=mock_registry,
+        guardrails={},
+        kms_graph_client=None,
+        vector_store=None,
+    )
+    node_names = set(graph.nodes.keys())
+    assert "graph_enrich" not in node_names
+    assert "execute_tools" in node_names
+    assert "generate_with_context" in node_names
+    assert "direct_generate" in node_names
+    assert "run_guardrails" in node_names
+    assert "build_response" in node_names

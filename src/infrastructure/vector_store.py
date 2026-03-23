@@ -272,6 +272,61 @@ class VectorStore:
             for row in rows
         ]
 
+    # -- ID 매핑 --
+
+    async def get_external_ids(self, aip_doc_ids: list[str]) -> dict[str, str]:
+        """ai-platform UUID → KMS external_id 배치 매핑."""
+        if not self._pool or not aip_doc_ids:
+            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, external_id FROM documents "
+                "WHERE id = ANY($1::uuid[]) AND external_id IS NOT NULL",
+                [uuid.UUID(d) for d in aip_doc_ids],
+            )
+        return {str(row["id"]): row["external_id"] for row in rows}
+
+    async def get_aip_id_by_external(self, external_id: str) -> str | None:
+        """KMS external_id → ai-platform UUID 단건 역매핑."""
+        if not self._pool:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id FROM documents WHERE external_id = $1",
+                external_id,
+            )
+        return str(row["id"]) if row else None
+
+    async def get_top_chunks_by_doc(
+        self, document_id: str, limit: int = 2,
+    ) -> list[dict]:
+        """document_id로 상위 청크를 chunk_index 순서로 조회 (임베딩 불필요)."""
+        if not self._pool:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.id, c.document_id, c.content, c.chunk_index, d.file_name
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.document_id = $1
+                ORDER BY c.chunk_index
+                LIMIT $2
+                """,
+                uuid.UUID(document_id), limit,
+            )
+        return [
+            {
+                "chunk_id": str(row["id"]),
+                "document_id": str(row["document_id"]),
+                "content": row["content"],
+                "chunk_index": row["chunk_index"],
+                "score": 0.5,
+                "file_name": row.get("file_name", ""),
+            }
+            for row in rows
+        ]
+
     # -- 내부 메서드 --
 
     @staticmethod

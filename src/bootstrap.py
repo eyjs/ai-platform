@@ -32,6 +32,7 @@ from src.tools.registry import ToolRegistry
 from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
+from src.services.kms_graph_client import KmsGraphClient
 from src.workflow.engine import WorkflowEngine
 from src.workflow.store import WorkflowStore
 
@@ -155,12 +156,20 @@ async def create_app_state(settings: Settings) -> AppState:
     workflow_engine = WorkflowEngine(workflow_store)
     logger.info("workflows_loaded", count=workflow_store.count)
 
+    # KMS 지식그래프 클라이언트 (선택적)
+    kms_graph_client = None
+    if settings.kms_api_url and settings.kms_internal_key:
+        kms_graph_client = KmsGraphClient(settings.kms_api_url, settings.kms_internal_key)
+        logger.info("kms_graph_client_initialized", kms_api_url=settings.kms_api_url)
+
     agent = GraphExecutor(
         main_llm=main_llm,
         tool_registry=tool_registry,
         guardrails=guardrails,
         chat_model=chat_model,
         workflow_engine=workflow_engine,
+        kms_graph_client=kms_graph_client,
+        vector_store=vector_store,
     )
 
     # 11. Parsing Provider + Ingest Pipeline
@@ -219,7 +228,7 @@ async def create_app_state(settings: Settings) -> AppState:
     else:
         logger.info("orchestrator_disabled")
 
-    providers = [embedding_provider, router_llm, main_llm, reranker, orchestrator_llm]
+    providers = [embedding_provider, router_llm, main_llm, reranker, orchestrator_llm, kms_graph_client]
 
     return AppState(
         settings=settings,

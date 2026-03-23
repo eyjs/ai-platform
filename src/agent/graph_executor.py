@@ -14,11 +14,13 @@ from src.agent.state import create_initial_state
 from src.agent.tool_adapter import convert_tools_to_langchain
 from src.domain.models import AgentMode, AgentResponse, SourceRef, TraceInfo
 from src.infrastructure.providers.base import LLMProvider
+from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.trace_logger import RequestTrace
 from src.router.execution_plan import ExecutionPlan
 from src.safety.base import GuardrailContext
 from src.safety.base import Guardrail
+from src.services.kms_graph_client import KmsGraphClient
 from src.tools.base import AgentContext
 from src.tools.registry import ToolRegistry
 from src.workflow.engine import StepResult, WorkflowEngine
@@ -40,6 +42,8 @@ class GraphExecutor:
         guardrails: Optional[dict[str, Guardrail]] = None,
         chat_model: Optional[BaseChatModel] = None,
         workflow_engine: Optional[WorkflowEngine] = None,
+        kms_graph_client: Optional[KmsGraphClient] = None,
+        vector_store: Optional[VectorStore] = None,
     ):
         self._main_llm = main_llm
         self._registry = tool_registry
@@ -52,6 +56,8 @@ class GraphExecutor:
             llm=main_llm,
             registry=tool_registry,
             guardrails=self._guardrails,
+            kms_graph_client=kms_graph_client,
+            vector_store=vector_store,
         )
         self._deterministic_app = det_graph.compile()
 
@@ -316,8 +322,20 @@ class GraphExecutor:
                             "success": tl["success"],
                             "ms": tl["ms"],
                         }}
+                elif node_name == "graph_enrich":
+                    if "search_results" in state_update:
+                        search_results = state_update["search_results"]
+                    enrichment = state_update.get("graph_enrichment", {})
+                    if enrichment.get("enriched") or enrichment.get("discovered"):
+                        yield {"type": "trace", "data": {
+                            "step": "graph_enrich",
+                            "enriched": enrichment.get("enriched", 0),
+                            "discovered": enrichment.get("discovered", 0),
+                        }}
 
         # LLM 토큰 스트리밍 (래퍼에서 직접 처리)
+        # graph_enrich 결과가 뒤에 추가되므로 score 기준 정렬 후 슬라이스
+        search_results.sort(key=lambda r: r.get("score", 0), reverse=True)
         prompt_results = search_results[:plan.strategy.max_vector_chunks]
         prompt = build_prompt(question, plan, prompt_results)
 
