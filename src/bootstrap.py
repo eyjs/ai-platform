@@ -133,7 +133,7 @@ async def create_app_state(settings: Settings) -> AppState:
 
     # 8. Guardrails
     guardrails = {
-        "faithfulness": FaithfulnessGuard(),
+        "faithfulness": FaithfulnessGuard(router_llm=router_llm),
         "response_policy": ResponsePolicyGuard(),
         "pii_filter": PIIFilterGuard(),
     }
