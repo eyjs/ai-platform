@@ -7,7 +7,8 @@ from src.infrastructure.providers.base import EmbeddingProvider, RerankerProvide
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.domain.models import SearchScope
-from src.tools.base import AgentContext, ToolResult
+from src.domain.agent_context import AgentContext
+from src.tools.base import ToolResult
 
 logger = get_logger(__name__)
 

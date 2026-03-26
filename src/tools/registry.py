@@ -7,7 +7,8 @@ import logging
 from typing import Optional, Union
 
 from src.domain.models import SearchScope
-from src.tools.base import AgentContext, ScopedTool, Tool, ToolResult
+from src.domain.agent_context import AgentContext
+from src.tools.base import ScopedTool, Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 

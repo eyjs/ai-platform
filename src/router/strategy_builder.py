@@ -6,7 +6,7 @@ STRATEGY_MATRIX 소유 + SearchScope + tools + system_prompt + guardrails + conv
 import logging
 from typing import List, Optional, Union
 
-from src.agent.profile import AgentProfile
+from src.domain.agent_profile import AgentProfile
 from src.domain.models import (
     AgentMode, ResponsePolicy, SearchScope, SecurityLevel,
     SECURITY_HIERARCHY, resolve_domain_hierarchy,

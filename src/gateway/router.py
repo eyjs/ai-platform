@@ -26,7 +26,7 @@ from src.orchestrator.models import OrchestratorResult
 from src.router.execution_plan import ExecutionPlan
 from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
-from src.tools.base import AgentContext
+from src.domain.agent_context import AgentContext
 
 APP_VERSION = "0.1.0"
 

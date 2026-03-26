@@ -5,7 +5,8 @@ from typing import Optional
 
 from src.infrastructure.fact_store import FactStore
 from src.domain.models import SearchScope
-from src.tools.base import AgentContext, ToolResult
+from src.domain.agent_context import AgentContext
+from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 

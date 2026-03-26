@@ -12,7 +12,7 @@ import asyncpg
 import yaml
 
 from src.domain.models import AgentMode
-from .profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
+from src.domain.agent_profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
 
 logger = logging.getLogger(__name__)
 

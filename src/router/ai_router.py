@@ -13,7 +13,7 @@ Layer 3: Strategy Builder (전략 + SearchScope + conversation_context + Executi
 import time
 from typing import List, Optional, Union
 
-from src.agent.profile import AgentProfile
+from src.domain.agent_profile import AgentProfile
 from src.common.exceptions import AIError, RouterAIError
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger

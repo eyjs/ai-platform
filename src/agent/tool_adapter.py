@@ -11,7 +11,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, create_model
 
 from src.domain.models import SearchScope
-from src.tools.base import AgentContext, ScopedTool, Tool, ToolResult
+from src.domain.agent_context import AgentContext
+from src.tools.base import ScopedTool, Tool, ToolResult
 
 MAX_TOOL_RESULT_LEN = 2000
 

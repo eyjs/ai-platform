@@ -21,7 +21,7 @@ from src.router.execution_plan import ExecutionPlan
 from src.safety.base import GuardrailContext
 from src.safety.base import Guardrail
 from src.services.kms_graph_client import KmsGraphClient
-from src.tools.base import AgentContext
+from src.domain.agent_context import AgentContext
 from src.tools.registry import ToolRegistry
 from src.workflow.engine import StepResult, WorkflowEngine
 

@@ -10,7 +10,7 @@ from src.agent.state import AgentState
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.safety.base import Guardrail, GuardrailContext
-from src.tools.base import AgentContext
+from src.domain.agent_context import AgentContext
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)

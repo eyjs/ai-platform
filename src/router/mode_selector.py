@@ -6,7 +6,7 @@ Profile.mode 기반 + HybridTrigger 매칭.
 import logging
 from typing import Optional
 
-from src.agent.profile import AgentProfile
+from src.domain.agent_profile import AgentProfile
 from src.domain.models import AgentMode
 
 logger = logging.getLogger(__name__)

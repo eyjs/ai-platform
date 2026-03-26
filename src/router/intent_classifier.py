@@ -8,7 +8,7 @@ import logging
 import re
 from typing import List, Optional
 
-from src.agent.profile import AgentProfile, IntentHint
+from src.domain.agent_profile import AgentProfile, IntentHint
 from src.infrastructure.providers.base import LLMProvider
 from src.router.execution_plan import QuestionType
 
