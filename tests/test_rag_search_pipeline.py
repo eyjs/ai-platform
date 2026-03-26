@@ -27,18 +27,28 @@ def _mock_chunk(chunk_id: str, score: float) -> dict:
     }
 
 
+# RRF 스코어 범위: ~0.007-0.016
+# 고품질: 0.015+ (양쪽 검색 상위권)
+# 저품질: 0.008 이하 (한쪽 검색만 매칭)
+# PROBE_SKIP_THRESHOLD = 0.012
+
+
 @pytest.mark.asyncio
 async def test_full_pipeline_with_reranker():
-    """전체 파이프라인: 확장 -> 검색 -> 노이즈 -> 이웃 -> 리랭킹 -> 가드."""
+    """전체 파이프라인: probe 저품질 → 확장 → 검색 → 리랭킹."""
     from src.tools.internal.rag_search import RAGSearchTool
 
     embedder = AsyncMock()
-    embedder.embed_batch.return_value = [[0.1] * 10, [0.2] * 10, [0.3] * 10]
+    # probe 1회 + 확장 3쿼리 1회
+    embedder.embed_batch.side_effect = [
+        [[0.1] * 10],
+        [[0.1] * 10, [0.2] * 10, [0.3] * 10],
+    ]
 
     store = AsyncMock()
-    # probe top-1 = 0.3 (< 0.4) → 확장 트리거
+    # probe top-1 = 0.008 (< 0.012) → 확장 트리거
     store.hybrid_search.return_value = [
-        _mock_chunk(f"c{i}", 0.3 - i * 0.01) for i in range(10)
+        _mock_chunk(f"c{i}", 0.008 - i * 0.0003) for i in range(10)
     ]
     store.get_neighbor_chunks.return_value = []
 
@@ -53,12 +63,6 @@ async def test_full_pipeline_with_reranker():
 
     router_llm = AsyncMock()
     router_llm.generate_json.return_value = ["변형1", "변형2"]
-
-    # embed_batch: probe 1회 + 확장 3쿼리 1회
-    embedder.embed_batch.side_effect = [
-        [[0.1] * 10],
-        [[0.1] * 10, [0.2] * 10, [0.3] * 10],
-    ]
 
     tool = RAGSearchTool(
         embedding_provider=embedder,
@@ -75,6 +79,8 @@ async def test_full_pipeline_with_reranker():
 
     assert result.success is True
     assert len(result.data) > 0
+    # 확장 실행됨
+    router_llm.generate_json.assert_called_once()
     assert len(embedder.embed_batch.call_args_list[1][0][0]) == 3
 
 
@@ -87,8 +93,9 @@ async def test_pipeline_without_reranker():
     embedder.embed_batch.return_value = [[0.1] * 10]
 
     store = AsyncMock()
+    # 높은 RRF 점수 → 확장 스킵
     store.hybrid_search.return_value = [
-        _mock_chunk(f"c{i}", 0.9 - i * 0.1) for i in range(10)
+        _mock_chunk(f"c{i}", 0.015 - i * 0.0005) for i in range(10)
     ]
     store.get_neighbor_chunks.return_value = []
 
@@ -127,16 +134,16 @@ async def test_empty_query():
 
 @pytest.mark.asyncio
 async def test_adaptive_skips_expansion_on_high_probe_score():
-    """probe top-1 점수가 임계값 이상이면 쿼리 확장 스킵."""
+    """probe top-1 RRF 점수가 0.012 이상이면 쿼리 확장 스킵."""
     from src.tools.internal.rag_search import RAGSearchTool
 
     embedder = AsyncMock()
     embedder.embed_batch.return_value = [[0.1] * 10]
 
     store = AsyncMock()
-    # probe 결과: top-1 점수 0.5 (>= 0.4 임계값)
+    # probe top-1 = 0.015 (>= 0.012 임계값) → 확장 스킵
     store.hybrid_search.return_value = [
-        _mock_chunk(f"c{i}", 0.9 - i * 0.05) for i in range(10)
+        _mock_chunk(f"c{i}", 0.015 - i * 0.0005) for i in range(10)
     ]
     store.get_neighbor_chunks.return_value = []
 
@@ -157,14 +164,14 @@ async def test_adaptive_skips_expansion_on_high_probe_score():
     )
 
     assert result.success is True
-    # 확장 스킵 → embed_batch에 원본 1개만 전달
+    # 확장 스킵 → LLM 미호출
     router_llm.generate_json.assert_not_called()
     assert len(embedder.embed_batch.call_args[0][0]) == 1
 
 
 @pytest.mark.asyncio
 async def test_adaptive_expands_on_low_probe_score():
-    """probe top-1 점수가 낮으면 쿼리 확장 실행."""
+    """probe top-1 RRF 점수가 0.012 미만이면 쿼리 확장 실행."""
     from src.tools.internal.rag_search import RAGSearchTool
 
     embedder = AsyncMock()
@@ -175,9 +182,9 @@ async def test_adaptive_expands_on_low_probe_score():
     ]
 
     store = AsyncMock()
-    # probe 결과: top-1 점수 0.2 (< 0.4 임계값)
+    # probe top-1 = 0.008 (< 0.012 임계값) → 확장 트리거
     store.hybrid_search.return_value = [
-        _mock_chunk(f"c{i}", 0.2 - i * 0.01) for i in range(10)
+        _mock_chunk(f"c{i}", 0.008 - i * 0.0003) for i in range(10)
     ]
     store.get_neighbor_chunks.return_value = []
 
@@ -200,7 +207,6 @@ async def test_adaptive_expands_on_low_probe_score():
     assert result.success is True
     # 확장 실행됨
     router_llm.generate_json.assert_called_once()
-    # 두 번째 embed_batch 호출에 3개 쿼리
     assert len(embedder.embed_batch.call_args_list[1][0][0]) == 3
 
 
@@ -214,7 +220,7 @@ async def test_adaptive_no_llm_skips_probe():
 
     store = AsyncMock()
     store.hybrid_search.return_value = [
-        _mock_chunk(f"c{i}", 0.9 - i * 0.05) for i in range(10)
+        _mock_chunk(f"c{i}", 0.015 - i * 0.0005) for i in range(10)
     ]
     store.get_neighbor_chunks.return_value = []
 

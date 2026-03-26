@@ -22,7 +22,7 @@ from src.tools.internal.result_guard import guard_results
 logger = get_logger(__name__)
 
 CANDIDATE_POOL_SIZE = 50
-PROBE_SKIP_THRESHOLD = 0.4
+PROBE_SKIP_THRESHOLD = 0.012  # RRF 스코어 범위: ~0.007-0.016
 
 
 class RAGSearchTool:
