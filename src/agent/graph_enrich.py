@@ -34,7 +34,7 @@ def _is_relevant(file_name: str, keywords: list[str]) -> bool:
 
 def _format_strength(strength) -> str:
     """strength 값을 표시 문자열로 변환한다."""
-    if not strength or not str(strength).strip():
+    if strength is None or str(strength).strip() == "":
         return "미지정"
     return f"{strength}/10"
 

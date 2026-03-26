@@ -698,6 +698,40 @@ async def test_strength_display_with_value():
     assert "강도: 7/10" in graph_items[0]["content"]
 
 
+@pytest.mark.asyncio
+async def test_strength_display_zero():
+    """strength=0은 유효한 값이므로 '0/10'으로 표시되어야 한다."""
+    client = MagicMock()
+    client.is_configured = True
+    client.get_rag_context = AsyncMock(return_value={
+        "relatedDocuments": [
+            _make_related_doc(
+                doc_id="kms-2",
+                file_name="보장내용.pdf",
+                reason="동일 약관 참조",
+                strength="0",
+            ),
+        ],
+    })
+
+    vs = MagicMock()
+    vs.get_external_ids = AsyncMock(return_value={"aip-1": "kms-1"})
+    vs.get_aip_ids_by_externals = AsyncMock(return_value={
+        "kms-2": {"aip_id": "aip-2", "security_level": "PUBLIC"},
+    })
+    vs.get_top_chunks_by_doc = AsyncMock(return_value=[
+        {"chunk_id": "c1", "content": "보장 내용", "score": 0.5},
+    ])
+
+    node = create_graph_enrich(client, vs)
+    state = _make_state(search_results=[_make_search_result(doc_id="aip-1")])
+    result = await node(state)
+
+    graph_items = [r for r in result["search_results"] if r.get("source") == "graph"]
+    assert len(graph_items) >= 1
+    assert "강도: 0/10" in graph_items[0]["content"]
+
+
 # --- P1 병렬화: KMS API 병렬 호출 검증 ---
 
 
