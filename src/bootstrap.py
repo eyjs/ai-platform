@@ -123,6 +123,7 @@ async def create_app_state(settings: Settings) -> AppState:
         embedding_provider=embedding_provider,
         vector_store=vector_store,
         reranker=reranker,
+        router_llm=router_llm,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
     logger.info("tools_registered", tools=tool_registry.tool_names)

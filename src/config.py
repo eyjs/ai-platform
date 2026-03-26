@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
     cors_origins: list[str] = []
 
+    # LLM 응답 최대 토큰 (MLX 기본 512 방지)
+    llm_max_tokens: int = 4096
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000

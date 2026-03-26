@@ -76,6 +76,7 @@ class ProviderFactory:
             return HttpLLMProvider(
                 base_url=server_url,
                 system_prefix=_LLM_SYSTEM_PREFIX,
+                max_tokens=self._settings.llm_max_tokens,
             )
 
         if self._is_local:

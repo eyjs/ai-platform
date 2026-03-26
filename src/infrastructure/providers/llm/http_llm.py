@@ -13,10 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class HttpLLMProvider(LLMProvider):
-    def __init__(self, base_url: str, system_prefix: str = ""):
+    def __init__(self, base_url: str, system_prefix: str = "", max_tokens: int = 4096):
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=120.0)
         self._system_prefix = system_prefix
+        self._max_tokens = max_tokens
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -31,6 +32,7 @@ class HttpLLMProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
+                "max_tokens": self._max_tokens,
             },
         )
         response.raise_for_status()
@@ -54,6 +56,7 @@ class HttpLLMProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": True,
+                "max_tokens": self._max_tokens,
             },
         ) as response:
             async for line in response.aiter_lines():
