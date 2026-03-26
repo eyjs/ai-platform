@@ -46,7 +46,7 @@ memory_ttl_seconds: 3600
 
 intent_hints:
   - name: "POLICY_INQUIRY"
-    patterns: ["규정", "연차", "휴가", "급여", "복지"]
+    patterns: ["규정", "연차", "휴가", "급여", "복지", "출근", "퇴근", "야근", "회식"]
     description: "사내 규정이나 복리후생 관련 질문"
   - name: "PROCESS_GUIDE"
     patterns: ["어떻게", "절차", "신청", "방법", "프로세스"]

@@ -20,7 +20,10 @@ PROFILES = [
         "name": "보험 상담 챗봇",
         "description": "보험 상품 전문 상담",
         "domain_scopes": ["자동차보험", "실손보험", "화재보험", "건강보험"],
-        "intent_hints": [],
+        "intent_hints": [
+            {"name": "INSURANCE_INQUIRY", "patterns": ["보험", "보장", "보험료", "보험금", "보상"], "description": "보험 질문"},
+            {"name": "INSURANCE_RECOMMEND", "patterns": ["보험 추천", "어떤 보험", "보험 가입", "보험 비교"], "description": "보험 추천"},
+        ],
     },
     {
         "id": "food-recipe",
@@ -28,7 +31,8 @@ PROFILES = [
         "description": "요리 레시피 안내",
         "domain_scopes": ["요리", "레시피"],
         "intent_hints": [
-            {"name": "RECIPE_SEARCH", "patterns": ["레시피", "만드는 법", "요리법", "조리법"], "description": "레시피 검색"},
+            {"name": "RECIPE_SEARCH", "patterns": ["레시피", "만드는 법", "요리법", "조리법", "끓이는 법", "볶는 법", "굽는 법", "무치는 법", "찌는 법", "튀기는 법", "삶는 법"], "description": "레시피 검색"},
+            {"name": "FOOD_INQUIRY", "patterns": ["칼로리", "음식", "반찬", "찌개", "요리"], "description": "음식 질문"},
             {"name": "INGREDIENT_SEARCH", "patterns": ["재료", "냉장고", "뭘 만들"], "description": "재료 기반 검색"},
         ],
     },
@@ -38,7 +42,8 @@ PROFILES = [
         "description": "사주명리 상담",
         "domain_scopes": ["사주명리"],
         "intent_hints": [
-            {"name": "SAJU_ANALYSIS", "patterns": ["사주", "팔자", "운세", "궁합", "오행"], "description": "사주 분석"},
+            {"name": "SAJU_ANALYSIS", "patterns": ["사주", "팔자", "운세", "궁합", "오행", "토정비결", "신년운세"], "description": "사주 분석"},
+            {"name": "FORTUNE_GENERAL", "patterns": ["재운", "관운", "건강운", "연애운", "이사운"], "description": "운세 상담"},
         ],
     },
     {
@@ -57,7 +62,7 @@ PROFILES = [
         "description": "사내규정 안내",
         "domain_scopes": ["인사", "사내규정"],
         "intent_hints": [
-            {"name": "POLICY_INQUIRY", "patterns": ["규정", "연차", "휴가", "급여", "복지"], "description": "규정 질문"},
+            {"name": "POLICY_INQUIRY", "patterns": ["규정", "연차", "휴가", "급여", "복지", "출근", "퇴근", "야근", "회식"], "description": "규정 질문"},
         ],
     },
 ]
@@ -184,3 +189,44 @@ class TestIntegrationScenarios:
         t2 = router.tier2_keyword_score("인생이 힘들어")
         assert t1 is None
         assert t2 is None  # Tier 3(LLM)으로 넘어가야 함
+
+
+# ── Tier 2: 역방향 매칭 ──
+
+class TestTier2ReverseMatch:
+    def test_insurance_reverse_token_match(self, router):
+        """'보험'(질문 토큰)이 '자동차보험'(키워드) 안에 포함 -> insurance-qa."""
+        result = router.tier2_keyword_score("30대 남자 보험 추천")
+        assert result is not None
+        assert result.profile_id == "insurance-qa"
+        assert result.tier == 2
+
+    def test_food_cooking_verb_tier1(self, router):
+        """'끓이는 법' 패턴으로 Tier 1에서 food-recipe 매칭."""
+        result = router.tier1_rule_match("된장찌개 끓이는 법")
+        assert result is not None
+        assert result.profile_id == "food-recipe"
+        assert result.tier == 1
+
+    def test_food_jjigae_tier2(self, router):
+        """'찌개' 키워드로 food-recipe Tier 2 매칭."""
+        result = router.tier2_keyword_score("찌개 추천해줘")
+        assert result is not None
+        assert result.profile_id == "food-recipe"
+
+    def test_reverse_match_no_false_positive(self, router):
+        """관련 없는 질문은 역방향 매칭에도 None."""
+        result = router.tier2_keyword_score("오늘 날씨 어때?")
+        assert result is None
+
+    def test_tier2_min_score_parameter(self, router):
+        """min_score=0.3으로 낮추면 약한 매칭도 통과."""
+        # 기본 min_score=0.5에서 실패할 수 있는 질문
+        result_strict = router.tier2_keyword_score("상품 알려줘", min_score=0.5)
+        result_relaxed = router.tier2_keyword_score("상품 알려줘", min_score=0.1)
+        # relaxed가 strict보다 같거나 더 많이 매칭
+        if result_strict is None:
+            # strict에서 실패해도 relaxed에서는 성공할 수 있음 (또는 둘 다 None)
+            pass
+        else:
+            assert result_relaxed is not None

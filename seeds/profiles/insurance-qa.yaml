@@ -38,4 +38,10 @@ main_model: "sonnet"
 memory_type: "short"
 memory_ttl_seconds: 3600
 
-intent_hints: []
+intent_hints:
+  - name: "INSURANCE_INQUIRY"
+    patterns: ["보험", "보장", "보험료", "보험금", "보상"]
+    description: "보험 상품, 보장 내용, 보험료 관련 질문"
+  - name: "INSURANCE_RECOMMEND"
+    patterns: ["보험 추천", "어떤 보험", "보험 가입", "보험 비교"]
+    description: "보험 상품 추천 또는 비교 요청"

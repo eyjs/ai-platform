@@ -350,8 +350,22 @@ class MasterOrchestrator:
                     selected_profile_id=extracted,
                     reason=f"[Tier 3] 텍스트 추출: {extracted}",
                 )
-            # 최종 폴백: 현재 프로필 -> 첫 번째 프로필
-            fallback = current_profile or profiles[0]["id"]
+            # Tier 2 재시도 (min_score=0.3으로 완화)
+            router = ProfileRouter(profiles)
+            tier2_retry = router.tier2_keyword_score(question, min_score=0.3)
+            if tier2_retry:
+                logger.info(
+                    "orchestrator_tier3_tier2_retry",
+                    profile_id=tier2_retry.profile_id,
+                    confidence=tier2_retry.confidence,
+                )
+                return OrchestratorResult(
+                    selected_profile_id=tier2_retry.profile_id,
+                    reason=f"[Tier 3] Tier 2 재시도: {tier2_retry.reason}",
+                )
+            # general-chat 우선 폴백
+            general = next((p["id"] for p in profiles if p["id"] == "general-chat"), None)
+            fallback = current_profile or general or profiles[0]["id"]
             logger.warning(
                 "orchestrator_no_tool_call_fallback",
                 text_preview=result.get("text", "")[:100],

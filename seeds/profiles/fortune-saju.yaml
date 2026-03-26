@@ -42,8 +42,11 @@ memory_ttl_seconds: 7200
 
 intent_hints:
   - name: "SAJU_ANALYSIS"
-    patterns: ["사주", "팔자", "운세", "궁합", "오행"]
+    patterns: ["사주", "팔자", "운세", "궁합", "오행", "토정비결", "신년운세"]
     description: "사주팔자 분석 또는 운세 상담 요청"
   - name: "COMPATIBILITY"
     patterns: ["궁합", "결혼운", "인연"]
     description: "두 사람 사이의 궁합 분석 요청"
+  - name: "FORTUNE_GENERAL"
+    patterns: ["재운", "관운", "건강운", "연애운", "이사운"]
+    description: "특정 분야별 운세 상담 요청"

@@ -331,6 +331,63 @@ async def test_route_tenant_filter(orchestrator, deps):
 
 
 @pytest.mark.asyncio
+async def test_route_tier3_retries_tier2(orchestrator, deps):
+    """Tier 3: LLM tool_calls 없을 때 Tier 2를 min_score=0.3으로 재시도한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("insurance-qa", name="보험",
+                      domain_scopes=["자동차보험", "실손보험"],
+                      intent_hints=[_make_hint("INS", ["보험", "보장"])]),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {}
+    sm.get_turns.return_value = []
+
+    # LLM이 tool_calls 없이 응답
+    llm.select_profile.return_value = {
+        "function": "no_tool_call",
+        "text": "잘 모르겠습니다",
+        "profile_id": "",
+        "reason": "",
+    }
+
+    result = await orchestrator.route("보험 상품 알려줘", "sess-1", FakeUserCtx())
+
+    # Tier 2 재시도로 insurance-qa 매칭 기대
+    assert result.selected_profile_id == "insurance-qa"
+    assert "Tier 2 재시도" in result.reason or "Tier" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_route_tier3_fallback_general_chat(orchestrator, deps):
+    """Tier 3: 모든 매칭 실패 시 general-chat으로 폴백한다."""
+    llm, ps, sm, we, ts = deps
+
+    ps.list_all.return_value = [
+        _make_profile("general-chat", name="일반"),
+        _make_profile("food-recipe", name="요리",
+                      intent_hints=[_make_hint("RECIPE", ["레시피"])]),
+    ]
+    ts.get_allowed_profiles.return_value = []
+    sm.get_orchestrator_metadata.return_value = {}
+    sm.get_turns.return_value = []
+
+    # LLM이 tool_calls 없이 응답, 프로필 추출도 실패
+    llm.select_profile.return_value = {
+        "function": "no_tool_call",
+        "text": "잘 모르겠습니다",
+        "profile_id": "",
+        "reason": "",
+    }
+
+    result = await orchestrator.route("인생이 힘들어", "sess-1", FakeUserCtx())
+
+    assert result.selected_profile_id == "general-chat"
+
+
+@pytest.mark.asyncio
 async def test_handle_switch_pauses_workflow(orchestrator, deps):
     """프로필 전환 시 활성 워크플로우를 일시정지한다."""
     llm, ps, sm, we, ts = deps

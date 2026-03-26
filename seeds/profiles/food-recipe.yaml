@@ -42,8 +42,11 @@ memory_ttl_seconds: 1800
 
 intent_hints:
   - name: "RECIPE_SEARCH"
-    patterns: ["레시피", "만드는 법", "요리법", "조리법"]
+    patterns: ["레시피", "만드는 법", "요리법", "조리법", "끓이는 법", "볶는 법", "굽는 법", "무치는 법", "찌는 법", "튀기는 법", "삶는 법"]
     description: "특정 요리의 레시피 검색"
+  - name: "FOOD_INQUIRY"
+    patterns: ["칼로리", "음식", "반찬", "찌개", "요리"]
+    description: "음식/요리 관련 일반 질문"
   - name: "INGREDIENT_SEARCH"
     patterns: ["재료", "냉장고", "있는데", "뭘 만들"]
     description: "보유 재료 기반 레시피 역검색"

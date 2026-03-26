@@ -130,7 +130,7 @@ class ProfileRouter:
 
     # ── Tier 2: Keyword Scoring (<5ms) ──
 
-    def tier2_keyword_score(self, question: str) -> RouteResult | None:
+    def tier2_keyword_score(self, question: str, min_score: float = 0.5) -> RouteResult | None:
         """키워드 스코어링으로 프로필을 결정한다."""
         q_tokens = set(_tokenize_korean(question))
         scores: dict[str, float] = {}
@@ -138,9 +138,12 @@ class ProfileRouter:
         for profile_id, keywords in self._keyword_map.items():
             score = 0.0
             for keyword, weight in keywords:
-                # 원문에 키워드 포함 또는 토큰 정확 매칭
+                # 정방향: 원문에 키워드 포함 또는 토큰 정확 매칭
                 if keyword in question or keyword in q_tokens:
                     score += weight
+                elif any(token in keyword for token in q_tokens if len(token) >= 2):
+                    # 역방향: "보험"(질문 토큰)이 "자동차보험"(키워드) 안에 포함
+                    score += weight * 0.6
             if score > 0:
                 scores[profile_id] = score
 
@@ -149,7 +152,7 @@ class ProfileRouter:
 
         sorted_scores = sorted(scores.values(), reverse=True)
         best_score = sorted_scores[0]
-        if best_score < 0.5:
+        if best_score < min_score:
             return None
 
         best = max(scores, key=scores.get)
