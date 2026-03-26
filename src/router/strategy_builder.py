@@ -11,7 +11,7 @@ from src.domain.models import (
     AgentMode, ResponsePolicy, SearchScope, SecurityLevel,
     SECURITY_HIERARCHY, resolve_domain_hierarchy,
 )
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 from src.tools.base import ScopedTool, Tool
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ class StrategyBuilder:
         strategy: QuestionStrategy,
         mode: AgentMode,
         tools: List[Union[Tool, ScopedTool]],
+        query: str = "",
         history: Optional[List[dict]] = None,
         user_security_level: str = "PUBLIC",
         prior_doc_ids: Optional[List[str]] = None,
@@ -85,10 +86,13 @@ class StrategyBuilder:
                 f"{t['role']}: {t['content']}" for t in recent
             )
 
+        # tool_groups 배정: 기본은 모든 도구를 한 그룹 (= 전부 병렬)
+        tool_groups = self._build_tool_groups(query, tools, strategy)
+
         return ExecutionPlan(
             mode=mode,
             scope=scope,
-            tools=tools,
+            tool_groups=tool_groups,
             system_prompt=profile.system_prompt,
             guardrail_chain=profile.guardrails,
             question_type=question_type,
@@ -100,6 +104,18 @@ class StrategyBuilder:
             max_tool_calls=profile.max_tool_calls,
             agent_timeout_seconds=profile.agent_timeout_seconds,
         )
+
+    @staticmethod
+    def _build_tool_groups(
+        query: str,
+        tools: List[Union[Tool, ScopedTool]],
+        strategy: QuestionStrategy,
+    ) -> list[list[ToolCall]]:
+        """도구 목록을 병렬 그룹으로 배정. 기본: 한 그룹 = 전부 병렬."""
+        if not strategy.needs_rag or not tools:
+            return []
+        calls = [ToolCall(tool_name=t.name, params={"query": query}) for t in tools]
+        return [calls]
 
     @staticmethod
     def _security_rank(level: str) -> int:

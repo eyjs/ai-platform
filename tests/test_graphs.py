@@ -7,7 +7,7 @@ from src.agent.graph_executor import GraphExecutor
 from src.agent.graphs import build_deterministic_graph
 from src.agent.state import AgentState, create_initial_state
 from src.domain.models import AgentMode, SearchScope
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 
 
 def test_build_deterministic_graph_compiles():
@@ -84,10 +84,6 @@ async def test_deterministic_rag_path():
         data=[{"document_id": "doc-1", "title": "약관", "content": "대인배상 한도 1억원", "score": 0.9}],
     ))
 
-    # FakeTool for plan.tools
-    class FakeTool:
-        name = "rag_search"
-
     graph = build_deterministic_graph(
         llm=mock_llm,
         registry=mock_registry,
@@ -98,7 +94,7 @@ async def test_deterministic_rag_path():
     plan = ExecutionPlan(
         mode=AgentMode.DETERMINISTIC,
         scope=SearchScope(domain_codes=["자동차보험"]),
-        tools=[FakeTool()],
+        tool_groups=[[ToolCall("rag_search", {"query": "대인배상 한도가 얼마야?"})]],
         question_type=QuestionType.STANDALONE,
         strategy=QuestionStrategy(needs_rag=True, max_vector_chunks=5),
         system_prompt="보험 전문가입니다.",
@@ -154,9 +150,6 @@ async def test_graph_executor_deterministic_rag():
         data=[{"document_id": "d1", "title": "약관", "content": "1억", "score": 0.9}],
     ))
 
-    class FakeTool:
-        name = "rag_search"
-
     executor = GraphExecutor(
         main_llm=mock_llm,
         tool_registry=mock_registry,
@@ -166,7 +159,7 @@ async def test_graph_executor_deterministic_rag():
     plan = ExecutionPlan(
         mode=AgentMode.DETERMINISTIC,
         scope=SearchScope(),
-        tools=[FakeTool()],
+        tool_groups=[[ToolCall("rag_search", {"query": "대인배상 한도?"})]],
         question_type=QuestionType.STANDALONE,
     )
 
@@ -215,9 +208,6 @@ async def test_streaming_bypass_no_double_llm():
         data=[{"document_id": "d1", "title": "약관", "content": "1억", "score": 0.9}],
     ))
 
-    class FakeTool:
-        name = "rag_search"
-
     graph = build_deterministic_graph(
         llm=mock_llm,
         registry=mock_registry,
@@ -228,7 +218,7 @@ async def test_streaming_bypass_no_double_llm():
     plan = ExecutionPlan(
         mode=AgentMode.DETERMINISTIC,
         scope=SearchScope(),
-        tools=[FakeTool()],
+        tool_groups=[[ToolCall("rag_search", {"query": "질문"})]],
         question_type=QuestionType.STANDALONE,
         strategy=QuestionStrategy(needs_rag=True, max_vector_chunks=5),
     )

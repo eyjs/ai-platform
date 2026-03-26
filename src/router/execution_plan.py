@@ -32,13 +32,21 @@ class QuestionStrategy:
     max_vector_chunks: int = 5
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """개별 도구 호출 단위. tool_name + params."""
+
+    tool_name: str
+    params: dict = field(default_factory=dict)
+
+
 @dataclass
 class ExecutionPlan:
     """Router가 생성하는 실행 계획. Agent/Workflow에 전달."""
 
     mode: AgentMode
     scope: SearchScope
-    tools: list = field(default_factory=list)
+    tool_groups: list[list[ToolCall]] = field(default_factory=list)
     system_prompt: str = ""
     guardrail_chain: list[str] = field(default_factory=list)
     question_type: QuestionType = QuestionType.STANDALONE

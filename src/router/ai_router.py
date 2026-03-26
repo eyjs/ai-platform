@@ -93,6 +93,7 @@ class AIRouter:
             strategy=strategy,
             mode=mode,
             tools=tools,
+            query=resolved_query,
             history=history,
             user_security_level=user_security_level,
             prior_doc_ids=prior_doc_ids,
@@ -103,7 +104,7 @@ class AIRouter:
         logger.info(
             "L3_strategy_build",
             layer="ROUTER", component="StrategyBuilder",
-            tools_count=len(plan.tools),
+            tools_count=sum(len(g) for g in plan.tool_groups),
             guardrails=plan.guardrail_chain,
             scope_domains=plan.scope.domain_codes,
             security_max=plan.scope.security_level_max,

@@ -6,7 +6,7 @@ ai-worker의 RAGState 패턴을 범용화.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from src.domain.models import AgentMode
 from src.router.execution_plan import ExecutionPlan
@@ -46,12 +46,16 @@ class AgentState(TypedDict):
     # 메타데이터
     latency_ms: float
 
+    # Trace (Optional — 병렬 실행 시 레이턴시 기록용)
+    trace: Any
+
 
 def create_initial_state(
     question: str,
     plan: ExecutionPlan,
     session_id: str = "",
     is_streaming: bool = False,
+    trace: Any = None,
 ) -> AgentState:
     """초기 상태 생성."""
     return AgentState(
@@ -68,4 +72,5 @@ def create_initial_state(
         is_streaming=is_streaming,
         graph_enrichment={},
         latency_ms=0.0,
+        trace=trace,
     )

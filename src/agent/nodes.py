@@ -3,6 +3,7 @@
 ai-worker 패턴: 팩토리 함수가 의존성을 클로저로 캡처 -> 순수 노드 함수 반환.
 """
 
+import asyncio
 import time
 from typing import Callable
 
@@ -35,47 +36,73 @@ def route_by_rag(state: AgentState) -> str:
 
 
 def create_execute_tools(registry: ToolRegistry) -> Callable:
-    """Tool 순차 실행 노드."""
+    """Tool 병렬 실행 노드. tool_groups별 asyncio.gather."""
+
+    async def _execute_single(tool_call, context, scope, trace):
+        """단일 Tool 실행 + trace 기록."""
+        node = trace.start_node(f"tool:{tool_call.tool_name}") if trace else None
+        try:
+            result = await registry.execute(
+                tool_name=tool_call.tool_name,
+                params=tool_call.params,
+                context=context,
+                scope=scope,
+            )
+            if node:
+                node.finish(
+                    success=result.success,
+                    chunks=len(result.data) if result.data else 0,
+                )
+            return tool_call, result
+        except Exception as e:
+            if node:
+                node.finish(success=False, error=str(e))
+            raise
 
     async def execute_tools(state: AgentState) -> dict:
         plan = state["plan"]
-        question = state["question"]
         context = AgentContext(session_id=state["session_id"])
+        trace = state.get("trace")
         search_results = []
         tools_called = []
         tool_latencies = []
 
-        for tool in plan.tools:
-            tool_name = tool.name if hasattr(tool, "name") else str(tool)
-            tools_called.append(tool_name)
+        for group in plan.tool_groups:
+            tasks = [
+                _execute_single(tc, context, plan.scope, trace)
+                for tc in group
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            t_start = time.time()
-            result = await registry.execute(
-                tool_name=tool_name,
-                params={"query": question, "subject": question},
-                context=context,
-                scope=plan.scope,
-            )
-            tool_ms = (time.time() - t_start) * 1000
+            for tc, outcome in zip(group, results):
+                if isinstance(outcome, Exception):
+                    logger.warning("tool_failed", tool=tc.tool_name, error=str(outcome))
+                    tool_latencies.append({
+                        "tool": tc.tool_name, "success": False,
+                        "chunks_found": 0, "ms": 0,
+                    })
+                    continue
 
-            chunks_found = 0
-            if result.success and isinstance(result.data, list):
-                search_results.extend(result.data)
-                chunks_found = len(result.data)
+                _tc, result = outcome
+                tools_called.append(tc.tool_name)
+                chunks_found = len(result.data) if result.success and result.data else 0
+                if result.success and result.data:
+                    search_results.extend(result.data)
 
-            tool_latencies.append({
-                "tool": tool_name,
-                "success": result.success,
-                "chunks_found": chunks_found,
-                "ms": round(tool_ms, 1),
-            })
-            logger.info(
-                "tool_execute",
-                tool=tool_name,
-                success=result.success,
-                chunks_found=chunks_found,
-                latency_ms=round(tool_ms, 1),
-            )
+                node_ms = 0
+                if trace:
+                    matching = [n for n in trace.nodes if n.node == f"tool:{tc.tool_name}"]
+                    if matching:
+                        node_ms = matching[-1].duration_ms
+                tool_latencies.append({
+                    "tool": tc.tool_name, "success": result.success,
+                    "chunks_found": chunks_found, "ms": round(node_ms, 1),
+                })
+                logger.info(
+                    "tool_execute", tool=tc.tool_name,
+                    success=result.success, chunks_found=chunks_found,
+                    latency_ms=round(node_ms, 1),
+                )
 
         return {
             "search_results": search_results,
