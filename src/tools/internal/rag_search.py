@@ -1,5 +1,6 @@
 """RAG Search Tool: 5-layer 파이프라인 오케스트레이터.
 
+Adaptive L1: probe 검색 → 고품질이면 확장 스킵
 L1 쿼리확장 -> 멀티쿼리 검색 -> L2 노이즈필터 -> L3 이웃확장 -> L4 리랭킹 -> L5 가드
 """
 
@@ -21,6 +22,7 @@ from src.tools.internal.result_guard import guard_results
 logger = get_logger(__name__)
 
 CANDIDATE_POOL_SIZE = 50
+PROBE_SKIP_THRESHOLD = 0.4
 
 
 class RAGSearchTool:
@@ -63,19 +65,20 @@ class RAGSearchTool:
         top_k = params.get("max_vector_chunks", self._default_top_k)
         t_start = time.time()
 
-        # L1. 쿼리 확장
-        if self._router_llm:
-            queries = await expand_queries(self._router_llm, query)
-        else:
-            queries = [query]
+        # L1. Adaptive 쿼리 확장: probe → 조건부 확장
+        queries, probe_candidates = await self._adaptive_expand(query, scope)
 
         # 멀티쿼리 임베딩 (배치)
         embeddings = await self._embedder.embed_batch(queries)
 
         # 멀티쿼리 하이브리드 검색 + 합산
-        candidates = await self._multi_query_search(
-            queries, embeddings, scope,
-        )
+        if probe_candidates is not None and len(queries) == 1:
+            # probe 결과를 재사용 (확장 스킵된 경우)
+            candidates = probe_candidates
+        else:
+            candidates = await self._multi_query_search(
+                queries, embeddings, scope,
+            )
 
         if not candidates:
             return ToolResult.ok([], method="rag_search", chunks_found=0)
@@ -110,6 +113,56 @@ class RAGSearchTool:
             method="rag_search",
             chunks_found=len(results),
         )
+
+    async def _adaptive_expand(
+        self, query: str, scope: SearchScope,
+    ) -> tuple[list[str], list[dict] | None]:
+        """Probe 검색 후 조건부 쿼리 확장.
+
+        Returns:
+            (queries, probe_candidates):
+            - 확장 스킵: ([원본], probe 결과)
+            - 확장 실행: ([원본, 변형1, 변형2], None)
+            - LLM 없음: ([원본], None)
+        """
+        if not self._router_llm:
+            return [query], None
+
+        # Probe: 원본 쿼리 1회 검색
+        probe_embedding = (await self._embedder.embed_batch([query]))[0]
+        domain_codes = scope.domain_codes if scope.domain_codes else None
+        probe_results = await self._store.hybrid_search(
+            embedding=probe_embedding,
+            text_query=query,
+            limit=CANDIDATE_POOL_SIZE,
+            domain_codes=domain_codes,
+            allowed_doc_ids=scope.allowed_doc_ids,
+            max_security_level=scope.security_level_max,
+        )
+
+        if not probe_results:
+            # 결과 없음 → 확장 실행
+            queries = await expand_queries(self._router_llm, query)
+            return queries, None
+
+        top_score = probe_results[0]["score"]
+        if top_score >= PROBE_SKIP_THRESHOLD:
+            logger.info(
+                "adaptive_expansion_skipped",
+                top_score=round(top_score, 4),
+                threshold=PROBE_SKIP_THRESHOLD,
+            )
+            sorted_results = sorted(probe_results, key=lambda x: x["score"], reverse=True)
+            return [query], sorted_results
+
+        # 품질 부족 → 확장 실행
+        logger.info(
+            "adaptive_expansion_triggered",
+            top_score=round(top_score, 4),
+            threshold=PROBE_SKIP_THRESHOLD,
+        )
+        queries = await expand_queries(self._router_llm, query)
+        return queries, None
 
     async def _multi_query_search(
         self,
