@@ -40,7 +40,7 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
 
     async def _execute_single(tool_call, context, scope, trace):
         """단일 Tool 실행 + trace 기록."""
-        node = trace.start_node(f"tool:{tool_call.tool_name}") if trace else None
+        trace_node = trace.start_node(f"tool:{tool_call.tool_name}") if trace else None
         try:
             result = await registry.execute(
                 tool_name=tool_call.tool_name,
@@ -48,15 +48,15 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
                 context=context,
                 scope=scope,
             )
-            if node:
-                node.finish(
+            if trace_node:
+                trace_node.finish(
                     success=result.success,
                     chunks=len(result.data) if result.data else 0,
                 )
-            return tool_call, result
+            return tool_call, result, trace_node
         except Exception as e:
-            if node:
-                node.finish(success=False, error=str(e))
+            if trace_node:
+                trace_node.finish(success=False, error=str(e))
             raise
 
     async def execute_tools(state: AgentState) -> dict:
@@ -83,17 +83,13 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
                     })
                     continue
 
-                _tc, result = outcome
+                _, result, trace_node = outcome
                 tools_called.append(tc.tool_name)
                 chunks_found = len(result.data) if result.success and result.data else 0
                 if result.success and result.data:
                     search_results.extend(result.data)
 
-                node_ms = 0
-                if trace:
-                    matching = [n for n in trace.nodes if n.node == f"tool:{tc.tool_name}"]
-                    if matching:
-                        node_ms = matching[-1].duration_ms
+                node_ms = trace_node.duration_ms if trace_node else 0
                 tool_latencies.append({
                     "tool": tc.tool_name, "success": result.success,
                     "chunks_found": chunks_found, "ms": round(node_ms, 1),

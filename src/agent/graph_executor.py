@@ -395,10 +395,9 @@ class GraphExecutor:
 
         context = AgentContext(session_id=session_id)
         tool_instances = [
-            self._registry.get(tc.tool_name)
-            for group in plan.tool_groups
+            inst for group in plan.tool_groups
             for tc in group
-            if self._registry.get(tc.tool_name)
+            if (inst := self._registry.get(tc.tool_name))
         ]
         lc_tools = convert_tools_to_langchain(tool_instances, context, plan.scope)
 
@@ -469,10 +468,9 @@ class GraphExecutor:
 
         context = AgentContext(session_id=session_id)
         tool_instances = [
-            self._registry.get(tc.tool_name)
-            for group in plan.tool_groups
+            inst for group in plan.tool_groups
             for tc in group
-            if self._registry.get(tc.tool_name)
+            if (inst := self._registry.get(tc.tool_name))
         ]
         lc_tools = convert_tools_to_langchain(tool_instances, context, plan.scope)
 
