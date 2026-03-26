@@ -94,6 +94,8 @@ class ProviderFactory:
         return OpenAILLMProvider(
             api_key=self._settings.openai_api_key,
             model=self._settings.prod_llm_model,
+            system_prefix=_LLM_SYSTEM_PREFIX,
+            max_tokens=self._settings.llm_max_tokens,
         )
 
     def get_parsing_provider(self) -> ParsingProvider:

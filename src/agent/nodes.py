@@ -16,7 +16,7 @@ from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
-MAX_CONTENT_PREVIEW_LEN = 500
+MAX_CONTENT_PREVIEW_LEN = 1500
 MAX_SOURCE_PREVIEW_LEN = 200
 MAX_SOURCES = 5
 GUARDRAIL_BLOCK_TEMPLATE = "답변을 제공할 수 없습니다. 사유: {reason}"
@@ -263,6 +263,12 @@ def _format_result(r: dict) -> str:
     return str(r)[:MAX_CONTENT_PREVIEW_LEN]
 
 
+_RAG_INSTRUCTION = (
+    "아래 참고 문서에 근거하여 답변하세요. "
+    "문서에 없는 내용은 추측하지 말고 '확인이 필요합니다'라고 안내하세요."
+)
+
+
 def build_prompt(question: str, plan, results: list[dict]) -> str:
     """검색 결과를 포함한 LLM 프롬프트 생성."""
     if not results:
@@ -277,10 +283,9 @@ def build_prompt(question: str, plan, results: list[dict]) -> str:
 
     context_text = "\n\n".join(context_parts)
 
+    parts = [_RAG_INSTRUCTION, f"\n\n참고 문서:\n{context_text}"]
     if plan.conversation_context:
-        return (
-            f"대화 맥락:\n{plan.conversation_context}\n\n"
-            f"참고 문서:\n{context_text}\n\n"
-            f"질문: {question}"
-        )
-    return f"참고 문서:\n{context_text}\n\n질문: {question}"
+        parts.append(f"\n\n대화 맥락:\n{plan.conversation_context}")
+    parts.append(f"\n\n질문: {question}")
+
+    return "".join(parts)
