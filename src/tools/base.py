@@ -43,15 +43,7 @@ class ToolDefinition:
     cost_tier: str = "free"  # "free" | "low" | "high"
 
 
-@dataclass
-class AgentContext:
-    """도구 실행 시 전달되는 대화 맥락."""
-
-    session_id: str = ""
-    user_id: str = ""
-    user_role: str = UserRole.VIEWER
-    conversation_history: list = field(default_factory=list)
-    prior_doc_ids: list[str] = field(default_factory=list)
+from src.domain.agent_context import AgentContext  # noqa: F401
 
 
 @runtime_checkable

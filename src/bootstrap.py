@@ -33,6 +33,7 @@ from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
+from src.services.null_kms_client import NullKmsClient
 from src.workflow.engine import WorkflowEngine
 from src.workflow.store import WorkflowStore
 
@@ -156,11 +157,13 @@ async def create_app_state(settings: Settings) -> AppState:
     workflow_engine = WorkflowEngine(workflow_store)
     logger.info("workflows_loaded", count=workflow_store.count)
 
-    # KMS 지식그래프 클라이언트 (선택적)
-    kms_graph_client = None
+    # KMS 지식그래프 클라이언트 (미설정 시 NullKmsClient)
     if settings.kms_api_url and settings.kms_internal_key:
         kms_graph_client = KmsGraphClient(settings.kms_api_url, settings.kms_internal_key)
         logger.info("kms_graph_client_initialized", kms_api_url=settings.kms_api_url)
+    else:
+        kms_graph_client = NullKmsClient()
+        logger.info("kms_graph_client_null", reason="KMS API 미설정")
 
     agent = GraphExecutor(
         main_llm=main_llm,

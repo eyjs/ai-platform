@@ -14,6 +14,7 @@ import numpy as np
 from pgvector.asyncpg import register_vector
 
 from src.domain.models import SECURITY_HIERARCHY
+from src.infrastructure.providers.vector_store_base import AbstractVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ TRIGRAM_MIN_SIMILARITY = 0.1
 TRIGRAM_MAX_TERMS = 5
 
 
-class VectorStore:
+class VectorStore(AbstractVectorStore):
     """pgvector + PostgreSQL full-text search 하이브리드 저장소."""
 
     def __init__(self, database_url: str):
@@ -299,21 +300,39 @@ class VectorStore:
 
     async def get_top_chunks_by_doc(
         self, document_id: str, limit: int = 2,
+        max_security_level: Optional[str] = None,
     ) -> list[dict]:
-        """document_id로 상위 청크를 chunk_index 순서로 조회 (임베딩 불필요)."""
+        """document_id로 상위 청크를 chunk_index 순서로 조회 (임베딩 불필요).
+
+        max_security_level이 지정되면 해당 등급 이하 청크만 반환한다.
+        """
         if not self._pool:
             return []
+
+        allowed_levels = self._allowed_security_levels(max_security_level)
+
+        conditions = ["c.document_id = $1"]
+        params: list = [uuid.UUID(document_id), limit]
+        param_idx = 3
+
+        if allowed_levels:
+            conditions.append(f"c.security_level = ANY(${param_idx}::text[])")
+            params.append(allowed_levels)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT c.id, c.document_id, c.content, c.chunk_index, d.file_name
                 FROM document_chunks c
                 JOIN documents d ON d.id = c.document_id
-                WHERE c.document_id = $1
+                WHERE {where_clause}
                 ORDER BY c.chunk_index
                 LIMIT $2
                 """,
-                uuid.UUID(document_id), limit,
+                *params,
             )
         return [
             {
@@ -326,6 +345,30 @@ class VectorStore:
             }
             for row in rows
         ]
+
+    async def get_aip_ids_by_externals(
+        self, external_ids: list[str],
+    ) -> dict[str, dict]:
+        """KMS external_id 목록 → ai-platform {id, security_level} 배치 역매핑.
+
+        Returns:
+            {external_id: {"aip_id": str, "security_level": str}}
+        """
+        if not self._pool or not external_ids:
+            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, external_id, security_level FROM documents "
+                "WHERE external_id = ANY($1::text[])",
+                external_ids,
+            )
+        return {
+            row["external_id"]: {
+                "aip_id": str(row["id"]),
+                "security_level": row.get("security_level", "PUBLIC"),
+            }
+            for row in rows
+        }
 
     # -- 내부 메서드 --
 
