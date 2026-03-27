@@ -1,9 +1,9 @@
 # AI Platform
 
-**어떤 웹사이트든 AI 챗봇을 붙일 수 있는 범용 플랫폼.**
+**Profile 기반 범용 AI 에이전트 플랫폼.**
 
-API Key 하나와 Profile 설정만으로 도메인별 AI 챗봇을 생성한다.
-외부 시스템(DMS, CMS, 사내 포탈 등)에서 문서를 수집하고, 해당 문서 기반으로 질의응답하는 RAG 챗봇을 제공한다.
+API Key 하나와 Profile YAML만으로 도메인별 AI 챗봇을 생성한다.
+Agent는 하나(Universal Agent), 행동은 Profile이 결정한다. 코드 변경 0줄.
 
 ```
 외부 웹사이트  ──  <script src="ai-platform/widget.js">  ──  챗봇 동작
@@ -12,87 +12,160 @@ API Key 하나와 Profile 설정만으로 도메인별 AI 챗봇을 생성한다
                         |
                    AI Platform (이 프로젝트)
                         |
-                   문서 수집 API  ←──  KMS, DMS, CMS 등 외부 시스템
+                   문서 수집 API  <──  KMS, DMS, CMS 등 외부 시스템
 ```
 
 ## How It Works
 
 ```
-1. Profile 생성    "캠핑장 예약 안내 챗봇 만들어줘"  →  camping-reservation.yaml
-2. 문서 수집       캠핑장 이용약관, 요금표, FAQ 등   →  POST /api/documents/ingest
-3. 챗봇 동작       "글램핑 2박 요금이 얼마예요?"     →  문서 기반 RAG 답변
+1. Profile 생성    "보험 상담 챗봇 만들어줘"     ->  insurance-qa.yaml
+2. 문서 수집       보험 약관, 상품요약서 등       ->  POST /api/documents/ingest
+3. 챗봇 동작       "대인배상 보상한도 알려줘"     ->  문서 기반 RAG 답변
 ```
 
 Profile을 만들고 문서를 밀어넣으면 끝. 코드 변경 없이 새 도메인 챗봇이 바로 동작한다.
 
-## Use Cases
-
-- **캠핑장 예약 안내** -- 이용약관, 요금표, FAQ 문서만 넣으면 예약 관련 질의응답 챗봇 완성.
-- **보험 상품 상담** -- 보험 약관 PDF를 수집하면 보장 내용, 보험금 한도 등 답변하는 챗봇.
-- **사내 IT 헬프데스크** -- 사내 매뉴얼, 장애 대응 가이드를 넣으면 직원용 Q&A 챗봇.
-- **외부 웹사이트 위젯** -- JS 스크립트 한 줄로 챗봇 삽입. ai-platform을 모르는 시스템에서도 동작.
-- **멀티 테넌트** -- API Key로 고객 식별, `X-Chatbot-Profile` 헤더로 봇 선택, domain_scope로 문서 격리.
-
-## Features
-
-- **Profile = Chatbot** -- Admin UI 또는 YAML로 챗봇 생성. 코드 변경 0줄.
-- **Admin UI** -- 관리자 페이지에서 챗봇 프로필 CRUD + KMS 도메인 연동.
-- **KMS Integration** -- KMS 도메인 목록 프록시 조회 (Internal Key 인증, Docker 내부 통신).
-- **Embed Anywhere** -- API Key + 헤더만으로 어떤 웹사이트든 챗봇 연동.
-- **4-Layer Router** -- 대명사 해소 > 의도 분류 > 모드 선택 > 실행 계획 조립
-- **Hybrid Search** -- pgvector(ANN) + tsvector(FTS) + pg_trgm(fuzzy) + RRF 병합
-- **Safety Guard Chain** -- Faithfulness, PII Filter, Response Policy (동적 체인)
-- **Workflow Engine** -- 절차 기반 대화 (예약 접수, 상담 안내 등). Admin API로 생성/관리.
-- **SSE Streaming** -- 토큰 단위 스트리밍 + 추론 과정(trace) 실시간 전송
-- **PostgreSQL Only** -- 벡터, 캐시, 세션, 큐 모두 PostgreSQL 단일 스택. Redis 불필요.
-- **Document Ingestion API** -- 외부 시스템이 REST API로 문서를 밀어넣으면 자동 파싱/청킹/임베딩.
+---
 
 ## Architecture
 
+### 시스템 흐름
+
 ```
-Gateway  -->  Router  -->  Agent  -->  Tool
-  |             |            |          |
- 인증        4-Layer      Pipeline     RAG Search
- Profile     분류/전략    LLM 생성     Fact Lookup
- SSE         Plan 조립   Guardrail    (scope 주입)
+Request
+  |
+  v
+[Orchestrator] ── 프로필 선택 (어떤 도메인 전문가에게 보낼지)
+  |                 Tier 1: 임베딩 유사도 (~100ms, 다국어)
+  |                 Tier 1-B: 패턴 매칭 (폴백)
+  |                 Tier 2: 키워드 스코어링
+  |                 Tier 3: LLM Function Calling (최후 수단)
+  v
+[Router 4-Layer] ── 실행 전략 결정 (어떻게 답변할지)
+  |  L0: Context Resolver (대명사 해소, LLM 위임)
+  |  L1: Intent Classifier (QuestionType 분류)
+  |  L2: Mode Selector (deterministic/agentic/workflow)
+  |  L3: Strategy Builder (ExecutionPlan 조립)
+  v
+[Agent] ── LangGraph 파이프라인 실행
+  |  route_by_rag -> execute_tools -> graph_enrich -> generate -> guardrails -> response
+  v
+[Tool System] ── RAG 5-Layer Pipeline
+  |  L1: Adaptive Query Expansion (probe -> 조건부 LLM 확장)
+  |  L2: Noise Filter (score gap 기반)
+  |  L3: Neighbor Expansion (인접 chunk)
+  |  L4: 3-Tier Reranking (CrossEncoder + score fusion)
+  |  L5: Result Guard (PII masking)
+  v
+[Safety Guard Chain] ── 답변 검증
+  |  FaithfulnessGuard (숫자/인용/co-occurrence/LLM deep eval)
+  |  PIIFilterGuard (개인정보 마스킹)
+  |  ResponsePolicyGuard (strict/balanced)
+  v
+[SSE Streaming] ── 토큰 단위 + trace 이벤트 실시간 전송
 ```
 
-### Router 4-Layer
+### 레이어 의존 규칙
 
-| Layer | 이름 | 역할 |
-|-------|------|------|
-| L0 | Context Resolver | 대명사 해소 (Pattern > LLM 2-tier) |
-| L1 | Intent Classifier | QuestionType 8종 분류 |
-| L2 | Mode Selector | agentic / workflow 모드 결정 |
-| L3 | Strategy Builder | ExecutionPlan 생성 (scope, tools, prompt, guardrails) |
+```
+Gateway -> Orchestrator -> Router -> Agent -> Tool -> Domain/Infrastructure
+                                                   -> Safety
+```
 
-### 12 Components
+**단방향만 허용. 역방향 참조 금지.**
 
-| # | Component | Description |
-|---|-----------|-------------|
-| C1 | AI Gateway | 인증, Profile 로딩, SSE 스트리밍 |
-| C2 | AI Router | 4-Layer 질문 라우팅 |
-| C3 | Universal Agent | 결정론적 RAG 파이프라인 |
-| C4 | Workflow Engine | 절차 기반 대화 (예정) |
-| C5 | Tool System | Registry + Permission + Scope 주입 |
-| C6 | Domain Layer | SearchScope, 공유 모델 |
-| C7 | Infrastructure | PostgreSQL 단일 스택 (벡터/캐시/큐/세션) |
-| C8 | Safety Guard | Faithfulness, PII, ResponsePolicy |
-| C9 | Observability | 구조화 로깅, 추적 |
-| C10 | Knowledge Pipeline | Parse > Chunk > Embed > Index |
-| C11 | Experiment Layer | A/B 테스트 (예정) |
-| C12 | Memory System | Session + Cache (PostgreSQL) |
+### 3-Layer 설정 체계
+
+```
+Platform Settings (config.py)      -- 인프라, 시크릿, 임계값 (환경변수 AIP_ prefix)
+Locale Bundle (locale/ko.yaml)     -- 언어별 문자열, 패턴, PII 규칙 (YAML)
+Profile YAML (seeds/profiles/)     -- 도메인 행동, system_prompt, 도구, 가드레일
+```
+
+하드코딩 제로. 프롬프트/메시지/패턴/PII 규칙 전부 locale YAML로 외부화.
+
+### 13 Components
+
+| # | Component | 파일 수 | 역할 |
+|---|-----------|---------|------|
+| C1 | **Gateway** | 8 | 인증(JWT/API Key), SSE 스트리밍, Rate Limiting, CORS |
+| C2 | **Orchestrator** | 8 | 임베딩 기반 프로필 라우팅 + 3-Tier 폴백 + 크로스도메인 핸드오프 |
+| C3 | **Router** | 7 | 4-Layer 질문 분석 (Context -> Intent -> Mode -> Strategy) |
+| C4 | **Agent** | 10 | LangGraph 실행 (deterministic/agentic), thinking 분리 |
+| C5 | **Workflow** | 5 | 절차 기반 대화 (예약, 계약 등), 뒤로가기/이탈 처리 |
+| C6 | **Tool System** | 11 | Registry + Permission + Scope 주입 + RAG 5-Layer |
+| C7 | **Domain** | 5 | AgentProfile, SearchScope, 공유 모델 (SSOT) |
+| C8 | **Infrastructure** | 26 | PostgreSQL 단일 스택, Provider Factory, Memory |
+| C9 | **Safety** | 5 | FaithfulnessGuard, PIIFilter, ResponsePolicy (동적 체인) |
+| C10 | **Pipeline** | 4 | Parse -> Chunk -> Embed -> Index (비동기 Job Queue) |
+| C11 | **Observability** | 4 | 구조화 JSON 로깅, RequestTrace, 레이턴시 추적 |
+| C12 | **Locale** | 2 | 다국어 문자열/패턴/PII 규칙 (ko.yaml -> LocaleBundle) |
+| C13 | **Services** | 2 | KMS 지식그래프 클라이언트 |
+
+### Orchestrator: 임베딩 기반 프로필 라우팅
+
+```
+질문 -> 임베딩 -> 프로필 능력 기술과 cosine similarity -> 최적 프로필 선택
+```
+
+- 프로필의 system_prompt, description, domain_scopes를 임베딩하여 "능력 기술"으로 사용
+- 대표 질문 관리 불필요 -- 프로필 YAML만 잘 쓰면 라우팅 자동
+- 다국어 지원 (BGE-m3-ko 임베딩 모델)
+- threshold 미달 시 패턴/키워드/LLM 순차 폴백
+
+### RAG 5-Layer Pipeline
+
+```
+Query -> [L1 Probe+확장] -> [검색] -> [L2 노이즈필터] -> [L3 이웃확장] -> [L4 리랭킹] -> [L5 PII]
+```
+
+| Layer | 역할 | 알고리즘 |
+|-------|------|----------|
+| L1 | Adaptive Query Expansion | probe 검색 후 score < threshold면 LLM으로 쿼리 변형 |
+| Hybrid Search | 벡터+FTS+Trigram 3중 검색 | pgvector ANN + tsvector FTS + pg_trgm fuzzy + RRF 병합 |
+| L2 | Noise Filter | score gap ratio 기반 저품질 제거 |
+| L3 | Neighbor Expansion | 상위 chunk의 인접 chunk 가져오기 |
+| L4 | 3-Tier Reranking | CrossEncoder + vector score fusion, Tier1+Tier2 보충 |
+| L5 | Result Guard | PII 마스킹 (locale 기반 패턴) |
+
+### Qwen3 Thinking Mode 지원
+
+```
+LLM 응답: <think>추론 과정...</think>실제 답변
+
+-> HttpLLMProvider가 <think> 블록 분리
+-> SSE event:trace (thinking) + event:token (answer)
+-> 프론트에서 "생각보기" 토글 가능
+-> /no_think 지시로 비활성화 가능 (locale YAML에서 설정)
+```
+
+---
 
 ## Tech Stack
 
-| Area | Development | Production |
-|------|-------------|------------|
-| Framework | FastAPI | FastAPI |
-| Database | PostgreSQL 16 + pgvector | PostgreSQL 16 + pgvector |
-| Embedding | sentence-transformers (BGE-m3-ko) | OpenAI text-embedding-3-small |
-| LLM | Ollama (qwen3:8b) | OpenAI gpt-4o-mini |
-| Reranker | CrossEncoder (BGE-reranker-v2-m3) | HTTP API |
-| Streaming | SSE (sse-starlette) | SSE (sse-starlette) |
+| 영역 | 기술 |
+|------|------|
+| 프레임워크 | FastAPI |
+| 언어 | Python 3.11+ |
+| DB | PostgreSQL 16 + pgvector + pg_trgm |
+| 에이전트 | LangGraph (StateGraph + ReAct) |
+| 임베딩 | BGE-m3-ko (dev, MPS GPU) / OpenAI (prod) |
+| LLM | MLX Qwen3-14B/8B (dev) / OpenAI (prod) |
+| 리랭커 | BGE-reranker-v2-m3 (dev, MPS GPU) / HTTP API (prod) |
+| 스트리밍 | SSE (sse-starlette) |
+| 테스트 | pytest (368 tests) |
+
+### MLX 서버 구성 (Apple Silicon)
+
+| 포트 | 모델 | 역할 |
+|------|------|------|
+| 8102 | bge-reranker-v2-m3 | 리랭커 (MPS) |
+| 8103 | BGE-m3-ko (1024d) | 임베딩 (MPS) |
+| 8104 | Qwen3-14B-4bit | 오케스트레이터/라우팅 LLM |
+| 8105 | Qwen3-8B-4bit | 최종 답변 LLM |
+| 8106 | Qwen2.5-7B-4bit | 다른 시스템용 |
+
+---
 
 ## Quick Start
 
@@ -100,48 +173,38 @@ Gateway  -->  Router  -->  Agent  -->  Tool
 
 - Python 3.11+
 - PostgreSQL 16 with pgvector extension
-- Docker & Docker Compose (recommended)
+- Docker & Docker Compose
 
 ### Run with Docker
 
 ```bash
-# Clone
 git clone https://github.com/eyjs/ai-platform.git
 cd ai-platform
 
-# Configure
 cp .env.example .env
 # Edit .env with your settings
 
-# Start
 docker compose up -d
 
-# Verify
-curl http://localhost:8000/api/health
+curl http://localhost:8010/api/health
 ```
 
 ### Local Development
 
 ```bash
-# Virtual environment
 python -m venv .venv
 source .venv/bin/activate
-
-# Install dependencies
 pip install -e ".[dev,local]"
 
-# Start PostgreSQL
 docker compose up -d postgres
-
-# Run migrations
 alembic upgrade head
 
-# Start dev server
 uvicorn src.main:app --reload --port 8000
 
-# Run tests
 pytest tests/ -x -v
 ```
+
+---
 
 ## API
 
@@ -150,154 +213,268 @@ pytest tests/ -x -v
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check |
-| GET | `/api/profiles` | List available profiles |
-| POST | `/api/chat` | Chat (non-streaming) |
-| POST | `/api/chat/stream` | Chat (SSE streaming) |
-| POST | `/api/documents/ingest` | Document ingestion |
+| GET | `/api/profiles` | 프로필 목록 |
+| POST | `/api/chat` | 챗봇 (비스트리밍) |
+| POST | `/api/chat/stream` | 챗봇 (SSE 스트리밍) |
+| POST | `/api/documents/ingest` | 문서 수집 (비동기) |
+| GET | `/api/documents/ingest/{job_id}` | 수집 작업 상태 조회 |
 
 ### Admin (Control Plane)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/admin/profiles` | 프로필 목록 |
-| GET | `/api/admin/profiles/{id}` | 프로필 상세 |
-| POST | `/api/admin/profiles` | 프로필 생성 |
-| PUT | `/api/admin/profiles/{id}` | 프로필 수정 (부분) |
-| DELETE | `/api/admin/profiles/{id}` | 프로필 삭제 (soft) |
-| GET | `/api/admin/workflows` | 워크플로우 목록 |
-| POST | `/api/admin/workflows` | 워크플로우 생성 |
-| PUT | `/api/admin/workflows/{id}` | 워크플로우 수정 |
-| DELETE | `/api/admin/workflows/{id}` | 워크플로우 삭제 (soft) |
-| GET | `/api/admin/kms/domains` | KMS 도메인 프록시 조회 |
-| POST | `/api/admin/cache/invalidate` | 캐시 전체 무효화 |
+| GET/POST | `/api/admin/profiles` | 프로필 CRUD |
+| GET/PUT/DELETE | `/api/admin/profiles/{id}` | 프로필 상세/수정/삭제 |
+| GET/POST | `/api/admin/workflows` | 워크플로우 CRUD |
+| POST | `/api/admin/cache/invalidate` | 캐시 무효화 |
+| POST | `/api/api-keys` | API Key 생성 (ADMIN) |
+
+### SSE 이벤트 프로토콜
+
+```
+event: trace     -- 파이프라인 추적 (tool 실행, thinking 등)
+data: {"step": "tool_execution", "tool": "rag_search", "ms": 764}
+
+event: token     -- 답변 토큰
+data: {"delta": "대인배상I의 보상한도는"}
+
+event: done      -- 완료 + 소스
+data: {"answer": "...", "sources": [...], "tools_called": [...]}
+```
 
 ### Chat Example
 
 ```bash
-# API Key + Profile 헤더로 외부 시스템에서 호출
-curl -X POST http://localhost:8000/api/chat \
+# Orchestrator 모드 (프로필 자동 선택)
+curl -X POST http://localhost:8010/api/chat/stream \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -H "X-Chatbot-Profile: camping-reservation" \
-  -d '{
-    "question": "글램핑 2박 요금이 얼마예요?",
-    "session_id": "user-123"
-  }'
-```
+  -H "X-API-Key: aip_dev_admin" \
+  -d '{"question": "자동차보험 보험료 알려줘"}'
 
-### SSE Streaming
-
-```bash
-curl -N -X POST http://localhost:8000/api/chat/stream \
+# 프로필 지정 모드
+curl -X POST http://localhost:8010/api/chat/stream \
   -H "Content-Type: application/json" \
-  -d '{
-    "question": "보험 약관 요약해줘",
-    "profile_id": "insurance-qa"
-  }'
+  -H "X-API-Key: aip_dev_admin" \
+  -d '{"question": "보험료 알려줘", "chatbot_id": "insurance-qa"}'
 ```
 
-### Document Ingestion
-
-```bash
-# 외부 DMS/CMS에서 문서를 밀어넣기
-curl -X POST http://localhost:8000/api/documents/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "캠핑장 이용약관",
-    "content": "1. 체크인 15:00, 체크아웃 11:00...",
-    "domain_code": "camping",
-    "security_level": "PUBLIC"
-  }'
-```
-
-## Creating a Profile
-
-### Option 1: Admin UI (recommended)
-
-`http://localhost:8000/static/admin.html` 에서 관리자 페이지에 접속하여 챗봇을 생성한다.
-
-- API Key 설정 (우측 상단)
-- "+ New Chatbot" 클릭
-- 기본 정보, 모드, 검색 범위(KMS 도메인), 도구, 응답 정책, 메모리 설정
-- KMS 연동 시 도메인 체크박스로 검색 범위 자동 설정
-
-### Option 2: YAML Seed
-
-Add a YAML file to `seeds/profiles/`. Example -- camping reservation chatbot:
-
-```yaml
-id: camping-reservation
-name: Camping Reservation Assistant
-description: 캠핑장 예약 안내 챗봇
-mode: agentic
-
-system_prompt: |
-  당신은 캠핑장 예약 안내 도우미입니다.
-  이용약관, 요금표, FAQ 문서를 기반으로 정확하게 답변하세요.
-  문서에 없는 내용은 "확인 후 안내드리겠습니다"라고 답변하세요.
-
-tools:
-  - rag_search
-  - fact_lookup
-
-domain_scopes:
-  - domain_code: camping
-    security_level_max: PUBLIC
-
-response_policy: balanced
-
-guardrails:
-  - faithfulness
-  - pii_filter
-```
-
-Restart the server -- the new profile is automatically loaded. Documents ingested with `domain_code: camping` are automatically scoped to this profile.
+---
 
 ## Project Structure
 
 ```
 ai-platform/
-├── src/
-│   ├── main.py               # FastAPI entrypoint + lifespan
-│   ├── config.py             # Settings (AIP_ prefix)
-│   ├── domain/               # Shared models, enums
-│   ├── gateway/              # HTTP endpoints, SSE, auth
-│   │   ├── router.py         # Data plane (chat, ingest, health)
-│   │   ├── admin_router.py   # Control plane (profile/workflow CRUD)
-│   │   ├── auth.py           # JWT / API Key / Origin 인증
-│   │   └── streaming.py      # SSE helpers
-│   ├── router/               # 4-Layer intent routing
-│   ├── agent/                # Universal Agent, Profile, ProfileStore
-│   ├── workflow/              # Workflow Engine + Store + Definition
-│   ├── tools/                # Tool Protocol + Registry
-│   │   └── internal/         # Built-in tools (RAG, Facts)
-│   ├── infrastructure/       # PostgreSQL, providers
-│   │   ├── providers/        # LLM / Embedding / Reranker
-│   │   └── memory/           # Session, Cache
-│   ├── safety/               # Guardrail chain
-│   ├── observability/        # Structured logging, tracing
-│   └── pipeline/             # Document ingestion pipeline
-├── static/
-│   ├── admin.html            # Admin UI (profile CRUD + KMS 연동)
-│   └── chat-widget.html      # Chat widget (SSE streaming)
-├── seeds/profiles/           # Profile YAML definitions
-├── tests/                    # pytest test suite
-├── alembic/                  # DB migrations
-├── docker-compose.yml        # PostgreSQL + app
-└── pyproject.toml
+|-- src/
+|   |-- main.py                    # FastAPI entrypoint + lifespan
+|   |-- config.py                  # Settings (AIP_ prefix, pydantic-settings)
+|   |-- bootstrap.py               # 13개 컴포넌트 초기화 오케스트레이션
+|   |
+|   |-- locale/                    # C12: 다국어 로케일 시스템
+|   |   |-- ko.yaml                #   한국어 (프롬프트, 메시지, 패턴, PII)
+|   |   |-- bundle.py              #   LocaleBundle 로더 (startup 시 pre-compile)
+|   |
+|   |-- gateway/                   # C1: HTTP 레이어
+|   |   |-- router.py              #   Data plane (/chat, /ingest, /health)
+|   |   |-- admin_router.py        #   Control plane (profile/workflow CRUD)
+|   |   |-- auth.py                #   JWT + API Key + Origin 인증
+|   |   |-- rate_limiter.py        #   PostgreSQL Token Bucket
+|   |   |-- streaming.py           #   SSE 유틸리티
+|   |   |-- models.py              #   Request/Response DTO
+|   |   |-- webhook_router.py      #   Webhook 핸들러
+|   |
+|   |-- orchestrator/              # C2: 프로필 라우팅
+|   |   |-- orchestrator.py        #   MasterOrchestrator (3-Tier + continuation)
+|   |   |-- embedding_router.py    #   임베딩 기반 의도-능력 매칭 (Tier 1)
+|   |   |-- profile_router.py      #   패턴/키워드 라우터 (Tier 1-B, 2)
+|   |   |-- llm_adapter.py         #   LLM Function Calling (Tier 3)
+|   |   |-- prompts.py             #   오케스트레이터 프롬프트 (locale 기반)
+|   |   |-- models.py              #   OrchestratorResult
+|   |   |-- tenant.py              #   멀티테넌트 필터링
+|   |
+|   |-- router/                    # C3: 4-Layer 질문 라우팅
+|   |   |-- ai_router.py           #   4-Layer 오케스트레이터
+|   |   |-- context_resolver.py    #   L0: 대명사 해소 (Pattern detect -> LLM)
+|   |   |-- intent_classifier.py   #   L1: QuestionType 분류 (locale 패턴)
+|   |   |-- mode_selector.py       #   L2: 모드 선택 (Hybrid 트리거 전수 비교)
+|   |   |-- strategy_builder.py    #   L3: ExecutionPlan 조립 + PII 새니타이징
+|   |   |-- execution_plan.py      #   ExecutionPlan, QuestionType, QuestionStrategy
+|   |
+|   |-- agent/                     # C4: Universal Agent
+|   |   |-- graph_executor.py      #   모드별 LangGraph 실행 + thinking 분리
+|   |   |-- graphs.py              #   StateGraph / ReAct 빌더
+|   |   |-- nodes.py               #   노드 팩토리 (tool, generate, guardrail)
+|   |   |-- state.py               #   AgentState TypedDict
+|   |   |-- tool_adapter.py        #   Tool -> LangChain StructuredTool 변환
+|   |   |-- graph_enrich.py        #   KMS 지식그래프 보강 노드
+|   |   |-- profile.py             #   AgentProfile re-export
+|   |   |-- profile_store.py       #   Profile YAML/DB 로딩
+|   |   |-- chat_model_factory.py  #   ChatModel 팩토리 (MLX 자동 감지)
+|   |
+|   |-- workflow/                  # C5: 절차 기반 대화 엔진
+|   |   |-- engine.py              #   WorkflowEngine (start/advance/cancel)
+|   |   |-- store.py               #   WorkflowStore (YAML seed + DB)
+|   |   |-- definition.py          #   WorkflowDefinition, WorkflowStep
+|   |   |-- state.py               #   WorkflowSession
+|   |
+|   |-- tools/                     # C6: Tool System
+|   |   |-- base.py                #   Tool/ScopedTool Protocol, ToolResult
+|   |   |-- registry.py            #   ToolRegistry (name -> instance, scope 주입)
+|   |   |-- internal/
+|   |       |-- rag_search.py      #   5-Layer RAG Pipeline
+|   |       |-- fact_lookup.py     #   Fact 검색
+|   |       |-- query_expander.py  #   L1: LLM 쿼리 확장 (locale 프롬프트)
+|   |       |-- noise_filter.py    #   L2: Score gap 필터
+|   |       |-- neighbor_expander.py # L3: 인접 chunk 확장
+|   |       |-- reranker_pipeline.py # L4: 3-Tier CrossEncoder 리랭킹
+|   |       |-- result_guard.py    #   L5: PII 마스킹 (locale 패턴)
+|   |
+|   |-- domain/                    # C7: 공유 도메인 모델
+|   |   |-- models.py              #   AgentMode, SecurityLevel, SearchScope 등
+|   |   |-- agent_profile.py       #   AgentProfile (frozen dataclass)
+|   |   |-- agent_context.py       #   AgentContext (tool 실행 컨텍스트)
+|   |   |-- protocols.py           #   공유 Protocol
+|   |
+|   |-- infrastructure/            # C8: PostgreSQL 단일 스택
+|   |   |-- vector_store.py        #   Hybrid Search (pgvector + FTS + trigram + RRF)
+|   |   |-- fact_store.py          #   Fact 저장/조회
+|   |   |-- job_queue.py           #   PostgreSQL SKIP LOCKED 작업 큐
+|   |   |-- memory/
+|   |   |   |-- session.py         #   세션 메모리 (PostgreSQL)
+|   |   |   |-- cache.py           #   TTL 캐시 (PostgreSQL UNLOGGED)
+|   |   |-- providers/
+|   |       |-- base.py            #   LLMProvider, EmbeddingProvider, StreamChunk
+|   |       |-- factory.py         #   ProviderFactory (locale 연동)
+|   |       |-- llm/               #   OpenAI, Ollama, HTTP(MLX) + thinking 분리
+|   |       |-- embedding/         #   OpenAI, SentenceTransformers, HTTP
+|   |       |-- reranking/         #   CrossEncoder, LLM, HTTP
+|   |       |-- parsing/           #   Text, LlamaParse
+|   |
+|   |-- safety/                    # C9: Guardrail Chain
+|   |   |-- base.py                #   Guardrail Protocol, GuardrailResult
+|   |   |-- faithfulness.py        #   숫자/인용/co-occurrence/LLM 검증
+|   |   |-- pii_filter.py          #   PII 감지/마스킹 (locale 패턴)
+|   |   |-- response_policy.py     #   strict/balanced 정책
+|   |
+|   |-- pipeline/                  # C10: 문서 수집 파이프라인
+|   |   |-- ingest.py              #   IngestPipeline (parse->chunk->embed->index)
+|   |   |-- chunker.py             #   TextChunker, MarkdownChunker
+|   |   |-- domain_tagger.py       #   도메인 메타데이터 태깅
+|   |
+|   |-- observability/             # C11: 관측성
+|   |   |-- logging.py             #   구조화 JSON 로깅 + ContextVar
+|   |   |-- trace_logger.py        #   RequestTrace (노드별 레이턴시)
+|   |   |-- metrics.py             #   메트릭 수집
+|   |
+|   |-- services/                  # C13: 외부 서비스 클라이언트
+|   |   |-- kms_graph_client.py    #   KMS 지식그래프 API
+|   |   |-- null_kms_client.py     #   NullObject (KMS 미연결 시)
+|   |
+|   |-- common/                    # 공통 유틸리티
+|       |-- exceptions.py          #   예외 계층 (AIError, GatewayError 등)
+|
+|-- seeds/
+|   |-- profiles/                  # Profile YAML (8개)
+|   |   |-- insurance-qa.yaml
+|   |   |-- insurance-contract.yaml
+|   |   |-- legal-contract.yaml
+|   |   |-- hr-onboarding.yaml
+|   |   |-- food-recipe.yaml
+|   |   |-- fortune-saju.yaml
+|   |   |-- general-assistant.yaml
+|   |   |-- general-chat.yaml
+|   |-- workflows/                 # Workflow YAML (2개)
+|
+|-- static/
+|   |-- admin.html                 # Admin UI
+|   |-- chat-widget.html           # Chat Widget (SSE)
+|
+|-- tests/                         # 368 tests
+|-- alembic/                       # DB migrations
+|-- docker-compose.yml
+|-- pyproject.toml
 ```
+
+---
+
+## DB Schema (PostgreSQL Only)
+
+| 테이블 | 용도 | 타입 |
+|--------|------|------|
+| agent_profiles | 프로필 설정 | 일반 |
+| documents | 문서 메타데이터 | 일반 |
+| document_chunks | 벡터+FTS+trgm 검색 | 일반 |
+| facts | 구조화된 팩트 | 일반 |
+| conversation_sessions | 대화 세션 | 일반 (영속) |
+| cache_entries | 캐시 | UNLOGGED |
+| job_queue | 작업 큐 (SKIP LOCKED) | 일반 |
+| workflow_states | 워크플로우 상태 | 일반 (영속) |
+| api_keys | API Key 관리 | 일반 |
+
+---
+
+## Creating a Profile
+
+### YAML (seeds/profiles/)
+
+```yaml
+id: insurance-qa
+name: 보험 상담 챗봇
+
+domain_scopes:
+  - "자동차보험"
+  - "실손보험"
+security_level_max: "INTERNAL"
+
+mode: "deterministic"
+
+tools:
+  - name: "rag_search"
+    config:
+      max_vector_chunks: 3
+  - name: "fact_lookup"
+
+system_prompt: |
+  당신은 보험 상품 전문 상담 AI입니다.
+  고객의 질문에 정확하고 친절하게 답변하세요.
+  반드시 문서 근거를 인용하여 답변하세요.
+
+response_policy: "strict"
+guardrails:
+  - "faithfulness"
+  - "pii_filter"
+
+intent_hints:
+  - name: "INSURANCE_INQUIRY"
+    patterns: ["보험", "보장", "보험료", "보험금", "보상"]
+    description: "보험 상품, 보장 내용, 보험료 관련 질문"
+```
+
+서버 재시작하면 자동 로드. 임베딩 라우터가 system_prompt/description을 임베딩하여 자동 라우팅.
+
+---
+
+## Design Principles
+
+1. **Profile = Chatbot** -- YAML 추가만으로 새 챗봇. 코드 변경 0줄.
+2. **No Agent Sprawl** -- Agent는 하나. 행동은 Profile이 결정.
+3. **Strict Layer Separation** -- Gateway > Router > Agent > Tool. 역방향 금지.
+4. **PostgreSQL Single Stack** -- 벡터, 캐시, 세션, 큐 모두 PostgreSQL. Redis 불필요.
+5. **Tool Permission as Security** -- Profile.tools에 없는 도구는 LLM이 존재를 모른다.
+6. **Scope Injection** -- Tool은 어떤 봇에서 호출됐는지 모른다. scope/context만 받는다.
+7. **Locale as Config** -- 모든 언어/도메인 의존 문자열은 YAML 외부화. 코드에 하드코딩 없음.
+8. **Capability-based Routing** -- 프로필의 능력 기술을 임베딩하여 의미 기반 라우팅. 패턴 관리 불필요.
+
+---
 
 ## KMS Integration
 
-ai-platform은 KMS(문서관리 프레임워크)와 연동하여 도메인 정보를 조회한다.
-
 ```
 KMS (NestJS)                    ai-platform (FastAPI)
-──────────────                  ─────────────────────
+--------------                  ---------------------
 문서 체계 관리 (SSOT)            AI 프로필 / RAG / 챗봇
 도메인/카테고리/문서              검색 / 임베딩 / 생성
-        │                               │
-        └──── Docker 내부 통신 ──────────┘
+        |                               |
+        +---- Docker 내부 통신 ---------+
              X-Internal-Key (공유 비밀키)
 ```
 
@@ -306,15 +483,25 @@ KMS (NestJS)                    ai-platform (FastAPI)
 | KMS API URL | `AIP_KMS_API_URL` | 예: `http://kms-api:3000/api` |
 | Internal Key | `AIP_KMS_INTERNAL_KEY` | KMS `INTERNAL_KEY`와 동일한 값 |
 
-KMS 미연결 시 Admin UI의 도메인 체크박스가 비활성화되며, 수동 입력으로 대체 가능.
+---
 
-## Design Principles
+## Environment Variables
 
-1. **No Agent Sprawl** -- One Universal Agent runtime. Behavior is driven by Profile configuration.
-2. **Strict Layer Separation** -- Gateway > Router > Agent > Tool. No reverse dependencies.
-3. **PostgreSQL Single Stack** -- Vector search, caching, sessions, job queue all on PostgreSQL. No Redis.
-4. **Tool Permission as Security** -- Tools not listed in a Profile don't exist to the LLM.
-5. **Scope Injection** -- Tools receive SearchScope (domain codes, security level) without knowing which bot called them.
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `AIP_PROVIDER_MODE` | development | development / openai / production |
+| `AIP_DATABASE_URL` | localhost:5434 | PostgreSQL 연결 |
+| `AIP_EMBEDDING_SERVER_URL` | - | MLX 임베딩 서버 |
+| `AIP_RERANKER_SERVER_URL` | - | MLX 리랭커 서버 |
+| `AIP_ROUTER_LLM_SERVER_URL` | - | 라우팅 LLM 서버 |
+| `AIP_MAIN_LLM_SERVER_URL` | - | 답변 LLM 서버 |
+| `AIP_AUTH_REQUIRED` | true | 인증 활성화 |
+| `AIP_LOCALE` | ko | 로케일 (ko.yaml 로드) |
+| `AIP_ORCHESTRATOR_ENABLED` | true | 오케스트레이터 활성화 |
+| `AIP_ORCHESTRATOR_MODEL` | Qwen3-14B | 오케스트레이터 LLM 모델 |
+| `AIP_LOG_FORMAT` | json | json / human |
+
+---
 
 ## License
 
