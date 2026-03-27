@@ -278,9 +278,10 @@ def build_prompt(question: str, plan, results: list[dict]) -> str:
     max_chunks = plan.strategy.max_vector_chunks
     context_parts = []
     for i, r in enumerate(results[:max_chunks], 1):
-        title = r.get("title", r.get("file_name", ""))
+        # 프론트에서 file_name으로 소스를 표시하므로 프롬프트도 file_name 사용
+        doc_ref = r.get("file_name") or r.get("title", "")
         content = _format_result(r)
-        context_parts.append(f"[{i}] {title}\n{content}")
+        context_parts.append(f"[{i}] {doc_ref}\n{content}")
 
     context_text = "\n\n".join(context_parts)
 
