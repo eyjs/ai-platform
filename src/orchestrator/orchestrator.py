@@ -21,7 +21,7 @@ from src.orchestrator.tenant import TenantService
 
 logger = get_logger(__name__)
 
-_RESUME_MAX_LENGTH = 80
+_RESUME_MAX_LENGTH = 40
 
 # 프로필 히스토리 최대 보관 수
 _MAX_PROFILE_HISTORY = 10
@@ -286,12 +286,15 @@ class MasterOrchestrator:
         return result
 
     def _is_resume_intent(self, question: str) -> bool:
-        """워크플로우 재개 의도인지 패턴 매칭으로 판단한다."""
+        """워크플로우 재개 의도인지 판단한다. 짧은 문장 + 문두 패턴만."""
         stripped = question.strip()
         if len(stripped) > _RESUME_MAX_LENGTH:
             return False
         pattern = get_locale().compiled_pattern("resume")
-        return bool(pattern and pattern.search(stripped))
+        if not pattern:
+            return False
+        # 문두 5자 이내에서만 매칭 (중간에 "다시"가 있는 일반 질문 배제)
+        return bool(pattern.search(stripped[:10]))
 
     def _route_result_from_tier(
         self, tier_result, profiles: list[dict],

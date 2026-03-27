@@ -4,7 +4,15 @@ LLM, Embedding, Reranker, Parsing 4종.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import AsyncIterator, List
+
+
+@dataclass(frozen=True)
+class StreamChunk:
+    """스트리밍 청크. kind로 thinking/answer 구분."""
+    kind: str   # "thinking" | "answer"
+    content: str
 
 
 class EmbeddingProvider(ABC):
@@ -39,6 +47,11 @@ class LLMProvider(ABC):
     async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
         """토큰 단위 스트리밍. 기본 구현은 generate() 결과를 한 번에 yield."""
         yield await self.generate(prompt, system=system)
+
+    async def generate_stream_typed(self, prompt: str, system: str = "") -> AsyncIterator[StreamChunk]:
+        """thinking/answer 구분 스트리밍. 기본 구현은 전부 answer로 전달."""
+        async for token in self.generate_stream(prompt, system):
+            yield StreamChunk(kind="answer", content=token)
 
 
 class RerankerProvider(ABC):

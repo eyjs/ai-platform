@@ -7,24 +7,15 @@ Qwen3 등 thinking 모델의 <think>...</think> 블록을
 import json
 import logging
 import re
-from dataclasses import dataclass
 from typing import AsyncIterator
 
 import httpx
 
-from ..base import LLMProvider
+from ..base import LLMProvider, StreamChunk
 
 logger = logging.getLogger(__name__)
 
 _THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
-
-
-@dataclass(frozen=True)
-class StreamChunk:
-    """스트리밍 청크. kind로 thinking/answer 구분."""
-
-    kind: str   # "thinking" | "answer"
-    content: str
 
 
 class HttpLLMProvider(LLMProvider):

@@ -65,7 +65,11 @@ class EmbeddingRouter:
             logger.warning("embedding_router_no_capabilities")
             return
 
-        embeddings = await self._embedding.embed_batch(all_texts)
+        try:
+            embeddings = await self._embedding.embed_batch(all_texts)
+        except Exception as e:
+            logger.warning("embedding_router_init_failed", error=str(e))
+            return
 
         for (text, profile_id), embedding in zip(text_to_profile, embeddings):
             if profile_id not in self._profile_capabilities:
@@ -85,7 +89,11 @@ class EmbeddingRouter:
         if not self._initialized or not self._profile_capabilities:
             return None
 
-        query_embeddings = await self._embedding.embed_batch([question])
+        try:
+            query_embeddings = await self._embedding.embed_batch([question])
+        except Exception as e:
+            logger.warning("embedding_route_error", error=str(e))
+            return None
         query_vec = query_embeddings[0]
 
         profile_scores: dict[str, tuple[float, str]] = {}

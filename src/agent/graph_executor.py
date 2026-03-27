@@ -13,7 +13,7 @@ from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chai
 from src.agent.state import create_initial_state
 from src.agent.tool_adapter import convert_tools_to_langchain
 from src.domain.models import AgentMode, AgentResponse, SourceRef, TraceInfo
-from src.infrastructure.providers.base import LLMProvider
+from src.infrastructure.providers.base import LLMProvider, StreamChunk
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.trace_logger import RequestTrace
@@ -295,19 +295,13 @@ class GraphExecutor:
         """
         # RAG 불필요 -> 직접 스트리밍
         if not plan.strategy.needs_rag:
-            if hasattr(self._main_llm, "generate_stream_typed"):
-                async for chunk in self._main_llm.generate_stream_typed(
-                    question, system=plan.system_prompt,
-                ):
-                    if chunk.kind == "thinking":
-                        yield {"type": "thinking", "data": chunk.content}
-                    else:
-                        yield {"type": "token", "data": chunk.content}
-            else:
-                async for token in self._main_llm.generate_stream(
-                    question, system=plan.system_prompt,
-                ):
-                    yield {"type": "token", "data": token}
+            async for chunk in self._main_llm.generate_stream_typed(
+                question, system=plan.system_prompt,
+            ):
+                if chunk.kind == "thinking":
+                    yield {"type": "thinking", "data": chunk.content}
+                else:
+                    yield {"type": "token", "data": chunk.content}
             yield {"type": "done", "data": {"tools_called": [], "sources": []}}
             return
 
@@ -358,23 +352,15 @@ class GraphExecutor:
         }}
 
         answer_tokens = []
-        # Qwen3 thinking 모드: thinking/answer 분리 스트리밍
-        if hasattr(self._main_llm, "generate_stream_typed"):
-            from src.infrastructure.providers.llm.http_llm import StreamChunk
-            async for chunk in self._main_llm.generate_stream_typed(
-                prompt, system=plan.system_prompt,
-            ):
-                if chunk.kind == "thinking":
-                    yield {"type": "thinking", "data": chunk.content}
-                else:
-                    answer_tokens.append(chunk.content)
-                    yield {"type": "token", "data": chunk.content}
-        else:
-            async for token in self._main_llm.generate_stream(
-                prompt, system=plan.system_prompt,
-            ):
-                answer_tokens.append(token)
-                yield {"type": "token", "data": token}
+        # thinking/answer 분리 스트리밍 (base 기본 구현은 전부 answer)
+        async for chunk in self._main_llm.generate_stream_typed(
+            prompt, system=plan.system_prompt,
+        ):
+            if chunk.kind == "thinking":
+                yield {"type": "thinking", "data": chunk.content}
+            else:
+                answer_tokens.append(chunk.content)
+                yield {"type": "token", "data": chunk.content}
 
         # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)

@@ -68,11 +68,11 @@ def _build_orchestrator_tools() -> list[dict]:
                     "properties": {
                         "profile_id": {
                             "type": "string",
-                            "description": "선택할 프로필 ID",
+                            "description": get_locale().prompt("orchestrator_tool_profile_id_desc"),
                         },
                         "reason": {
                             "type": "string",
-                            "description": "선택 이유 (한국어, 1문장)",
+                            "description": get_locale().prompt("orchestrator_tool_reason_desc"),
                         },
                     },
                     "required": ["profile_id", "reason"],

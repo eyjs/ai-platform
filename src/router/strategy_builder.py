@@ -108,16 +108,12 @@ class StrategyBuilder:
     @staticmethod
     def _sanitize_history(history: List[dict]) -> List[dict]:
         """대화 히스토리에서 PII 패턴을 마스킹한다."""
-        import re
-        pii_patterns = [
-            (re.compile(r"\d{6}-[1-4]\d{6}"), "[주민번호]"),
-            (re.compile(r"01[0-9]-\d{3,4}-\d{4}"), "[전화번호]"),
-            (re.compile(r"\d{3,6}-\d{2,6}-\d{2,6}"), "[계좌번호]"),
-        ]
+        from src.locale.bundle import get_locale
+        pii_rules = get_locale().pii_result_guard
         sanitized = []
         for turn in history:
             content = turn.get("content", "")
-            for pat, replacement in pii_patterns:
+            for pat, replacement in pii_rules:
                 content = pat.sub(replacement, content)
             sanitized.append({**turn, "content": content})
         return sanitized
