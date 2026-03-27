@@ -349,20 +349,24 @@ async def chat_stream(req: ChatRequest, request: Request):
             ):
                 event_type = event["type"]
                 if event_type == "thinking":
-                    yield {"event": "thinking", "data": event["data"]}
+                    yield {"event": "trace", "data": json.dumps({"step": "thinking", "content": event["data"]}, ensure_ascii=False)}
                 elif event_type == "token":
                     answer_parts.append(event["data"])
-                    yield {"event": "token", "data": event["data"]}
+                    yield {"event": "token", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
                 elif event_type == "replace":
                     answer_parts.clear()
                     answer_parts.append(event["data"])
-                    yield {"event": "replace", "data": event["data"]}
+                    yield {"event": "replace", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
                 elif event_type == "trace":
                     yield {"event": "trace", "data": json.dumps(event["data"], ensure_ascii=False)}
                 elif event_type == "done":
                     done_data = event["data"]
                     done_data["profile_id"] = setup.profile_id
                     done_data["orchestrated"] = setup.orchestrated
+                    # KMS 프론트 호환: answer, confidence, traversal_path 필드 추가
+                    done_data.setdefault("answer", "".join(answer_parts))
+                    done_data.setdefault("confidence", None)
+                    done_data.setdefault("traversal_path", [])
                     yield {"event": "done", "data": json.dumps(done_data, ensure_ascii=False)}
 
             full_answer = "".join(answer_parts)
