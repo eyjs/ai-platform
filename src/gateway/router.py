@@ -348,7 +348,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                 session_id=setup.session_id, trace=setup.trace,
             ):
                 event_type = event["type"]
-                if event_type == "token":
+                if event_type == "thinking":
+                    yield {"event": "thinking", "data": event["data"]}
+                elif event_type == "token":
                     answer_parts.append(event["data"])
                     yield {"event": "token", "data": event["data"]}
                 elif event_type == "replace":

@@ -295,10 +295,19 @@ class GraphExecutor:
         """
         # RAG 불필요 -> 직접 스트리밍
         if not plan.strategy.needs_rag:
-            async for token in self._main_llm.generate_stream(
-                question, system=plan.system_prompt,
-            ):
-                yield {"type": "token", "data": token}
+            if hasattr(self._main_llm, "generate_stream_typed"):
+                async for chunk in self._main_llm.generate_stream_typed(
+                    question, system=plan.system_prompt,
+                ):
+                    if chunk.kind == "thinking":
+                        yield {"type": "thinking", "data": chunk.content}
+                    else:
+                        yield {"type": "token", "data": chunk.content}
+            else:
+                async for token in self._main_llm.generate_stream(
+                    question, system=plan.system_prompt,
+                ):
+                    yield {"type": "token", "data": token}
             yield {"type": "done", "data": {"tools_called": [], "sources": []}}
             return
 
@@ -349,11 +358,23 @@ class GraphExecutor:
         }}
 
         answer_tokens = []
-        async for token in self._main_llm.generate_stream(
-            prompt, system=plan.system_prompt,
-        ):
-            answer_tokens.append(token)
-            yield {"type": "token", "data": token}
+        # Qwen3 thinking 모드: thinking/answer 분리 스트리밍
+        if hasattr(self._main_llm, "generate_stream_typed"):
+            from src.infrastructure.providers.llm.http_llm import StreamChunk
+            async for chunk in self._main_llm.generate_stream_typed(
+                prompt, system=plan.system_prompt,
+            ):
+                if chunk.kind == "thinking":
+                    yield {"type": "thinking", "data": chunk.content}
+                else:
+                    answer_tokens.append(chunk.content)
+                    yield {"type": "token", "data": chunk.content}
+        else:
+            async for token in self._main_llm.generate_stream(
+                prompt, system=plan.system_prompt,
+            ):
+                answer_tokens.append(token)
+                yield {"type": "token", "data": token}
 
         # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)

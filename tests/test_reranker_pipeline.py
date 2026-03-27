@@ -19,10 +19,11 @@ async def test_tier1_high_quality():
     ]
     candidates = [_chunk("a", 0.8), _chunk("b", 0.7), _chunk("c", 0.6)]
     result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
-    # a: 0.7*0.9 + 0.3*0.8 = 0.87
-    # b: 0.7*0.7 + 0.3*0.7 = 0.70
-    # c: 0.7*0.3 + 0.3*0.6 = 0.39 (< 0.5)
-    assert len(result) == 2
+    # a: 0.7*0.9 + 0.3*0.8 = 0.87 (Tier1: >= 0.5)
+    # b: 0.7*0.7 + 0.3*0.7 = 0.70 (Tier1: >= 0.5)
+    # c: 0.7*0.3 + 0.3*0.6 = 0.39 (Tier2: >= 0.15, Tier1 보충)
+    # top_k=5이므로 Tier1(2개) + Tier2 보충(1개) = 3개
+    assert len(result) == 3
     assert result[0]["chunk_id"] == "a"
 
 

@@ -15,22 +15,10 @@ from itertools import combinations
 from typing import Optional
 
 from src.infrastructure.providers.base import LLMProvider
+from src.locale.bundle import get_locale
 from src.safety.base import GuardrailContext, GuardrailResult
 
 logger = logging.getLogger(__name__)
-
-_CITATION_PATTERN = re.compile(r'[\w가-힣]+\.(?:pdf|csv|md|xlsx|docx)', re.IGNORECASE)
-
-_DEEP_EVAL_PROMPT = """아래 답변이 제공된 소스 문서에 근거하는지 판단하세요.
-
-[소스 문서]
-{sources}
-
-[답변]
-{answer}
-
-JSON으로 응답하세요:
-{{"faithful": true/false, "reason": "판단 근거 (1문장)"}}"""
 
 
 class FaithfulnessGuard:
@@ -40,6 +28,8 @@ class FaithfulnessGuard:
 
     def __init__(self, router_llm: Optional[LLMProvider] = None):
         self._llm = router_llm
+        exts = "|".join(get_locale().citation_extensions)
+        self._citation_re = re.compile(rf'[\w가-힣]+\.(?:{exts})', re.IGNORECASE)
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
         if not context.source_documents:
@@ -54,10 +44,18 @@ class FaithfulnessGuard:
             source_numbers = self._extract_numbers(source_text)
             unverified = [n for n in answer_numbers if n not in source_numbers]
             if unverified:
-                warning = f"답변의 숫자 {unverified}이(가) 참고 문서에서 확인되지 않았습니다."
-                logger.warning("faithfulness_number_missing: %s", warning)
-                modified = answer + f"\n\n[주의: {warning}]"
-                return GuardrailResult.warn(warning, modified)
+                # 완화 검증: 단위/접미사 제거 후 숫자값만 비교
+                # "1항" → "1", 소스 "1." → "1" 이면 pass
+                source_bare = self._extract_bare_numbers(source_text)
+                still_unverified = [
+                    n for n in unverified
+                    if not set(re.findall(r'\d+', n)).issubset(source_bare)
+                ]
+                if still_unverified:
+                    warning = get_locale().message("number_missing", numbers=str(still_unverified))
+                    logger.warning("faithfulness_number_missing: %s", warning)
+                    modified = answer + f"\n\n[주의: {warning}]"
+                    return GuardrailResult.warn(warning, modified)
 
             # --- Quick-check 2: 숫자 co-occurrence ---
             if len(answer_numbers) >= 2:
@@ -91,17 +89,16 @@ class FaithfulnessGuard:
                     found_together = True
                     break
             if not found_together:
-                warning = f"숫자 '{a}'와 '{b}'가 같은 문서 청크에 공존하지 않습니다."
+                warning = get_locale().message("cooccurrence_fail", a=a, b=b)
                 logger.warning("faithfulness_cooccurrence: %s", warning)
                 return GuardrailResult.warn(
                     warning, None,
                 )
         return None
 
-    @staticmethod
-    def _check_citations(answer: str, docs: list[dict]) -> Optional[GuardrailResult]:
+    def _check_citations(self, answer: str, docs: list[dict]) -> Optional[GuardrailResult]:
         """답변에서 언급한 문서명이 소스에 존재하는지 검증."""
-        cited = _CITATION_PATTERN.findall(answer)
+        cited = self._citation_re.findall(answer)
         if not cited:
             return None
 
@@ -110,7 +107,7 @@ class FaithfulnessGuard:
         }
         for cite in cited:
             if cite not in source_files:
-                warning = f"인용된 문서 '{cite}'가 참고 문서에 없습니다."
+                warning = get_locale().message("citation_missing", cite=cite)
                 logger.warning("faithfulness_citation: %s", warning)
                 return GuardrailResult.warn(warning, None)
         return None
@@ -123,14 +120,14 @@ class FaithfulnessGuard:
             sources = "\n---\n".join(
                 doc.get("content", "")[:500] for doc in context.source_documents[:5]
             )
-            prompt = _DEEP_EVAL_PROMPT.format(sources=sources, answer=answer)
+            prompt = get_locale().prompt("deep_eval", sources=sources, answer=answer)
             result = await self._llm.generate_json(prompt)
 
             if not result.get("faithful", True):
                 reason = result.get("reason", "근거 불충분")
                 logger.warning("faithfulness_deep_eval: %s", reason)
                 return GuardrailResult.warn(
-                    f"LLM 근거 검증 실패: {reason}", None,
+                    get_locale().message("deep_eval_fail", reason=reason), None,
                 )
         except Exception as e:
             logger.warning("faithfulness_deep_eval_error: %s", str(e))
@@ -139,19 +136,15 @@ class FaithfulnessGuard:
     @staticmethod
     def _extract_numbers(text: str) -> set[str]:
         """텍스트에서 의미 있는 숫자를 추출한다."""
-        patterns = [
-            r'\d{1,3}(?:,\d{3})+',  # 1,000,000
-            r'\d+(?:\.\d+)?%',       # 50.5%
-            r'\d+(?:\.\d+)?만',      # 100만
-            r'\d+(?:\.\d+)?억',      # 10억
-            r'\d+(?:\.\d+)?원',      # 5000원
-            r'\d+(?:~\d+)',          # 8~9
-            r'\d+[급종호조항]',       # 8급, 1종
-        ]
         numbers = set()
-        for pattern in patterns:
-            numbers.update(re.findall(pattern, text))
+        for pattern in get_locale().number_patterns:
+            numbers.update(pattern.findall(text))
         # 단독 숫자 (3자리 이상만)
         for match in re.findall(r'\b(\d{3,})\b', text):
             numbers.add(match)
         return numbers
+
+    @staticmethod
+    def _extract_bare_numbers(text: str) -> set[str]:
+        """숫자값만 추출 (단위/접미사 제거). 숫자 매칭 완화용."""
+        return set(re.findall(r'\d+', text))

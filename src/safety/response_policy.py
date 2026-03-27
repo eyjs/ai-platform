@@ -3,11 +3,10 @@
 import logging
 
 from src.domain.models import ResponsePolicy
+from src.locale.bundle import get_locale
 from src.safety.base import GuardrailContext, GuardrailResult
 
 logger = logging.getLogger(__name__)
-
-NO_DOCUMENT_BLOCK_MSG = "관련 문서를 찾지 못했습니다. 정확한 답변을 위해 문서를 확인해주세요."
 
 
 class ResponsePolicyGuard:
@@ -24,6 +23,6 @@ class ResponsePolicyGuard:
             return GuardrailResult.passed()
 
         if not context.source_documents:
-            return GuardrailResult.block(NO_DOCUMENT_BLOCK_MSG)
+            return GuardrailResult.block(get_locale().message("no_document"))
 
         return GuardrailResult.passed()

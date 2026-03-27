@@ -9,6 +9,7 @@ from typing import Callable
 
 from src.agent.state import AgentState
 from src.infrastructure.providers.base import LLMProvider
+from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 from src.safety.base import Guardrail, GuardrailContext
 from src.domain.agent_context import AgentContext
@@ -19,7 +20,6 @@ logger = get_logger(__name__)
 MAX_CONTENT_PREVIEW_LEN = 1500
 MAX_SOURCE_PREVIEW_LEN = 200
 MAX_SOURCES = 5
-GUARDRAIL_BLOCK_TEMPLATE = "답변을 제공할 수 없습니다. 사유: {reason}"
 
 
 # --- 라우팅 함수 (조건부 엣지) ---
@@ -219,7 +219,7 @@ async def run_guardrail_chain(
 
             if result.action == "block":
                 logger.warning("guardrail_block", guard=name, reason=result.reason)
-                return GUARDRAIL_BLOCK_TEMPLATE.format(reason=result.reason), results
+                return get_locale().message("guardrail_block", reason=result.reason), results
             if result.action == "warn" and result.modified_answer:
                 logger.info("guardrail_warn", guard=name, reason=result.reason)
                 answer = result.modified_answer
@@ -238,11 +238,15 @@ def build_source_dicts(results: list[dict]) -> list[dict]:
         if doc_id in seen:
             continue
         seen.add(doc_id)
+        title = r.get("title") or r.get("file_name") or ""
+        score = r.get("score", 0.0)
         sources.append({
             "document_id": doc_id,
-            "title": r.get("title", r.get("file_name", "")),
+            "title": title,
+            "file_name": r.get("file_name", ""),
             "chunk_text": r.get("content", "")[:MAX_SOURCE_PREVIEW_LEN],
-            "score": r.get("score", 0.0),
+            "score": score,
+            "relevance": score,
             "method": r.get("method", "vector"),
         })
     return sources[:MAX_SOURCES]
@@ -264,22 +268,12 @@ def _format_result(r: dict) -> str:
 
 
 
-_RAG_INSTRUCTION = (
-    "아래 참고 문서에 근거하여 답변하세요. "
-    "문서에 없는 내용은 추측하지 말고 '확인이 필요합니다'라고 안내하세요.\n\n"
-    "## 포맷 규칙\n"
-    "구조화된 정보(분류, 유형, 비교, 절차, 통계)는 반드시 마크다운 테이블로 작성하세요:\n"
-    "| 열1 | 열2 |\n"
-    "| --- | --- |\n"
-    "| 값1 | 값2 |\n"
-    "헤더 행과 구분선(| --- |)을 반드시 포함하세요. 텍스트만 나열하지 마세요."
-)
 
 
 def build_prompt(question: str, plan, results: list[dict]) -> str:
     """검색 결과를 포함한 LLM 프롬프트 생성."""
     if not results:
-        return f"질문: {question}\n\n관련 문서를 찾지 못했습니다."
+        return get_locale().message("no_search_results", question=question)
 
     max_chunks = plan.strategy.max_vector_chunks
     context_parts = []
@@ -290,7 +284,7 @@ def build_prompt(question: str, plan, results: list[dict]) -> str:
 
     context_text = "\n\n".join(context_parts)
 
-    parts = [_RAG_INSTRUCTION, f"\n\n참고 문서:\n{context_text}"]
+    parts = [get_locale().prompt("rag_instruction"), f"\n\n참고 문서:\n{context_text}"]
     if plan.conversation_context:
         parts.append(f"\n\n대화 맥락:\n{plan.conversation_context}")
     parts.append(f"\n\n질문: {question}")

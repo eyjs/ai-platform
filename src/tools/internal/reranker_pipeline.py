@@ -37,21 +37,24 @@ async def rerank_3tier(
 
     scored.sort(key=lambda x: x["fused_score"], reverse=True)
 
-    # 4. 3-tier 필터링
+    # 4. 3-tier 필터링 (Tier1이 top_k 미만이면 Tier2로 보충)
     tier1 = [s for s in scored if s["fused_score"] >= PREFERRED_MIN_SCORE]
-    if len(tier1) >= 1:
+    tier2 = [s for s in scored if FALLBACK_MIN_SCORE <= s["fused_score"] < PREFERRED_MIN_SCORE]
+
+    if tier1:
         results = tier1[:top_k]
+        if len(results) < top_k and tier2:
+            results.extend(tier2[:top_k - len(results)])
+    elif tier2:
+        results = tier2[:top_k]
     else:
-        tier2 = [s for s in scored if s["fused_score"] >= FALLBACK_MIN_SCORE]
-        if tier2:
-            results = tier2[:top_k]
-        else:
-            results = scored[:LAST_RESORT_COUNT]
+        results = scored[:LAST_RESORT_COUNT]
 
     logger.info(
         "rerank_3tier",
         input=len(candidates),
         tier1=len(tier1),
+        tier2=len(tier2),
         output=len(results),
     )
 

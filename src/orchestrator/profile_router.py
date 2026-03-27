@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from src.config import settings
+from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,23 +28,17 @@ class RouteResult:
     is_greeting: bool = False
 
 
-# 인사/작별 패턴 (문장 시작 기준)
-_GREETING_PATTERNS = re.compile(
-    r"^(안녕|하이|헬로|hi|hello|ㅎㅇ)(?:하세요|요|~|!|$)"
-    r"|^(고마워|감사합니다|감사해요|감사드|thanks|thank you)"
-    r"|^(잘가|바이바이|bye|수고|다음에)",
-    re.IGNORECASE,
-)
-_GREETING_MAX_LEN = 15
-
-
 def _is_greeting(q: str) -> bool:
     """인사/작별 패턴 감지. ai-worker의 검증된 로직 재사용."""
-    return len(q) <= _GREETING_MAX_LEN and bool(_GREETING_PATTERNS.search(q))
+    pattern = get_locale().compiled_pattern("greeting_compiled")
+    return len(q) <= settings.greeting_max_length and bool(pattern and pattern.search(q))
 
 
 def _tokenize_korean(text: str) -> list[str]:
     """간단한 한국어 토큰화 (공백 + 한글/영문 2자 이상)."""
+    pattern = get_locale().compiled_pattern("tokenize")
+    if pattern:
+        return pattern.findall(text)
     return re.findall(r"[가-힣a-zA-Z]{2,}", text)
 
 
@@ -86,12 +82,27 @@ class ProfileRouter:
         """패턴 매칭으로 프로필을 결정한다."""
         q = question.strip()
 
-        # 1-a. 인사/작별 감지
+        # 1-a. 인사/작별 감지 — 도메인 키워드 포함 시 에스컬레이션
         if _is_greeting(q):
-            general = self._find_profile("general-chat") or self._profiles[0]["id"]
-            return RouteResult(
-                general, "인사/작별", tier=1, confidence=0.95, is_greeting=True,
-            )
+            # 인사 + 도메인 키워드 혼합 체크
+            has_domain_keyword = False
+            for p in self._profiles:
+                for hint in p.get("intent_hints", []):
+                    for pattern in hint.get("patterns", []):
+                        if len(pattern) >= 2 and pattern in q:
+                            has_domain_keyword = True
+                            break
+                    if has_domain_keyword:
+                        break
+                if has_domain_keyword:
+                    break
+
+            if not has_domain_keyword:
+                general = self._find_profile(settings.fallback_profile_id) or self._profiles[0]["id"]
+                return RouteResult(
+                    general, "인사/작별", tier=1, confidence=0.95, is_greeting=True,
+                )
+            # 도메인 키워드가 포함된 인사 → Tier 2로 에스컬레이션
 
         # 1-b. intent_hints patterns 매칭 (2자 이상 패턴만, 앞뒤 경계 체크)
         for p in self._profiles:
@@ -156,20 +167,20 @@ class ProfileRouter:
             return None
 
         best = max(scores, key=scores.get)
-        # 2위 대비 gap 기반 confidence: 2위가 없거나 격차가 크면 높은 confidence
-        second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0.0
-        total = sum(scores.values())
-        confidence = best_score / total if total > 0 else 0.0
+        # gap 기반 confidence: 1위와 2위 격차가 클수록 높은 confidence
+        if len(sorted_scores) >= 2:
+            second_score = sorted_scores[1]
+            gap = (best_score - second_score) / best_score if best_score > 0 else 0
+            confidence = 0.5 + (gap * 0.5)  # 0.5~1.0 범위
+        else:
+            confidence = 0.9  # 유일한 프로필이면 높은 confidence
 
-        if confidence >= 0.5:
-            return RouteResult(
-                best,
-                f"키워드 스코어: {confidence:.2f}",
-                tier=2,
-                confidence=confidence,
-            )
-
-        return None
+        return RouteResult(
+            best,
+            f"키워드 스코어: {confidence:.2f}",
+            tier=2,
+            confidence=confidence,
+        )
 
     # ── 유틸리티 ──
 

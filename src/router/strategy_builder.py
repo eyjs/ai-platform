@@ -81,9 +81,9 @@ class StrategyBuilder:
         # conversation_context 조립 (L3 책임)
         conversation_context = ""
         if history and strategy.history_turns > 0:
-            recent = history[-strategy.history_turns:]
+            sanitized = self._sanitize_history(history[-strategy.history_turns:])
             conversation_context = "\n".join(
-                f"{t['role']}: {t['content']}" for t in recent
+                f"{t['role']}: {t['content']}" for t in sanitized
             )
 
         # tool_groups 배정: 기본은 모든 도구를 한 그룹 (= 전부 병렬)
@@ -106,6 +106,23 @@ class StrategyBuilder:
         )
 
     @staticmethod
+    def _sanitize_history(history: List[dict]) -> List[dict]:
+        """대화 히스토리에서 PII 패턴을 마스킹한다."""
+        import re
+        pii_patterns = [
+            (re.compile(r"\d{6}-[1-4]\d{6}"), "[주민번호]"),
+            (re.compile(r"01[0-9]-\d{3,4}-\d{4}"), "[전화번호]"),
+            (re.compile(r"\d{3,6}-\d{2,6}-\d{2,6}"), "[계좌번호]"),
+        ]
+        sanitized = []
+        for turn in history:
+            content = turn.get("content", "")
+            for pat, replacement in pii_patterns:
+                content = pat.sub(replacement, content)
+            sanitized.append({**turn, "content": content})
+        return sanitized
+
+    @staticmethod
     def _build_tool_groups(
         query: str,
         tools: List[Union[Tool, ScopedTool]],
@@ -121,8 +138,8 @@ class StrategyBuilder:
     def _security_rank(level: str) -> int:
         rank = SECURITY_HIERARCHY.get(level)
         if rank is None:
-            logger.warning("Unknown security level '%s', defaulting to PUBLIC", level)
-            return 0
+            logger.warning("Unknown security level '%s', defaulting to INTERNAL (restrictive)", level)
+            return SECURITY_HIERARCHY.get(SecurityLevel.INTERNAL, 1)
         return rank
 
     @staticmethod
@@ -130,4 +147,5 @@ class StrategyBuilder:
         for level, r in SECURITY_HIERARCHY.items():
             if r == rank:
                 return level
-        return SecurityLevel.PUBLIC
+        logger.warning("Unknown security rank %d, defaulting to INTERNAL", rank)
+        return SecurityLevel.INTERNAL

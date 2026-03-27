@@ -9,10 +9,11 @@ chatbot_id가 지정되지 않은 요청에 대해:
 
 from __future__ import annotations
 
-import re
 import time
 
+from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
+from src.orchestrator.embedding_router import EmbeddingRouter
 from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.models import OrchestratorResult
 from src.orchestrator.profile_router import ProfileRouter
@@ -20,21 +21,7 @@ from src.orchestrator.tenant import TenantService
 
 logger = get_logger(__name__)
 
-# 워크플로우 재개 의도 패턴 -- 짧은 문장에서만 매칭 (30자 이내)
-_RESUME_PATTERNS = re.compile(
-    r"다시|이어서|계속|재개|resume|continue",
-    re.IGNORECASE,
-)
-_RESUME_MAX_LENGTH = 30
-
-# 대명사 / 연속 대화 힌트 (문장 시작 패턴)
-_CONTINUATION_PATTERNS = re.compile(
-    r"^(이거|그거|저거|이것|그것|저것|그래|네|응|맞아|ㅇㅇ|그리고|또|추가로"
-    r"|그러면|그래서|근데|그런데|그럼)",
-)
-
-# 과거 프로필 참조 패턴
-_PAST_REFERENCE_PATTERNS = re.compile(r"(아까|이전에|방금|전에)")
+_RESUME_MAX_LENGTH = 80
 
 # 프로필 히스토리 최대 보관 수
 _MAX_PROFILE_HISTORY = 10
@@ -50,12 +37,14 @@ class MasterOrchestrator:
         session_memory,
         workflow_engine,
         tenant_service: TenantService,
+        embedding_router: EmbeddingRouter | None = None,
     ):
         self._llm = llm
         self._profile_store = profile_store
         self._session = session_memory
         self._workflow = workflow_engine
         self._tenant = tenant_service
+        self._embedding_router = embedding_router
 
     async def route(
         self,
@@ -71,7 +60,7 @@ class MasterOrchestrator:
                 selected_profile_id="",
                 reason="사용 가능한 프로필 없음",
                 is_general_response=True,
-                general_message="현재 사용 가능한 서비스가 없습니다. 관리자에게 문의하세요.",
+                general_message=get_locale().message("no_profiles_available"),
             )
 
         # 2. 세션 메타데이터 로드
@@ -111,12 +100,33 @@ class MasterOrchestrator:
             return continuation
 
         # 5. 3-Tier Profile Router
+        valid_ids = {p["id"] for p in profiles}
 
-        # Tier 1: 패턴 매칭 (<1ms)
+        # Tier 1: 임베딩 유사도 (~100ms, 다국어 지원)
+        if self._embedding_router:
+            emb_result = await self._embedding_router.route(question)
+            if emb_result and not emb_result.is_ambiguous and emb_result.profile_id in valid_ids:
+                logger.info(
+                    "orchestrator_tier1_embedding",
+                    session_id=session_id,
+                    profile_id=emb_result.profile_id,
+                    similarity=round(emb_result.similarity, 4),
+                    confidence=round(emb_result.confidence, 4),
+                )
+                result = OrchestratorResult(
+                    selected_profile_id=emb_result.profile_id,
+                    reason=f"[Tier 1] 임베딩 유사도: {emb_result.similarity:.3f}",
+                )
+                if current and result.selected_profile_id != current:
+                    await self._handle_switch(session_id, current, meta)
+                await self._record_profile_history(session_id, result.selected_profile_id, meta)
+                return result
+
+        # Tier 1-B: 패턴 매칭 (임베딩 라우터 미사용 또는 모호한 경우 폴백)
         tier1 = router.tier1_rule_match(question)
         if tier1:
             logger.info(
-                "orchestrator_tier1",
+                "orchestrator_tier1_pattern",
                 session_id=session_id,
                 profile_id=tier1.profile_id,
                 reason=tier1.reason,
@@ -171,7 +181,8 @@ class MasterOrchestrator:
         q = question.strip()
 
         # A. 명시적 과거 프로필 참조: "아까 {keyword}"
-        if _PAST_REFERENCE_PATTERNS.search(q):
+        past_ref = get_locale().compiled_pattern("past_reference")
+        if past_ref and past_ref.search(q):
             profile_history = meta.get("profile_history", [])
             for entry in reversed(profile_history):
                 pid = entry["profile_id"]
@@ -191,7 +202,13 @@ class MasterOrchestrator:
             return None
 
         # B. 대명사/연속 표현 -> 현재 프로필 유지
-        if _CONTINUATION_PATTERNS.match(q):
+        #    단, 다른 프로필 키워드가 감지되면 프로필 전환 허용
+        continuation = get_locale().compiled_pattern("continuation")
+        if continuation and continuation.match(q):
+            tier1_check = router.tier1_rule_match(q)
+            if tier1_check and tier1_check.profile_id != current_profile:
+                # 다른 프로필 키워드 감지 -> continuation 적용 안 함
+                return None
             return OrchestratorResult(
                 selected_profile_id=current_profile,
                 reason="대명사/연속 표현",
@@ -273,7 +290,8 @@ class MasterOrchestrator:
         stripped = question.strip()
         if len(stripped) > _RESUME_MAX_LENGTH:
             return False
-        return bool(_RESUME_PATTERNS.search(stripped))
+        pattern = get_locale().compiled_pattern("resume")
+        return bool(pattern and pattern.search(stripped))
 
     def _route_result_from_tier(
         self, tier_result, profiles: list[dict],
@@ -308,7 +326,7 @@ class MasterOrchestrator:
                     selected_profile_id="",
                     reason="LLM 오류 + 프로필 없음",
                     is_general_response=True,
-                    general_message="서비스에 일시적인 문제가 발생했습니다.",
+                    general_message=get_locale().message("service_error"),
                 )
             return OrchestratorResult(
                 selected_profile_id=fallback,
@@ -343,13 +361,6 @@ class MasterOrchestrator:
             )
 
         if fn == "no_tool_call":
-            # 텍스트에서 프로필 ID 추출 성공
-            extracted = result.get("profile_id", "")
-            if extracted and extracted in valid_ids:
-                return OrchestratorResult(
-                    selected_profile_id=extracted,
-                    reason=f"[Tier 3] 텍스트 추출: {extracted}",
-                )
             # Tier 2 재시도 (min_score=0.3으로 완화)
             router = ProfileRouter(profiles)
             tier2_retry = router.tier2_keyword_score(question, min_score=0.3)
@@ -396,8 +407,19 @@ class MasterOrchestrator:
                 "step_id": active_wf.current_step_id,
                 "collected": dict(active_wf.collected),
                 "profile_id": current_profile_id,
+                "paused_at": time.time(),
             }
-            # 메타에 paused_workflow 저장
+            # 메타에 paused_workflow 저장 (타임스탬프로 충돌 감지)
+            existing_paused = meta.get("paused_workflow")
+            if existing_paused and existing_paused.get("paused_at", 0) > time.time() - 1.0:
+                # 1초 이내 다른 요청이 이미 pause → 스킵
+                logger.warning(
+                    "orchestrator_pause_conflict",
+                    session_id=session_id,
+                    existing_wf=existing_paused.get("workflow_id"),
+                )
+                return
+
             meta["paused_workflow"] = paused_state
             await self._session.save_orchestrator_metadata(session_id, meta)
 

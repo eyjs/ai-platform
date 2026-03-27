@@ -1,14 +1,9 @@
 """검색 결과 가드. LLM에 전달하기 전 민감 콘텐츠 필터링."""
 
-import re
-
+from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-_RE_RESIDENT = re.compile(r"\d{6}-[1-4]\d{6}")
-_RE_PHONE = re.compile(r"01[016789]-\d{3,4}-\d{4}")
-_RE_ACCOUNT = re.compile(r"\d{3,6}-\d{2,6}-\d{2,6}")
 
 
 def guard_results(candidates: list[dict]) -> list[dict]:
@@ -34,7 +29,6 @@ def _pii_guard(candidates: list[dict]) -> list[dict]:
 
 def _mask_pii(text: str) -> str:
     """정규식 기반 PII 마스킹."""
-    text = _RE_RESIDENT.sub("[주민번호]", text)
-    text = _RE_PHONE.sub("[전화번호]", text)
-    text = _RE_ACCOUNT.sub("[계좌번호]", text)
+    for pattern, replacement in get_locale().pii_result_guard:
+        text = pattern.sub(replacement, text)
     return text

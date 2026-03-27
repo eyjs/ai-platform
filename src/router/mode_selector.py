@@ -35,17 +35,32 @@ class ModeSelector:
         if profile.mode == AgentMode.WORKFLOW:
             return AgentMode.WORKFLOW, profile.workflow_id
 
-        # hybrid 모드: 트리거 매칭
+        # hybrid 모드: 모든 트리거 점수 비교 후 최고점 선택
         if profile.mode == AgentMode.HYBRID:
-            for trigger in profile.hybrid_triggers:
-                if custom_intent and custom_intent in trigger.intent_types:
-                    logger.info("Hybrid -> workflow (intent: %s)", custom_intent)
-                    return AgentMode.WORKFLOW, trigger.workflow_id
+            best_trigger = None
+            best_score = 0
 
+            for trigger in profile.hybrid_triggers:
+                score = 0
+                # intent 매칭 (가중치 2.0)
+                if custom_intent and custom_intent in trigger.intent_types:
+                    score += 2.0
+
+                # keyword 매칭 (가중치 1.0 per match)
                 for pattern in trigger.keyword_patterns:
                     if pattern in query:
-                        logger.info("Hybrid -> workflow (keyword: %s)", pattern)
-                        return AgentMode.WORKFLOW, trigger.workflow_id
+                        score += 1.0
+
+                if score > best_score:
+                    best_score = score
+                    best_trigger = trigger
+
+            if best_trigger and best_score > 0:
+                logger.info(
+                    "Hybrid -> workflow (score: %.1f, wf: %s)",
+                    best_score, best_trigger.workflow_id,
+                )
+                return AgentMode.WORKFLOW, best_trigger.workflow_id
 
             return AgentMode.AGENTIC, None
 

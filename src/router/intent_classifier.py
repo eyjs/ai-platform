@@ -5,28 +5,15 @@
 """
 
 import logging
-import re
 from typing import List, Optional
 
+from src.config import settings
 from src.domain.agent_profile import AgentProfile, IntentHint
 from src.infrastructure.providers.base import LLMProvider
+from src.locale.bundle import get_locale
 from src.router.execution_plan import QuestionType
 
 logger = logging.getLogger(__name__)
-
-# 인사/시스템 패턴
-GREETING_PATTERNS = [
-    r"^(안녕|하이|헬로|반가워|반갑)",
-    r"(감사합니다|감사해|감사드|고마워|고맙)",
-    r"^(바이바이|잘가|수고)",
-]
-
-SYSTEM_META_PATTERNS = [
-    r"(너는?\s*누구|뭘\s*할\s*수|기능|도움말)",
-    r"(어떤\s*문서|몇\s*개|상태)",
-]
-
-PATTERN_MAX_QUERY_LEN = 15
 
 
 class IntentClassifier:
@@ -52,7 +39,7 @@ class IntentClassifier:
             return QuestionType.STANDALONE, custom
 
         # 2. 패턴 기반 분류
-        pattern_type = self._pattern_classify(query)
+        pattern_type = self._pattern_classify(query, profile.domain_scopes)
         if pattern_type:
             return pattern_type, None
 
@@ -74,15 +61,19 @@ class IntentClassifier:
         return None
 
     @staticmethod
-    def _pattern_classify(query: str) -> Optional[QuestionType]:
-        # 길이 가드: 15자 이하만 인사/시스템 패턴 매칭
-        if len(query) <= PATTERN_MAX_QUERY_LEN:
-            for pattern in GREETING_PATTERNS:
-                if re.search(pattern, query):
+    def _pattern_classify(query: str, domain_scopes: list[str] = None) -> Optional[QuestionType]:
+        locale = get_locale()
+        # 길이 가드: 짧은 쿼리만 인사/시스템 패턴 매칭
+        if len(query) <= settings.pattern_max_query_length:
+            for pattern in locale.compiled_patterns("greeting"):
+                if pattern.search(query):
                     return QuestionType.GREETING
 
-            for pattern in SYSTEM_META_PATTERNS:
-                if re.search(pattern, query):
+            for pattern in locale.compiled_patterns("system_meta"):
+                if pattern.search(query):
+                    # 도메인 키워드 포함 시 SYSTEM_META가 아님
+                    if domain_scopes and any(kw in query for kw in domain_scopes if len(kw) >= 2):
+                        return None
                     return QuestionType.SYSTEM_META
 
         return None
@@ -90,25 +81,23 @@ class IntentClassifier:
     @staticmethod
     def _detect_followup(query: str) -> Optional[QuestionType]:
         """대화 이력 기반 후속 질문 유형 판단."""
+        locale = get_locale()
+
         # 조사/공백이 바로 뒤따르는 경우만 매칭 ("더블" 등 오탐 방지)
-        followup_markers = ["그러면", "그럼", "그래서", "그건", "이건"]
-        for marker in followup_markers:
+        for marker in locale.raw_patterns("followup_markers"):
             if query.startswith(marker):
                 return QuestionType.ANSWER_BASED_FOLLOWUP
 
         # 짧은 마커는 뒤에 조사/공백이 있어야만 매칭
-        short_markers = ["더 ", "또 ", "더는", "또한"]
-        for marker in short_markers:
+        for marker in locale.raw_patterns("short_followup_markers"):
             if query.startswith(marker):
                 return QuestionType.ANSWER_BASED_FOLLOWUP
 
-        same_doc_markers = ["같은 문서", "이 문서", "위 문서", "방금 문서"]
-        for marker in same_doc_markers:
+        for marker in locale.raw_patterns("same_doc_markers"):
             if marker in query:
                 return QuestionType.SAME_DOC_FOLLOWUP
 
-        comparison_markers = ["비교", "차이", "다른 점", "vs"]
-        for marker in comparison_markers:
+        for marker in locale.raw_patterns("comparison_markers"):
             if marker in query:
                 return QuestionType.CROSS_DOC_INTEGRATION
 

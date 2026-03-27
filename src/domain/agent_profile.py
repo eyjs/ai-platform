@@ -83,6 +83,7 @@ class AgentProfile:
     # 에이전틱 모드 설정
     max_tool_calls: int = 5
     agent_timeout_seconds: int = 30
+    llm_system_prefix: str | None = None  # None = 플랫폼 기본값 사용
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)

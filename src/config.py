@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     # LLM 응답 최대 토큰 (MLX 기본 512 방지)
     llm_max_tokens: int = 4096
 
+    # 로케일
+    locale: str = "ko"
+    llm_system_prefix: str = ""  # 빈값 = 로케일 기본값 사용
+    fallback_profile_id: str = "general-chat"
+    greeting_max_length: int = 30
+    pattern_max_query_length: int = 30
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000

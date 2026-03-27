@@ -9,12 +9,11 @@ import logging
 import httpx
 
 from src.config import ProviderMode, Settings
+from src.locale.bundle import get_locale
 
 from .base import EmbeddingProvider, LLMProvider, ParsingProvider, RerankerProvider
 
 logger = logging.getLogger(__name__)
-
-_LLM_SYSTEM_PREFIX = "반드시 한국어로만 답변하세요."
 
 
 class ProviderFactory:
@@ -69,13 +68,15 @@ class ProviderFactory:
 
     def _create_llm(self, server_url: str, local_model: str, label: str) -> LLMProvider:
         """LLM 프로바이더 생성 (router/main 공통 로직)."""
+        system_prefix = get_locale().prompt("llm_system_prefix")
+
         if server_url:
             from .llm.http_llm import HttpLLMProvider
 
             logger.info("Using HTTP LLM server (%s): %s", label, server_url)
             return HttpLLMProvider(
                 base_url=server_url,
-                system_prefix=_LLM_SYSTEM_PREFIX,
+                system_prefix=system_prefix,
                 max_tokens=self._settings.llm_max_tokens,
             )
 
@@ -86,7 +87,7 @@ class ProviderFactory:
                 base_url=self._settings.ollama_host,
                 model=local_model,
                 num_ctx=self._settings.ollama_num_ctx,
-                system_prefix=_LLM_SYSTEM_PREFIX,
+                system_prefix=system_prefix,
             )
 
         from .llm.openai import OpenAILLMProvider
@@ -94,7 +95,7 @@ class ProviderFactory:
         return OpenAILLMProvider(
             api_key=self._settings.openai_api_key,
             model=self._settings.prod_llm_model,
-            system_prefix=_LLM_SYSTEM_PREFIX,
+            system_prefix=system_prefix,
             max_tokens=self._settings.llm_max_tokens,
         )
 

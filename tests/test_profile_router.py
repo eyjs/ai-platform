@@ -88,8 +88,13 @@ class TestGreetingDetection:
     def test_greeting_thanks(self):
         assert _is_greeting("감사합니다")
 
-    def test_not_greeting_long(self):
-        assert not _is_greeting("안녕하세요 보험에 대해 물어볼게요")
+    def test_greeting_long_with_domain(self):
+        # _GREETING_MAX_LEN=30이므로 인사 패턴은 감지됨
+        # 실제 라우팅에서는 도메인 키워드("보험") 체크로 Tier2 에스컬레이션
+        assert _is_greeting("안녕하세요 보험에 대해 물어볼게요")
+
+    def test_not_greeting_too_long(self):
+        assert not _is_greeting("안녕하세요 저는 김철수이고 보험 상품에 대해 자세히 물어보고 싶습니다")
 
     def test_not_greeting_question(self):
         assert not _is_greeting("김치찌개 레시피 알려줘")

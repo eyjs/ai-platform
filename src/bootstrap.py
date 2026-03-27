@@ -8,6 +8,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from src.locale.bundle import LocaleBundle, set_locale
 from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
@@ -29,6 +30,7 @@ from src.safety.response_policy import ResponsePolicyGuard
 from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
+from src.orchestrator.embedding_router import EmbeddingRouter
 from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
@@ -68,6 +70,24 @@ class AppState:
     providers: list = field(default_factory=list)
 
 
+def _check_profile_pattern_overlap(profiles):
+    """프로필 간 intent_hints 패턴 중복을 검사하고 경고한다."""
+    pattern_to_profiles: dict[str, list[str]] = {}
+    for p in profiles:
+        for hint in p.intent_hints:
+            for pattern in hint.patterns:
+                if len(pattern) >= 2:
+                    pattern_to_profiles.setdefault(pattern, []).append(p.id)
+
+    for pattern, profile_ids in pattern_to_profiles.items():
+        if len(profile_ids) > 1:
+            logger.warning(
+                "profile_pattern_overlap",
+                pattern=pattern,
+                profiles=profile_ids,
+            )
+
+
 async def create_app_state(settings: Settings) -> AppState:
     """모든 컴포넌트를 초기화하고 AppState를 반환한다."""
 
@@ -79,6 +99,11 @@ async def create_app_state(settings: Settings) -> AppState:
     )
     pool = vector_store.pool
     logger.info("vectorstore_connected", pool_min=settings.pg_pool_min, pool_max=settings.pg_pool_max)
+
+    # 0. 로케일 번들 로드
+    locale_bundle = LocaleBundle.load(f"src/locale/{settings.locale}.yaml")
+    set_locale(locale_bundle)
+    logger.info("locale_loaded", locale=settings.locale, keys=locale_bundle.key_count)
 
     # 2. AuthService
     auth_service = AuthService(
@@ -115,7 +140,11 @@ async def create_app_state(settings: Settings) -> AppState:
     # 5. Profile Store
     profile_store = ProfileStore(pool, seed_dir="seeds/profiles")
     seed_count = await profile_store.load_seeds()
+    profiles = await profile_store.list_all()
     logger.info("profiles_loaded", seed_count=seed_count)
+
+    # 프로필 간 intent_hints 패턴 중복 검사
+    _check_profile_pattern_overlap(profiles)
 
     # 6. Tool Registry
     tool_registry = ToolRegistry()
@@ -141,9 +170,25 @@ async def create_app_state(settings: Settings) -> AppState:
     # 9. ChatModel + GraphExecutor
     chat_model = None
     try:
+        # MLX 서버 사용 시 모델명을 서버에서 자동 감지
+        chat_model_name = settings.main_model
+        if settings.main_llm_server_url:
+            try:
+                import httpx
+                resp = httpx.get(
+                    f"{settings.main_llm_server_url}/v1/models", timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    models = resp.json().get("data", [])
+                    if models:
+                        chat_model_name = models[0]["id"]
+                        logger.info("chat_model_auto_detected", model=chat_model_name)
+            except Exception:
+                pass  # 감지 실패 시 기본 모델명 사용
+
         chat_model = create_chat_model(
             provider_mode=settings.provider_mode,
-            model_name=settings.main_model,
+            model_name=chat_model_name,
             ollama_host=settings.ollama_host,
             openai_api_key=settings.openai_api_key,
             server_url=settings.main_llm_server_url,
@@ -215,12 +260,31 @@ async def create_app_state(settings: Settings) -> AppState:
                 ollama_host=settings.ollama_host,
             )
             await orchestrator_llm.initialize()
+            # 임베딩 기반 프로필 라우터 초기화
+            embedding_router = EmbeddingRouter(embedding_provider)
+            profile_dicts = [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "description": getattr(p, "description", ""),
+                    "domain_scopes": p.domain_scopes,
+                    "system_prompt": p.system_prompt,
+                    "intent_hints": [
+                        {"name": h.name, "patterns": h.patterns, "description": h.description}
+                        for h in p.intent_hints
+                    ],
+                }
+                for p in profiles
+            ]
+            await embedding_router.initialize(profile_dicts)
+
             orchestrator = MasterOrchestrator(
                 llm=orchestrator_llm,
                 profile_store=profile_store,
                 session_memory=session_memory,
                 workflow_engine=workflow_engine,
                 tenant_service=tenant_service,
+                embedding_router=embedding_router,
             )
             logger.info(
                 "orchestrator_initialized",

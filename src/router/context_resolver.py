@@ -4,11 +4,11 @@ PatternBasedResolver → LLMBasedResolver 2-tier 체인.
 """
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import List, Optional
 
 from src.infrastructure.providers.base import LLMProvider
+from src.locale.bundle import get_locale
 
 logger = logging.getLogger(__name__)
 
@@ -30,31 +30,22 @@ class ResolutionResult:
 class PatternBasedResolver:
     """패턴 기반 대명사 해소 (빠르고 정확)."""
 
-    PRONOUN_PATTERNS = [
-        (r"^(그|이|저)(것|거|건|게)\s", 0.9),
-        (r"^(그|이|저)(문서|상품|보험|약관)", 0.9),
-        (r"^(위|앞|방금)\s*(것|거|내용)", 0.85),
-        (r"^(더|또)\s*(알려|설명|자세)", 0.8),
-    ]
-
     def resolve(
         self, query: str, history: List[dict],
     ) -> Optional[ResolutionResult]:
         if not history:
             return None
 
-        for pattern, confidence in self.PRONOUN_PATTERNS:
-            if re.search(pattern, query):
-                # 가장 최근 사용자 질문에서 주제 추출
-                prev_query = self._find_last_user_query(history)
-                if prev_query:
-                    resolved = re.sub(pattern, prev_query + " ", query).strip()
-                    return ResolutionResult(
-                        resolved_query=resolved,
-                        original_query=query,
-                        confidence=confidence,
-                        method="pattern",
-                    )
+        for pattern, confidence in get_locale().pronoun_patterns():
+            if pattern.search(query):
+                # 패턴은 감지용으로만 사용 — 실제 해소는 LLM에 위임
+                # confidence를 threshold 미만으로 설정하여 ChainResolver가 LLM으로 넘기게 함
+                return ResolutionResult(
+                    resolved_query=query,
+                    original_query=query,
+                    confidence=0.5,  # < PATTERN_CONFIDENCE_THRESHOLD (0.9)
+                    method="pattern_detected",
+                )
         return None
 
     @staticmethod
@@ -85,13 +76,12 @@ class LLMBasedResolver:
         )
 
         try:
-            result = await self._llm.generate_json(
-                f"대화 이력:\n{history_text}\n\n"
-                f"현재 질문: {query}\n\n"
-                f"현재 질문에 대명사나 생략이 있으면 완전한 질문으로 바꾸세요.\n"
-                f"없으면 원래 질문을 그대로 반환하세요.\n"
-                f'JSON: {{"resolved": "완전한 질문", "changed": true/false}}'
+            prompt = get_locale().prompt(
+                "context_resolver_llm",
+                history_text=history_text,
+                query=query,
             )
+            result = await self._llm.generate_json(prompt)
             resolved = result.get("resolved", query)
             changed = result.get("changed", False)
             return ResolutionResult(

@@ -31,9 +31,9 @@ services:
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8104
       AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8105
-      # 오케스트레이터 (3-Tier: Tier 3 LLM용)
-      AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen2.5-32B-Instruct-4bit
-      AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
+      # 오케스트레이터 (3-Tier: Tier 3 LLM용 — Qwen3-14B)
+      AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-14B-4bit
+      AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8104
       # 인증
       AIP_AUTH_REQUIRED: "true"
       AIP_JWT_SECRET: "dev-jwt-secret-change-in-production"
