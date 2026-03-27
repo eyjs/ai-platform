@@ -351,11 +351,11 @@ async function sendMessage() {
             if (ttft === null) {
               ttft = Math.round(performance.now() - startTime);
             }
-            answer += data;
+            try { var parsed = JSON.parse(data); answer += parsed.delta || ''; } catch(e) { answer += data; }
             textSpan.textContent = answer;
             messagesEl.scrollTop = messagesEl.scrollHeight;
           } else if (currentEvent === 'replace') {
-            answer = data;
+            try { var parsed = JSON.parse(data); answer = parsed.delta || ''; } catch(e) { answer = data; }
             textSpan.textContent = answer;
           } else if (currentEvent === 'done') {
             try { doneData = JSON.parse(data); } catch(e) { /* ignore */ }

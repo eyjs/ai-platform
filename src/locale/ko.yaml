@@ -3,7 +3,7 @@
 # 새 언어 지원 시 이 파일을 복사하여 번역하면 된다.
 
 prompts:
-  llm_system_prefix: "반드시 한국어로만 답변하세요. 생각(think)도 반드시 한국어로 하세요."
+  llm_system_prefix: "반드시 한국어로만 답변하세요. /no_think"
 
   orchestrator_system: |
     당신은 사용자 질문을 적절한 전문 에이전트(프로필)에게 라우팅하는 오케스트레이터입니다.
