@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.config import settings
+from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 from src.orchestrator.prompts import (
     _build_orchestrator_tools,
@@ -195,20 +197,20 @@ class OrchestratorLLM:
         anthropic_tools = [
             {
                 "name": "select_profile",
-                "description": (
-                    "사용자 질문에 가장 적합한 프로필을 선택한다. "
-                    "인사/잡담도 general-chat으로 라우팅한다."
+                "description": get_locale().prompt(
+                    "orchestrator_tool_description",
+                    fallback_profile_id=settings.fallback_profile_id,
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "profile_id": {
                             "type": "string",
-                            "description": "선택할 프로필 ID",
+                            "description": get_locale().prompt("orchestrator_tool_profile_id_desc"),
                         },
                         "reason": {
                             "type": "string",
-                            "description": "선택 이유 (한국어, 1문장)",
+                            "description": get_locale().prompt("orchestrator_tool_reason_desc"),
                         },
                     },
                     "required": ["profile_id", "reason"],

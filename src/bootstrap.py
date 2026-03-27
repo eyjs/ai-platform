@@ -179,16 +179,17 @@ async def create_app_state(settings: Settings) -> AppState:
         if settings.main_llm_server_url:
             try:
                 import httpx
-                resp = httpx.get(
-                    f"{settings.main_llm_server_url}/v1/models", timeout=5.0,
-                )
-                if resp.status_code == 200:
-                    models = resp.json().get("data", [])
-                    if models:
-                        chat_model_name = models[0]["id"]
-                        logger.info("chat_model_auto_detected", model=chat_model_name)
-            except Exception:
-                pass  # 감지 실패 시 기본 모델명 사용
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(
+                        f"{settings.main_llm_server_url}/v1/models",
+                    )
+                    if resp.status_code == 200:
+                        models = resp.json().get("data", [])
+                        if models:
+                            chat_model_name = models[0]["id"]
+                            logger.info("chat_model_auto_detected", model=chat_model_name)
+            except httpx.HTTPError as e:
+                logger.warning("chat_model_detection_failed", error=str(e))
 
         chat_model = create_chat_model(
             provider_mode=settings.provider_mode,

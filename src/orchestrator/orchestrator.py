@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 
+from src.config import settings
 from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 from src.orchestrator.embedding_router import EmbeddingRouter
@@ -378,7 +379,7 @@ class MasterOrchestrator:
                     reason=f"[Tier 3] Tier 2 재시도: {tier2_retry.reason}",
                 )
             # general-chat 우선 폴백
-            general = next((p["id"] for p in profiles if p["id"] == "general-chat"), None)
+            general = next((p["id"] for p in profiles if p["id"] == settings.fallback_profile_id), None)
             fallback = current_profile or general or profiles[0]["id"]
             logger.warning(
                 "orchestrator_no_tool_call_fallback",
