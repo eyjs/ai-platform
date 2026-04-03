@@ -26,14 +26,14 @@ services:
     environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       AIP_PROVIDER_MODE: development
-      # MLX GPU 서버 (호스트에서 실행 중)
+      # MLX GPU 서버 (호스트에서 실행 중) — Qwen3.5 마이그레이션
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
-      AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8104
-      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8105
-      # 오케스트레이터 (3-Tier: Tier 3 LLM용 — Qwen3-14B)
-      AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-14B-4bit
-      AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8104
+      AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105  # 9B — 경량 (Intent 분류)
+      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104    # 27B — 품질 (답변 생성)
+      # 오케스트레이터 (9B — 프로필 선택은 경량 작업)
+      AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3.5-9B-4bit
+      AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
       # 인증
       AIP_AUTH_REQUIRED: "true"
       AIP_JWT_SECRET: "dev-jwt-secret-change-in-production"
