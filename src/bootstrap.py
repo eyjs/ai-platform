@@ -16,6 +16,7 @@ from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
 from src.config import Settings
+from src.gateway.access_policy import AccessPolicyStore
 from src.gateway.auth import AuthService
 from src.gateway.rate_limiter import PGRateLimiter
 from src.infrastructure.fact_store import FactStore
@@ -109,11 +110,16 @@ async def create_app_state(settings: Settings) -> AppState:
     set_locale(locale_bundle)
     logger.info("locale_loaded", locale=settings.locale, keys=locale_bundle.key_count)
 
+    # 1-B. AccessPolicyStore (segment 접근 정책)
+    access_policy = AccessPolicyStore(pool)
+    await access_policy.load()
+
     # 2. AuthService
     auth_service = AuthService(
         pool=pool,
         jwt_secret=settings.jwt_secret,
         auth_required=settings.auth_required,
+        access_policy=access_policy,
     )
     logger.info("auth_initialized", auth_required=settings.auth_required)
 
@@ -290,6 +296,7 @@ async def create_app_state(settings: Settings) -> AppState:
                 workflow_engine=workflow_engine,
                 tenant_service=tenant_service,
                 embedding_router=embedding_router,
+                access_policy=access_policy,
             )
             logger.info(
                 "orchestrator_initialized",
@@ -364,19 +371,20 @@ async def seed_dev_api_keys(pool: Any) -> None:
             return
 
     dev_keys = [
-        ("aip_dev_admin", "dev-admin-key", "dev-admin", "ADMIN", "SECRET", [], 120),
-        ("aip_dev_viewer", "dev-viewer-key", "dev-viewer", "VIEWER", "PUBLIC", [], 60),
-        ("aip_dev_editor", "dev-editor-key", "dev-editor", "EDITOR", "INTERNAL", [], 60),
+        ("aip_dev_admin", "dev-admin-key", "dev-admin", "ADMIN", "SECRET", [], 120, "staff"),
+        ("aip_dev_viewer", "dev-viewer-key", "dev-viewer", "VIEWER", "PUBLIC", [], 60, ""),
+        ("aip_dev_editor", "dev-editor-key", "dev-editor", "EDITOR", "INTERNAL", [], 60, ""),
     ]
     async with pool.acquire() as conn:
-        for raw_key, name, user_id, role, sec_lvl, profiles, rate in dev_keys:
+        for raw_key, name, user_id, role, sec_lvl, profiles, rate, user_type in dev_keys:
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             await conn.execute("""
                 INSERT INTO api_keys (key_hash, name, user_id, user_role,
-                                      security_level_max, allowed_profiles, rate_limit_per_min)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                      security_level_max, allowed_profiles,
+                                      rate_limit_per_min, user_type)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (key_hash) DO NOTHING
-            """, key_hash, name, user_id, role, sec_lvl, profiles, rate)
+            """, key_hash, name, user_id, role, sec_lvl, profiles, rate, user_type)
 
         key_count = await conn.fetchval("SELECT COUNT(*) FROM api_keys WHERE is_active = TRUE")
         logger.info("api_keys_ready", active_keys=key_count)

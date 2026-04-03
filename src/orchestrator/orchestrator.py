@@ -10,6 +10,7 @@ chatbot_id가 지정되지 않은 요청에 대해:
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 from src.config import settings
 from src.locale.bundle import get_locale
@@ -19,6 +20,9 @@ from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.models import OrchestratorResult
 from src.orchestrator.profile_router import ProfileRouter
 from src.orchestrator.tenant import TenantService
+
+if TYPE_CHECKING:
+    from src.gateway.access_policy import AccessPolicyStore
 
 logger = get_logger(__name__)
 
@@ -39,6 +43,7 @@ class MasterOrchestrator:
         workflow_engine,
         tenant_service: TenantService,
         embedding_router: EmbeddingRouter | None = None,
+        access_policy: AccessPolicyStore | None = None,
     ):
         self._llm = llm
         self._profile_store = profile_store
@@ -46,6 +51,7 @@ class MasterOrchestrator:
         self._workflow = workflow_engine
         self._tenant = tenant_service
         self._embedding_router = embedding_router
+        self._access_policy = access_policy
 
     async def route(
         self,
@@ -267,11 +273,16 @@ class MasterOrchestrator:
             if tenant_profile_ids:
                 tenant_allowed = set(tenant_profile_ids)
 
+        # segment 필터를 위한 user_type 추출
+        user_type = getattr(user_ctx, "user_type", "")
+
         result = []
         for p in all_profiles:
             if api_allowed and p.id not in api_allowed:
                 continue
             if tenant_allowed and p.id not in tenant_allowed:
+                continue
+            if self._access_policy and not self._access_policy.is_allowed(p.id, user_type):
                 continue
             result.append({
                 "id": p.id,

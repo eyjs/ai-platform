@@ -10,17 +10,22 @@
 - AIP_JWT_SECRET → JWT 서명 검증 키
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import asyncpg
 
 from src.domain.models import SecurityLevel, UserRole
 from src.gateway.models import UserContext
 from src.observability.logging import get_logger
+
+if TYPE_CHECKING:
+    from src.gateway.access_policy import AccessPolicyStore
 
 logger = get_logger(__name__)
 
@@ -40,10 +45,12 @@ class AuthService:
         pool: asyncpg.Pool,
         jwt_secret: str = "",
         auth_required: bool = True,
+        access_policy: AccessPolicyStore | None = None,
     ):
         self._pool = pool
         self._jwt_secret = jwt_secret
         self._auth_required = auth_required
+        self._access_policy = access_policy
         self._background_tasks: set[asyncio.Task] = set()
 
     async def authenticate(
@@ -97,6 +104,7 @@ class AuthService:
         user_id = payload.get("sub", "")
         user_role = payload.get("role", UserRole.VIEWER)
         security_max = payload.get("security_level_max", SecurityLevel.PUBLIC)
+        user_type = payload.get("user_type", "")
 
         if user_role not in UserRole.__members__.values():
             raise AuthError(f"유효하지 않은 역할: {user_role}")
@@ -105,6 +113,7 @@ class AuthService:
             user_id=user_id,
             user_role=user_role,
             security_level_max=security_max,
+            user_type=user_type,
         )
 
     async def _verify_api_key(self, raw_key: str) -> UserContext:
@@ -113,7 +122,7 @@ class AuthService:
 
         row = await self._pool.fetchrow(
             """
-            SELECT user_id, user_role, security_level_max,
+            SELECT user_id, user_role, security_level_max, user_type,
                    allowed_profiles, allowed_origins, rate_limit_per_min,
                    expires_at, tenant_id
             FROM api_keys
@@ -138,6 +147,7 @@ class AuthService:
             user_id=row["user_id"] or "api-user",
             user_role=row["user_role"],
             security_level_max=row["security_level_max"],
+            user_type=row["user_type"] or "",
             allowed_profiles=row["allowed_profiles"] or [],
             allowed_origins=row["allowed_origins"] or [],
             rate_limit_per_min=row["rate_limit_per_min"] or 60,
@@ -157,6 +167,12 @@ class AuthService:
         if user_ctx.allowed_profiles and chatbot_id not in user_ctx.allowed_profiles:
             raise AuthError(
                 f"이 API Key는 '{chatbot_id}' 프로필에 접근 권한이 없습니다"
+            )
+
+        # segment 교차 검증: AccessPolicyStore가 주입된 경우에만 수행
+        if self._access_policy and not self._access_policy.is_allowed(chatbot_id, user_ctx.user_type):
+            raise AuthError(
+                f"사용자군 '{user_ctx.user_type}'은(는) '{chatbot_id}' 프로필에 접근 권한이 없습니다"
             )
 
     def check_origin(
@@ -188,6 +204,7 @@ class AuthService:
         allowed_profiles: list[str] | None = None,
         allowed_origins: list[str] | None = None,
         rate_limit_per_min: int = 60,
+        user_type: str = "",
     ) -> tuple[str, str]:
         """새 API Key를 생성하고 DB에 저장한다.
 
@@ -210,11 +227,13 @@ class AuthService:
         await self._pool.execute(
             """
             INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
-                                  allowed_profiles, allowed_origins, rate_limit_per_min)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                  allowed_profiles, allowed_origins, rate_limit_per_min,
+                                  user_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             key_hash, name, creator_user_id, user_role, security_level_max,
             allowed_profiles or [], allowed_origins or [], rate_limit_per_min,
+            user_type,
         )
 
         logger.info("api_key_created", name=name, user_role=user_role, origins=allowed_origins or [])
