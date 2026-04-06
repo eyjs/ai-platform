@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import uuid
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import asyncpg
 import numpy as np
@@ -370,6 +370,123 @@ class VectorStore(AbstractVectorStore):
             for row in rows
         }
 
+    # -- Progressive Disclosure 검색 --
+
+    async def metadata_search(
+        self,
+        embedding: List[float],
+        text_query: str,
+        limit: int = 10,
+        domain_codes: Optional[List[str]] = None,
+        allowed_doc_ids: Optional[List[str]] = None,
+        max_security_level: Optional[str] = None,
+    ) -> List[dict]:
+        """메타데이터 전용 검색 (content 제외). Progressive Disclosure Level 1.
+
+        hybrid_search()와 동일한 벡터+FTS+trigram RRF 로직이지만
+        SELECT 절에서 content, embedding을 제외하여 I/O를 절감한다.
+        """
+        if not self._pool:
+            raise RuntimeError("VectorStore not connected")
+
+        allowed_levels = self._allowed_security_levels(max_security_level)
+        candidate_limit = limit * HYBRID_CANDIDATE_MULTIPLIER
+
+        async with self._pool.acquire() as conn:
+            vq, vp = self._build_vector_query(
+                embedding, candidate_limit, domain_codes, allowed_doc_ids,
+                allowed_levels, metadata_only=True,
+            )
+            vector_rows = await conn.fetch(vq, *vp)
+
+            try:
+                fts_rows = await self._fulltext_search(
+                    conn, text_query, candidate_limit, domain_codes,
+                    allowed_doc_ids, allowed_levels, metadata_only=True,
+                )
+            except Exception as e:
+                logger.warning("Metadata full-text search failed: %s", e)
+                fts_rows = []
+
+            if len(fts_rows) < TRIGRAM_FALLBACK_THRESHOLD:
+                try:
+                    trgm_rows = await self._trigram_search(
+                        conn, text_query, candidate_limit, domain_codes,
+                        allowed_doc_ids, allowed_levels, metadata_only=True,
+                    )
+                    if trgm_rows:
+                        seen_ids = {str(r["id"]) for r in fts_rows}
+                        for row in trgm_rows:
+                            if str(row["id"]) not in seen_ids:
+                                fts_rows.append(row)
+                                seen_ids.add(str(row["id"]))
+                except Exception as e:
+                    logger.warning("Metadata trigram search failed: %s", e)
+
+        return self._rrf_merge(
+            vector_rows, fts_rows, limit, 0.5,
+            row_converter=self._row_to_metadata_dict,
+        )
+
+    async def fetch_chunks_by_doc_ids(
+        self,
+        doc_ids: list[str],
+        limit_per_doc: int = 5,
+        max_security_level: Optional[str] = None,
+    ) -> List[dict]:
+        """doc_ids 기반 청크 본문 로드. Progressive Disclosure Level 2+.
+
+        각 문서당 limit_per_doc개의 청크를 chunk_index 순서로 반환한다.
+        """
+        if not self._pool or not doc_ids:
+            return []
+
+        allowed_levels = self._allowed_security_levels(max_security_level)
+
+        conditions = ["c.document_id = ANY($1::uuid[])"]
+        params: list = [[uuid.UUID(d) for d in doc_ids], limit_per_doc]
+        param_idx = 3
+
+        if allowed_levels:
+            conditions.append(f"c.security_level = ANY(${param_idx}::text[])")
+            params.append(allowed_levels)
+            param_idx += 1
+
+        where_clause = " AND ".join(conditions)
+
+        # ROW_NUMBER()로 문서당 청크 수 제한
+        query = f"""
+            SELECT chunk_id, document_id, content, chunk_index, score, file_name, title
+            FROM (
+                SELECT c.id AS chunk_id, c.document_id, c.content, c.chunk_index,
+                       0.5 AS score, d.file_name, d.title,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.document_id ORDER BY c.chunk_index
+                       ) AS rn
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE {where_clause}
+            ) sub
+            WHERE rn <= $2
+            ORDER BY document_id, chunk_index
+        """
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        return [
+            {
+                "chunk_id": str(row["chunk_id"]),
+                "document_id": str(row["document_id"]),
+                "content": row["content"],
+                "chunk_index": row["chunk_index"],
+                "score": float(row["score"]),
+                "file_name": row.get("file_name", ""),
+                "title": row.get("title", ""),
+            }
+            for row in rows
+        ]
+
     # -- 내부 메서드 --
 
     @staticmethod
@@ -394,6 +511,7 @@ class VectorStore(AbstractVectorStore):
         domain_codes: Optional[List[str]] = None,
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
+        metadata_only: bool = False,
     ) -> Tuple[str, list]:
         conditions = ["c.embedding IS NOT NULL"]
         params: list = [np.array(embedding, dtype=np.float32), limit]
@@ -415,10 +533,9 @@ class VectorStore(AbstractVectorStore):
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
+        columns = self._select_columns(metadata_only, "1 - (c.embedding <=> $1::vector)")
         query = f"""
-            SELECT c.id, c.document_id, c.content, c.chunk_index,
-                   1 - (c.embedding <=> $1::vector) AS score,
-                   d.file_name, d.title
+            SELECT {columns}
             FROM document_chunks c
             JOIN documents d ON d.id = c.document_id
             WHERE {where_clause}
@@ -432,6 +549,7 @@ class VectorStore(AbstractVectorStore):
         domain_codes: Optional[List[str]] = None,
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
+        metadata_only: bool = False,
     ) -> list:
         tsquery = self._sanitize_tsquery(text_query)
         if not tsquery:
@@ -457,10 +575,10 @@ class VectorStore(AbstractVectorStore):
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
+        score_expr = "ts_rank(c.search_vector, to_tsquery('simple', $1))"
+        columns = self._select_columns(metadata_only, score_expr)
         query = f"""
-            SELECT c.id, c.document_id, c.content, c.chunk_index,
-                   ts_rank(c.search_vector, to_tsquery('simple', $1)) AS score,
-                   d.file_name, d.title
+            SELECT {columns}
             FROM document_chunks c
             JOIN documents d ON d.id = c.document_id
             WHERE {where_clause}
@@ -474,6 +592,7 @@ class VectorStore(AbstractVectorStore):
         domain_codes: Optional[List[str]] = None,
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
+        metadata_only: bool = False,
     ) -> list:
         terms = [t for t in text_query.split() if len(t) >= TRIGRAM_MIN_TERM_LEN]
         if not terms:
@@ -500,10 +619,9 @@ class VectorStore(AbstractVectorStore):
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
+        columns = self._select_columns(metadata_only, "similarity(c.content, $1::text)")
         query = f"""
-            SELECT c.id, c.document_id, c.content, c.chunk_index,
-                   similarity(c.content, $1::text) AS score,
-                   d.file_name, d.title
+            SELECT {columns}
             FROM document_chunks c
             JOIN documents d ON d.id = c.document_id
             WHERE {where_clause}
@@ -513,8 +631,11 @@ class VectorStore(AbstractVectorStore):
         return await conn.fetch(query, *params)
 
     def _rrf_merge(
-        self, vector_rows: list, fts_rows: list, limit: int, vector_weight: float,
+        self, vector_rows: list, fts_rows: list, limit: int,
+        vector_weight: float,
+        row_converter: Callable | None = None,
     ) -> List[dict]:
+        converter = row_converter or self._row_to_dict
         chunk_data: dict[str, dict] = {}
         rrf_scores: dict[str, float] = {}
         fts_weight = 1.0 - vector_weight
@@ -525,7 +646,7 @@ class VectorStore(AbstractVectorStore):
                 vector_weight / (RRF_K + rank + 1)
             )
             if chunk_id not in chunk_data:
-                chunk_data[chunk_id] = self._row_to_dict(row)
+                chunk_data[chunk_id] = converter(row)
 
         for rank, row in enumerate(fts_rows):
             chunk_id = str(row["id"])
@@ -533,7 +654,7 @@ class VectorStore(AbstractVectorStore):
                 fts_weight / (RRF_K + rank + 1)
             )
             if chunk_id not in chunk_data:
-                chunk_data[chunk_id] = self._row_to_dict(row)
+                chunk_data[chunk_id] = converter(row)
 
         sorted_ids = sorted(rrf_scores, key=lambda cid: rrf_scores[cid], reverse=True)
 
@@ -569,6 +690,33 @@ class VectorStore(AbstractVectorStore):
             }
             for row in rows
         ]
+
+    @staticmethod
+    def _select_columns(metadata_only: bool, score_expr: str) -> str:
+        """검색 쿼리의 SELECT 절 생성. metadata_only=True이면 content 제외."""
+        if metadata_only:
+            return f"""c.id, c.document_id, c.chunk_index,
+                   SUBSTRING(c.content, 1, 250) AS summary,
+                   c.domain_code, c.security_level,
+                   {score_expr} AS score,
+                   d.file_name, d.title"""
+        return f"""c.id, c.document_id, c.content, c.chunk_index,
+                   {score_expr} AS score,
+                   d.file_name, d.title"""
+
+    @staticmethod
+    def _row_to_metadata_dict(row) -> dict:
+        """메타데이터 전용 행 변환 (content 없음)."""
+        return {
+            "doc_id": str(row["document_id"]),
+            "chunk_id": str(row["id"]),
+            "title": row.get("title", ""),
+            "summary": row.get("summary", ""),
+            "domain_code": row.get("domain_code", ""),
+            "score": float(row["score"]),
+            "security_level": row.get("security_level", ""),
+            "file_name": row.get("file_name", ""),
+        }
 
     @staticmethod
     def _allowed_security_levels(max_level: Optional[str]) -> Optional[List[str]]:

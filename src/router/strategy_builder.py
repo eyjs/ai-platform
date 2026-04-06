@@ -57,6 +57,7 @@ class StrategyBuilder:
         prior_doc_ids: Optional[List[str]] = None,
         workflow_id: Optional[str] = None,
         workflow_step: Optional[str] = None,
+        external_context: str = "",
     ) -> ExecutionPlan:
         # SearchScope 생성
         effective_security = min(
@@ -78,10 +79,16 @@ class StrategyBuilder:
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,
         )
 
+        # external_context가 있으면 history_turns를 최소 3으로 보장
+        # 사주 채팅 등 외부 컨텍스트 기반 대화는 히스토리 연속성이 필수
+        effective_history_turns = strategy.history_turns
+        if external_context and effective_history_turns < 3:
+            effective_history_turns = 3
+
         # conversation_context 조립 (L3 책임)
         conversation_context = ""
-        if history and strategy.history_turns > 0:
-            sanitized = self._sanitize_history(history[-strategy.history_turns:])
+        if history and effective_history_turns > 0:
+            sanitized = self._sanitize_history(history[-effective_history_turns:])
             conversation_context = "\n".join(
                 f"{t['role']}: {t['content']}" for t in sanitized
             )
@@ -89,11 +96,19 @@ class StrategyBuilder:
         # tool_groups 배정: 기본은 모든 도구를 한 그룹 (= 전부 병렬)
         tool_groups = self._build_tool_groups(query, tools, strategy)
 
+        # external_context가 있으면 system_prompt에 추가하여 LLM이 참조하도록 함
+        effective_system_prompt = profile.system_prompt
+        if external_context:
+            effective_system_prompt = (
+                f"{profile.system_prompt}\n\n"
+                f"--- 참고 컨텍스트 ---\n{external_context}"
+            ) if profile.system_prompt else f"--- 참고 컨텍스트 ---\n{external_context}"
+
         return ExecutionPlan(
             mode=mode,
             scope=scope,
             tool_groups=tool_groups,
-            system_prompt=profile.system_prompt,
+            system_prompt=effective_system_prompt,
             guardrail_chain=profile.guardrails,
             question_type=question_type,
             strategy=strategy,
@@ -103,6 +118,7 @@ class StrategyBuilder:
             response_policy=profile.response_policy,
             max_tool_calls=profile.max_tool_calls,
             agent_timeout_seconds=profile.agent_timeout_seconds,
+            external_context=external_context,
         )
 
     @staticmethod

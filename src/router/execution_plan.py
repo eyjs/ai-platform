@@ -58,3 +58,4 @@ class ExecutionPlan:
     max_tool_calls: int = 5
     agent_timeout_seconds: int = 30
     direct_answer: str | None = None  # Orchestrator 직접 응답 (인사/잡담)
+    external_context: str = ""  # 외부에서 주입된 컨텍스트 (사주 분석 등). system_prompt에 추가

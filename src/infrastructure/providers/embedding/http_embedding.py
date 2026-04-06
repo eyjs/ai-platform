@@ -14,9 +14,17 @@ class HttpEmbeddingProvider(EmbeddingProvider):
         base_url: str,
         max_concurrent: int = 20,
         dimension: int = 1024,
+        timeout: float = 15.0,
+        connect_timeout: float = 5.0,
     ):
         self._base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=30.0)
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=connect_timeout),
+            limits=httpx.Limits(
+                max_connections=max_concurrent,
+                max_keepalive_connections=max_concurrent,
+            ),
+        )
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._dimension = dimension
 

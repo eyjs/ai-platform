@@ -30,7 +30,7 @@ services:
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105  # 9B — 경량 (Intent 분류)
-      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104    # 27B — 품질 (답변 생성)
+      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8105    # 9B — 속도 우선 (채팅 응답)
       # 오케스트레이터 (9B — 프로필 선택은 경량 작업)
       AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3.5-9B-4bit
       AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105

@@ -167,7 +167,7 @@ class IngestPipeline:
         batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
 
         if len(batches) > 5:
-            logger.info("Embedding %d batches (%d texts total)", len(batches), len(texts))
+            logger.info("embedding_batches", batches=len(batches), total_texts=len(texts))
 
         async def _embed_one(batch: List[str]) -> List[List[float]]:
             return await self._embedder.embed_batch(batch)

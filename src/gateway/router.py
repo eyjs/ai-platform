@@ -3,10 +3,11 @@
 /chat/stream, /chat, /documents/ingest, /profiles, /health
 
 인증:
-- /health, /profiles → 공개 (인증 불필요)
-- /chat, /chat/stream, /documents/ingest → 인증 필수 (JWT 또는 API Key)
+- /health, /profiles -> 공개 (인증 불필요)
+- /chat, /chat/stream, /documents/ingest -> 인증 필수 (JWT 또는 API Key)
 """
 
+import asyncio
 import json
 import uuid
 from dataclasses import dataclass
@@ -88,6 +89,7 @@ class _ChatSetup:
     ctx_token: object  # contextvars.Token
     profile_id: str = ""
     orchestrated: bool = False
+    needs_routing: bool = False  # 백그라운드 오케스트레이터 라우팅 필요 여부
 
 
 async def _prepare_chat(
@@ -95,7 +97,7 @@ async def _prepare_chat(
     request: Request,
     user_ctx: UserContext,
 ) -> _ChatSetup:
-    """chat/chat_stream 공통 로직: 인증 → Orchestrator/Profile 로딩 → 세션 → history → Router."""
+    """chat/chat_stream 공통 로직: 인증 -> Orchestrator/Profile 로딩 -> 세션 -> history -> Router."""
     state = _get_app_state(request)
     request_id = str(uuid.uuid4())
     session_id = req.session_id or str(uuid.uuid4())
@@ -112,7 +114,7 @@ async def _prepare_chat(
         )
 
         if orchestrator_result.is_general_response:
-            # 인사/잡담 → 직접 응답 (프로필 없이)
+            # 인사/잡담 -> 직접 응답 (프로필 없이)
             ctx_token = request_context.set(RequestContext(
                 request_id=request_id,
                 session_id=session_id,
@@ -229,6 +231,8 @@ async def _prepare_chat(
                 )
             history = await state.session_memory.get_turns(session_id, max_turns=10)
 
+            skip_context_resolve = req.chatbot_id is not None
+
             tools = state.tool_registry.resolve(profile.tool_names)
             plan = await state.ai_router.route(
                 query=req.question,
@@ -236,9 +240,11 @@ async def _prepare_chat(
                 tools=tools,
                 history=history,
                 user_security_level=user_ctx.security_level_max,
+                skip_context_resolve=skip_context_resolve,
+                external_context=req.context or "",
             )
 
-        context = AgentContext(
+        agent_context = AgentContext(
             session_id=session_id,
             user_id=user_ctx.user_id,
             user_role=user_ctx.user_role,
@@ -249,11 +255,143 @@ async def _prepare_chat(
         return _ChatSetup(
             session_id=session_id,
             plan=plan,
-            context=context,
+            context=agent_context,
             trace=trace,
             ctx_token=ctx_token,
             profile_id=chatbot_id,
             orchestrated=orchestrator_result is not None,
+        )
+    except Exception:
+        request_context.reset(ctx_token)
+        raise
+
+
+async def _prepare_chat_fast(
+    req: ChatRequest,
+    request: Request,
+    user_ctx: UserContext,
+) -> _ChatSetup:
+    """chat_stream 전용: 오케스트레이터 호출 없이 즉시 반환.
+
+    세션 메타에서 이전 라우팅 결과(current_profile_id)를 확인하여 재사용.
+    없으면 fallback_profile_id 사용.
+    오케스트레이터 라우팅은 호출자가 백그라운드에서 별도 실행한다.
+    """
+    state = _get_app_state(request)
+    request_id = str(uuid.uuid4())
+    session_id = req.session_id or str(uuid.uuid4())
+
+    # chatbot_id가 명시적으로 전달된 경우: 기존과 동일 (오케스트레이터 바이패스)
+    chatbot_id = req.chatbot_id
+    needs_routing = False
+
+    if chatbot_id is None:
+        # 오케스트레이터가 활성이면 백그라운드 라우팅 예약
+        if hasattr(state, "orchestrator") and state.orchestrator:
+            needs_routing = True
+
+            # 세션 메타에서 이전 프로필 확인
+            try:
+                meta = await state.session_memory.get_orchestrator_metadata(session_id)
+                chatbot_id = meta.get("current_profile_id")
+            except Exception:
+                chatbot_id = None
+
+            # 이전 프로필이 없으면 fallback 사용
+            if not chatbot_id:
+                chatbot_id = state.settings.fallback_profile_id
+
+        if not chatbot_id:
+            raise HTTPException(
+                status_code=400,
+                detail="chatbot_id가 필요합니다. orchestrator가 비활성 상태입니다.",
+            )
+
+    ctx_token = request_context.set(RequestContext(
+        request_id=request_id,
+        session_id=session_id,
+        profile_id=chatbot_id,
+        user_id=user_ctx.user_id,
+    ))
+
+    try:
+        # 프로필 접근 권한 확인
+        try:
+            await state.auth_service.check_profile_access(user_ctx, chatbot_id)
+        except AuthError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+
+        logger.info(
+            "chat_stream_fast_setup",
+            question=req.question[:100],
+            chatbot_id=chatbot_id,
+            needs_routing=needs_routing,
+            question_len=len(req.question),
+            user_id=user_ctx.user_id,
+        )
+
+        profile = await state.profile_store.get(chatbot_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profile not found: {chatbot_id}")
+
+        # 세션 생성 (없으면)
+        await state.session_memory.create_session(
+            session_id=session_id,
+            profile_id=chatbot_id,
+            user_id=user_ctx.user_id,
+            ttl_seconds=profile.memory_ttl_seconds,
+        )
+
+        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
+        active_wf = state.workflow_engine.get_session(session_id)
+        if active_wf and not active_wf.completed:
+            logger.info(
+                "workflow_session_active",
+                session_id=session_id,
+                workflow_id=active_wf.workflow_id,
+                current_step=active_wf.current_step_id,
+            )
+            plan = ExecutionPlan(
+                mode=AgentMode.WORKFLOW,
+                scope=SearchScope(),
+                workflow_id=active_wf.workflow_id,
+            )
+            history = []
+        else:
+            history = await state.session_memory.get_turns(session_id, max_turns=10)
+
+            # chatbot_id가 명시적으로 전달된 경우: L0 ContextResolver를 건너뛴다
+            # 이미 특정 챗봇을 지정했으므로 대명사 해소/질문 재작성이 불필요
+            skip_context_resolve = req.chatbot_id is not None
+
+            tools = state.tool_registry.resolve(profile.tool_names)
+            plan = await state.ai_router.route(
+                query=req.question,
+                profile=profile,
+                tools=tools,
+                history=history,
+                user_security_level=user_ctx.security_level_max,
+                skip_context_resolve=skip_context_resolve,
+                external_context=req.context or "",
+            )
+
+        agent_context = AgentContext(
+            session_id=session_id,
+            user_id=user_ctx.user_id,
+            user_role=user_ctx.user_role,
+            conversation_history=history,
+        )
+        trace = RequestTrace(request_id=request_id)
+
+        return _ChatSetup(
+            session_id=session_id,
+            plan=plan,
+            context=agent_context,
+            trace=trace,
+            ctx_token=ctx_token,
+            profile_id=chatbot_id,
+            orchestrated=needs_routing,
+            needs_routing=needs_routing,
         )
     except Exception:
         request_context.reset(ctx_token)
@@ -332,12 +470,42 @@ async def chat_stream(req: ChatRequest, request: Request):
     await _check_rate_limit(request, user_ctx)
 
     try:
-        setup = await _prepare_chat(req, request, user_ctx)
+        setup = await _prepare_chat_fast(req, request, user_ctx)
     except HTTPException:
         raise
     except Exception as e:
         logger.error("chat_stream_setup_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+    # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
+    routing_task: Optional[asyncio.Task] = None
+    if setup.needs_routing:
+        async def _background_route():
+            """백그라운드에서 오케스트레이터 라우팅을 실행하고 세션 메타에 결과를 기록한다."""
+            try:
+                result = await state.orchestrator.route(
+                    question=req.question,
+                    session_id=setup.session_id,
+                    user_ctx=user_ctx,
+                )
+                if result and result.selected_profile_id:
+                    await state.session_memory.update_current_profile(
+                        setup.session_id, result.selected_profile_id,
+                    )
+                logger.info(
+                    "background_routing_complete",
+                    session_id=setup.session_id,
+                    selected_profile=result.selected_profile_id if result else "none",
+                    reason=result.reason if result else "none",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "background_routing_error",
+                    session_id=setup.session_id,
+                    error=str(exc),
+                )
+
+        routing_task = asyncio.create_task(_background_route())
 
     # context reset을 generator 종료 시점으로 연기
     async def event_generator():
@@ -380,6 +548,13 @@ async def chat_stream(req: ChatRequest, request: Request):
                 total_ms=round(setup.trace.total_ms, 1),
             )
         finally:
+            # 백그라운드 라우팅 태스크 정리
+            if routing_task and not routing_task.done():
+                routing_task.cancel()
+                try:
+                    await routing_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             # SSE 제너레이터는 별도 Task에서 실행되므로
             # ContextVar 토큰 reset은 안전하게 스킵
             try:
@@ -462,7 +637,7 @@ async def get_ingest_status(job_id: str, request: Request):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
-    # pending → queued (외부 API 용어 통일)
+    # pending -> queued (외부 API 용어 통일)
     status = "queued" if job["status"] == "pending" else job["status"]
     result = job.get("result") if job["status"] == "completed" else None
 

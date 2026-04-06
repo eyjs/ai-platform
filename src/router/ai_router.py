@@ -57,13 +57,34 @@ class AIRouter:
         history: Optional[List[dict]] = None,
         user_security_level: str = "PUBLIC",
         prior_doc_ids: Optional[List[str]] = None,
+        skip_context_resolve: bool = False,
+        external_context: str = "",
     ) -> ExecutionPlan:
         """4-Layer 라우팅 실행."""
         t_start = time.time()
         history = history or []
 
         # Layer 0: Context Resolver
-        resolved_query, resolution = await self._run_l0(query, history)
+        # chatbot_id가 명시적으로 전달된 경우 L0을 건너뛰고 passthrough 처리
+        if skip_context_resolve:
+            resolved_query = query
+            resolution = ResolutionResult(
+                resolved_query=query,
+                original_query=query,
+                confidence=1.0,
+                method="passthrough",
+            )
+            logger.info(
+                "L0_context_resolve",
+                layer="ROUTER", component="ContextResolver",
+                method="passthrough",
+                confidence=1.0,
+                changed=False,
+                latency_ms=0.0,
+                reason="skip_context_resolve (chatbot_id explicit)",
+            )
+        else:
+            resolved_query, resolution = await self._run_l0(query, history)
 
         # Layer 1: Intent Classifier
         question_type, custom_intent = await self._run_l1(
@@ -99,6 +120,7 @@ class AIRouter:
             prior_doc_ids=prior_doc_ids,
             workflow_id=workflow_id,
             workflow_step=None,
+            external_context=external_context,
         )
         l3_ms = (time.time() - t3) * 1000
         logger.info(
@@ -110,6 +132,8 @@ class AIRouter:
             security_max=plan.scope.security_level_max,
             needs_rag=strategy.needs_rag,
             history_turns=strategy.history_turns,
+            has_external_context=bool(external_context),
+            has_conversation_context=bool(plan.conversation_context),
             latency_ms=round(l3_ms, 1),
         )
 

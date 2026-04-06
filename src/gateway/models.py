@@ -23,6 +23,7 @@ class ChatRequest(BaseModel):
     question: str
     chatbot_id: str | None = None  # None이면 orchestrator 모드
     session_id: str | None = None
+    context: str | None = None  # 외부 컨텍스트 (사주 분석 등). question과 분리하여 system prompt에 주입
 
     @field_validator("question")
     @classmethod

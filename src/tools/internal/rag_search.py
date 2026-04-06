@@ -24,6 +24,11 @@ logger = get_logger(__name__)
 CANDIDATE_POOL_SIZE = 50
 PROBE_SKIP_THRESHOLD = 0.012  # RRF 스코어 범위: ~0.007-0.016
 
+# Progressive Disclosure 상수
+DEFAULT_DISCLOSURE_LEVEL = 2
+REFERENCE_LOAD_THRESHOLD = 0.015
+MAX_REFERENCE_DOCS = 3
+
 
 class RAGSearchTool:
     """RAG 검색 도구 (ScopedTool). 5-layer 파이프라인."""
@@ -63,17 +68,91 @@ class RAGSearchTool:
             return ToolResult.fail("query is required")
 
         top_k = params.get("max_vector_chunks", self._default_top_k)
+        disclosure_level = params.get(
+            "disclosure_level", DEFAULT_DISCLOSURE_LEVEL,
+        )
         t_start = time.time()
 
-        # L1. Adaptive 쿼리 확장: probe → 조건부 확장
+        # Level 1: 메타데이터 전용 (본문 로드 없음)
+        if disclosure_level == 1:
+            return await self._execute_level1(query, scope, t_start)
+
+        # Level 2: 기존 5-layer 파이프라인 (기본값)
+        results, query_embedding = await self._execute_full_pipeline(
+            query, scope, top_k,
+        )
+
+        # Level 3: Level 2 + references 조건부 로드 (임베딩 재사용)
+        if disclosure_level == 3 and results:
+            results = await self._append_references(
+                query, scope, results, t_start,
+                query_embedding=query_embedding,
+            )
+
+        total_ms = (time.time() - t_start) * 1000
+        logger.info(
+            "rag_pipeline_complete",
+            disclosure_level=disclosure_level,
+            final=len(results),
+            latency_ms=round(total_ms, 1),
+        )
+
+        return ToolResult.ok(
+            results,
+            method="rag_search",
+            chunks_found=len(results),
+            disclosure_level=disclosure_level,
+        )
+
+    async def _execute_level1(
+        self, query: str, scope: SearchScope, t_start: float,
+    ) -> ToolResult:
+        """Progressive Disclosure Level 1: 메타데이터 전용 검색."""
+        embedding = (await self._embedder.embed_batch([query]))[0]
+        domain_codes = scope.domain_codes if scope.domain_codes else None
+
+        metadata_results = await self._store.metadata_search(
+            embedding=embedding,
+            text_query=query,
+            limit=CANDIDATE_POOL_SIZE,
+            domain_codes=domain_codes,
+            allowed_doc_ids=scope.allowed_doc_ids,
+            max_security_level=scope.security_level_max,
+        )
+
+        total_ms = (time.time() - t_start) * 1000
+        logger.info(
+            "disclosure_level_applied",
+            disclosure_level=1,
+            docs_loaded=0,
+            results=len(metadata_results),
+            latency_ms=round(total_ms, 1),
+        )
+
+        return ToolResult.ok(
+            metadata_results,
+            method="rag_search",
+            chunks_found=len(metadata_results),
+            disclosure_level=1,
+        )
+
+    async def _execute_full_pipeline(
+        self, query: str, scope: SearchScope, top_k: int,
+    ) -> tuple[list[dict], list[float]]:
+        """기존 5-layer RAG 파이프라인 (Level 2 기본 경로).
+
+        Returns:
+            (results, query_embedding): 검색 결과와 원본 쿼리 임베딩 (Level 3 재사용용)
+        """
+        # L1. Adaptive 쿼리 확장: probe -> 조건부 확장
         queries, probe_candidates = await self._adaptive_expand(query, scope)
 
         # 멀티쿼리 임베딩 (배치)
         embeddings = await self._embedder.embed_batch(queries)
+        query_embedding = embeddings[0]  # 원본 쿼리 임베딩 보존
 
         # 멀티쿼리 하이브리드 검색 + 합산
         if probe_candidates is not None and len(queries) == 1:
-            # probe 결과를 재사용 (확장 스킵된 경우)
             candidates = probe_candidates
         else:
             candidates = await self._multi_query_search(
@@ -81,7 +160,7 @@ class RAGSearchTool:
             )
 
         if not candidates:
-            return ToolResult.ok([], method="rag_search", chunks_found=0)
+            return []
 
         # L2. 노이즈 필터
         candidates = filter_noise(candidates)
@@ -98,21 +177,64 @@ class RAGSearchTool:
             results = candidates[:top_k]
 
         # L5. 결과 가드
-        results = guard_results(results)
+        return guard_results(results), query_embedding
 
-        total_ms = (time.time() - t_start) * 1000
+    async def _append_references(
+        self,
+        query: str,
+        scope: SearchScope,
+        results: list[dict],
+        t_start: float,
+        *,
+        query_embedding: list[float] | None = None,
+    ) -> list[dict]:
+        """Level 3: 상위 결과 score가 낮을 때 참조 문서 추가 로드."""
+        top_score = results[0]["score"] if results else 0.0
+        if top_score > REFERENCE_LOAD_THRESHOLD:
+            return results
+
+        # 임베딩 재사용 (Level 2에서 이미 계산된 것 활용)
+        embedding = query_embedding or (await self._embedder.embed_batch([query]))[0]
+        domain_codes = scope.domain_codes if scope.domain_codes else None
+
+        metadata = await self._store.metadata_search(
+            embedding=embedding,
+            text_query=query,
+            limit=CANDIDATE_POOL_SIZE,
+            domain_codes=domain_codes,
+            allowed_doc_ids=scope.allowed_doc_ids,
+            max_security_level=scope.security_level_max,
+        )
+
+        # 기존 결과에 없는 doc_id 추출
+        existing_doc_ids = {r.get("document_id", "") for r in results}
+        ref_doc_ids = []
+        for m in metadata:
+            doc_id = m.get("doc_id", "")
+            if doc_id and doc_id not in existing_doc_ids:
+                ref_doc_ids.append(doc_id)
+                existing_doc_ids.add(doc_id)
+            if len(ref_doc_ids) >= MAX_REFERENCE_DOCS:
+                break
+
+        if not ref_doc_ids:
+            return results
+
+        ref_chunks = await self._store.fetch_chunks_by_doc_ids(
+            ref_doc_ids,
+            limit_per_doc=2,
+            max_security_level=scope.security_level_max,
+        )
+
         logger.info(
-            "rag_pipeline_complete",
-            queries=len(queries),
-            final=len(results),
-            latency_ms=round(total_ms, 1),
+            "disclosure_level_applied",
+            disclosure_level=3,
+            docs_loaded=len(ref_doc_ids),
+            ref_chunks=len(ref_chunks),
+            latency_ms=round((time.time() - t_start) * 1000, 1),
         )
 
-        return ToolResult.ok(
-            results,
-            method="rag_search",
-            chunks_found=len(results),
-        )
+        return results + ref_chunks
 
     async def _adaptive_expand(
         self, query: str, scope: SearchScope,

@@ -3,14 +3,16 @@
 프로필의 system_prompt, description, domain 정보를 그대로 임베딩하여
 질문과 의미적으로 가장 가까운 프로필을 선택한다.
 
-- 하드코딩 문장 합성 없음 — 프로필 원문이 곧 능력 기술
+- 하드코딩 문장 합성 없음 -- 프로필 원문이 곧 능력 기술
 - 프로필 YAML만 잘 쓰면 라우팅 자동
 - 다국어 지원, 범용어 면역
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
+import time
 from dataclasses import dataclass
 
 from src.infrastructure.providers.base import EmbeddingProvider
@@ -40,6 +42,44 @@ class EmbeddingRouteResult:
     matched_capability: str
 
 
+# 캐시에서 None 결과를 구분하기 위한 센티널
+_CACHE_NONE = object()
+
+
+class _TTLCache:
+    """간단한 TTL 기반 인메모리 캐시. 외부 의존성 없음."""
+
+    def __init__(self, ttl_seconds: float = 300.0, max_entries: int = 1000):
+        self._ttl = ttl_seconds
+        self._max = max_entries
+        self._store: dict[str, tuple[float, object]] = {}
+
+    def get(self, key: str) -> tuple[bool, object]:
+        """캐시 조회. (hit, value) 튜플 반환. hit=False이면 캐시 미스."""
+        entry = self._store.get(key)
+        if entry is None:
+            return False, None
+        expire_at, value = entry
+        if time.monotonic() > expire_at:
+            del self._store[key]
+            return False, None
+        return True, value
+
+    def put(self, key: str, value: object) -> None:
+        if len(self._store) >= self._max:
+            self._evict_expired()
+        if len(self._store) >= self._max:
+            oldest_key = min(self._store, key=lambda k: self._store[k][0])
+            del self._store[oldest_key]
+        self._store[key] = (time.monotonic() + self._ttl, value)
+
+    def _evict_expired(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, (exp, _) in self._store.items() if now > exp]
+        for k in expired:
+            del self._store[k]
+
+
 class EmbeddingRouter:
     """의도-능력 매칭 프로필 라우터."""
 
@@ -47,6 +87,7 @@ class EmbeddingRouter:
         self._embedding = embedding_provider
         self._profile_capabilities: dict[str, list[tuple[str, list[float]]]] = {}
         self._initialized = False
+        self._route_cache = _TTLCache(ttl_seconds=300.0, max_entries=1000)
 
     async def initialize(self, profiles: list[dict]) -> None:
         """프로필 원문에서 능력 기술을 추출하고 임베딩한다."""
@@ -89,6 +130,15 @@ class EmbeddingRouter:
         if not self._initialized or not self._profile_capabilities:
             return None
 
+        # 캐시 확인
+        cache_key = hashlib.sha256(question.encode()).hexdigest()
+        hit, cached = self._route_cache.get(cache_key)
+        if hit:
+            logger.info("embedding_route_cache_hit", question_len=len(question))
+            if cached is _CACHE_NONE:
+                return None
+            return cached
+
         try:
             query_embeddings = await self._embedding.embed_batch([question])
         except Exception as e:
@@ -108,6 +158,7 @@ class EmbeddingRouter:
             profile_scores[profile_id] = (best_sim, best_cap)
 
         if not profile_scores:
+            self._route_cache.put(cache_key, _CACHE_NONE)
             return None
 
         sorted_profiles = sorted(
@@ -125,6 +176,8 @@ class EmbeddingRouter:
                 best_score=round(best_score, 4),
                 threshold=SIMILARITY_THRESHOLD,
             )
+            # 임계값 미달도 캐싱 (반복 임베딩 방지)
+            self._route_cache.put(cache_key, _CACHE_NONE)
             return None
 
         is_ambiguous = gap < AMBIGUITY_GAP
@@ -141,7 +194,7 @@ class EmbeddingRouter:
             is_ambiguous=is_ambiguous,
         )
 
-        return EmbeddingRouteResult(
+        result = EmbeddingRouteResult(
             profile_id=best_id,
             similarity=best_score,
             confidence=confidence,
@@ -149,11 +202,15 @@ class EmbeddingRouter:
             matched_capability=best_cap,
         )
 
+        # 결과 캐싱
+        self._route_cache.put(cache_key, result)
+        return result
+
     @staticmethod
     def _extract_capability_segments(profile: dict) -> list[str]:
         """프로필 원문에서 의미 있는 세그먼트를 추출한다.
 
-        하드코딩 문장 합성 없음 — 프로필에 적힌 그대로 사용.
+        하드코딩 문장 합성 없음 -- 프로필에 적힌 그대로 사용.
         """
         segments: list[str] = []
 
@@ -172,12 +229,12 @@ class EmbeddingRouter:
         if description and len(description) >= 8:
             segments.append(description)
 
-        # domain_scopes — 도메인명 자체가 의미 담고 있음
+        # domain_scopes -- 도메인명 자체가 의미 담고 있음
         domains = [d for d in profile.get("domain_scopes", []) if d and d != "_common"]
         if domains:
             segments.append(" ".join(domains))
 
-        # intent_hints의 description — 각 인텐트의 능력 설명
+        # intent_hints의 description -- 각 인텐트의 능력 설명
         for hint in profile.get("intent_hints", []):
             desc = hint.get("description", "")
             if desc and len(desc) >= 5:

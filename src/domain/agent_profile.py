@@ -79,6 +79,16 @@ class AgentProfile:
     # 메모리
     memory_type: str = "short"  # "short" | "session" | "long"
     memory_ttl_seconds: int = 3600
+    memory_scopes: list[str] = field(default_factory=lambda: ["local"])
+    memory_project_id: str | None = None
+
+    # 검증 넛지
+    validation_nudge_enabled: bool = False
+    validation_nudge_interval: int = 20
+    validation_nudge_type: str = "fact_consistency"
+
+    # 실행 경로
+    execution_path: str = "subagent"
 
     # 에이전틱 모드 설정
     max_tool_calls: int = 5
@@ -87,6 +97,13 @@ class AgentProfile:
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """필드 간 교차 검증."""
+        if "project" in self.memory_scopes and not self.memory_project_id:
+            raise ValueError(
+                "memory_project_id is required when 'project' in memory_scopes"
+            )
 
     @property
     def tool_names(self) -> list[str]:

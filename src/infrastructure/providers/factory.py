@@ -35,6 +35,8 @@ class ProviderFactory:
             return HttpEmbeddingProvider(
                 base_url=self._settings.embedding_server_url,
                 max_concurrent=self._settings.embedding_concurrent_requests,
+                timeout=self._settings.embedding_timeout,
+                connect_timeout=self._settings.embedding_connect_timeout,
             )
 
         if self._is_local:
@@ -101,6 +103,24 @@ class ProviderFactory:
 
     def get_parsing_provider(self) -> ParsingProvider:
         parser_type = self._settings.parser_provider.lower()
+
+        if parser_type == "engine":
+            from src.pipeline.parsing.engine import ParsingEngine
+            from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
+
+            engine = ParsingEngine(
+                enable_docling=self._settings.parser_enable_docling,
+                enable_vlm=self._settings.parser_enable_vlm,
+                vlm_endpoint=self._settings.vlm_ocr_endpoint,
+                csv_max_rows=self._settings.parser_csv_max_rows,
+                excel_max_rows_per_sheet=self._settings.parser_excel_max_rows,
+            )
+            logger.info(
+                "Using unified parsing engine (docling=%s, vlm=%s)",
+                self._settings.parser_enable_docling,
+                self._settings.parser_enable_vlm,
+            )
+            return ParsingEngineProvider(engine)
 
         if parser_type == "llamaparse":
             if not self._settings.llamaparse_api_key:

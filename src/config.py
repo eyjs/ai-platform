@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     # Ollama 폴백 (MLX 서버 미실행 시)
     ollama_host: str = "http://localhost:11434"
     ollama_num_ctx: int = 16384
-    router_model: str = "qwen3:8b"
-    main_model: str = "gemma2:9b"
+    router_model: str = "qwen3.5:9b"
+    main_model: str = "qwen3.5:27b"
     dev_embedding_model: str = "dragonkue/BGE-m3-ko"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     openai_api_key: str = ""
@@ -50,9 +50,16 @@ class Settings(BaseSettings):
     prod_llm_model: str = "gpt-4o-mini"
 
     # 파서 (Vision Parser)
-    parser_provider: str = "text"      # text | llamaparse
+    parser_provider: str = "text"      # text | llamaparse | engine
     llamaparse_api_key: str = ""
     parser_timeout: float = 120.0
+
+    # 통합 파싱 엔진 (parser_provider=engine 일 때)
+    parser_enable_docling: bool = True
+    parser_enable_vlm: bool = False
+    vlm_ocr_endpoint: str = ""         # VLM OCR 서버 (예: http://localhost:8087)
+    parser_csv_max_rows: int = 10000
+    parser_excel_max_rows: int = 10000
 
     # 청킹
     chunk_size: int = 1000
@@ -61,6 +68,10 @@ class Settings(BaseSettings):
     # 임베딩 배치
     embed_batch_size: int = 64
     embed_max_batch_size: int = 128
+
+    # 임베딩 프로바이더
+    embedding_timeout: float = 15.0           # HTTP 타임아웃 (초)
+    embedding_connect_timeout: float = 5.0    # 커넥션 타임아웃 (초)
 
     # 동시성
     max_concurrent_agents: int = 50
@@ -89,7 +100,7 @@ class Settings(BaseSettings):
     kms_webhook_secret: str = ""       # Webhook HMAC-SHA256 비밀키
 
     # 오케스트레이터 (Master Router)
-    orchestrator_model: str = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+    orchestrator_model: str = "mlx-community/Qwen3.5-9B-4bit"
     orchestrator_provider: str = "mlx"  # mlx | ollama | openai | anthropic
     orchestrator_server_url: str = ""  # MLX 서버 URL (미설정 시 router_llm_server_url 사용)
     orchestrator_api_key: str = ""  # 별도 API Key (미설정 시 openai_api_key 사용)
@@ -97,7 +108,8 @@ class Settings(BaseSettings):
     orchestrator_timeout: float = 60.0  # 프로필 선택 타임아웃 (로컬 LLM은 느림)
 
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
-    cors_origins: list[str] = []
+    # 개발 환경: 웹앱(localhost:3000) + BFF(localhost:3001) 기본 허용
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     # LLM 응답 최대 토큰 (MLX 기본 512 방지)
     llm_max_tokens: int = 4096

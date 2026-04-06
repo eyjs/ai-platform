@@ -95,3 +95,28 @@ class AbstractVectorStore(ABC):
     async def get_aip_ids_by_externals(
         self, external_ids: list[str],
     ) -> dict[str, dict]: ...
+
+    # -- Progressive Disclosure 검색 --
+
+    @abstractmethod
+    async def metadata_search(
+        self,
+        embedding: List[float],
+        text_query: str,
+        limit: int = 10,
+        domain_codes: Optional[List[str]] = None,
+        allowed_doc_ids: Optional[List[str]] = None,
+        max_security_level: Optional[str] = None,
+    ) -> List[dict]:
+        """메타데이터 전용 검색 (content 제외). Progressive Disclosure Level 1."""
+        ...
+
+    @abstractmethod
+    async def fetch_chunks_by_doc_ids(
+        self,
+        doc_ids: list[str],
+        limit_per_doc: int = 5,
+        max_security_level: Optional[str] = None,
+    ) -> List[dict]:
+        """doc_ids 기반 청크 본문 로드. Progressive Disclosure Level 2+."""
+        ...
