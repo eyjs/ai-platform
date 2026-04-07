@@ -16,7 +16,9 @@ services:
       retries: 5
 
   api:
-    build: .
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
     container_name: aip-api
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -36,7 +38,7 @@ services:
       AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
       # 인증
       AIP_AUTH_REQUIRED: "true"
-      AIP_JWT_SECRET: "dev-jwt-secret-change-in-production"
+      AIP_JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
       # KMS 연동
       AIP_KMS_API_URL: http://kms-api:3000/api
       AIP_KMS_INTERNAL_KEY: ${INTERNAL_KEY:-dev_internal_key_32_chars_minimum}
@@ -51,10 +53,12 @@ services:
       - default
       - kms-aip-shared
     volumes:
-      - ./seeds:/app/seeds
+      - ./apps/api/seeds:/app/seeds
 
   worker:
-    build: .
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
     command: ["python", "-m", "src.worker_main"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -74,16 +78,16 @@ services:
 
   bff:
     build:
-      context: ./web
+      context: .
       dockerfile: apps/bff/Dockerfile
     container_name: aip-bff
     ports:
-      - "3001:3001"
+      - "3011:3001"
     environment:
       NODE_ENV: production
       BFF_PORT: 3001
       DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
-      JWT_SECRET: "dev-jwt-secret-change-in-production"
+      JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
       CORS_ORIGIN: "*"
     depends_on:
       postgres:

@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "dev": "npx next dev --port 3000",
+    "build": "npx next build",
+    "start": "npx next start",
+    "lint": "npx next lint",
+    "typecheck": "npx tsc --noEmit"
   },
   "dependencies": {
-    "@aip/design-system": "workspace:*",
+    "@aip/design-system": "0.1.0",
     "next": "^15.3.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

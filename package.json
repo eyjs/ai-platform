@@ -1,0 +1,20 @@
+{
+  "name": "ai-platform",
+  "private": true,
+  "workspaces": [
+    "apps/frontend",
+    "apps/bff",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace @aip/frontend",
+    "dev:bff": "npm run dev --workspace @aip/bff",
+    "build:frontend": "npm run build --workspace @aip/frontend",
+    "build:bff": "npm run build --workspace @aip/bff",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

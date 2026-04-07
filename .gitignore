@@ -8,6 +8,18 @@ build/
 .eggs/
 *.egg
 
+# Node
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+apps/bff/dist/
+apps/frontend/.next/
+
+# Pipeline
+.pipeline/
+tmp/
+
 # Virtual environments
 .venv/
 venv/

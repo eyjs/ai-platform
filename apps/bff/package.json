@@ -3,15 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
-    "build": "nest build",
+    "dev": "npx nest start --watch",
+    "build": "npx nest build",
     "start": "node dist/main",
-    "start:dev": "nest start --watch",
+    "start:dev": "npx nest start --watch",
     "start:prod": "node dist/main",
-    "lint": "eslint \"{src,test}/**/*.ts\"",
-    "typecheck": "tsc --noEmit",
-    "migration:run": "typeorm migration:run -d dist/config/database.config.js",
-    "migration:revert": "typeorm migration:revert -d dist/config/database.config.js"
+    "lint": "npx eslint \"{src,test}/**/*.ts\"",
+    "typecheck": "npx tsc --noEmit",
+    "migration:run": "npx typeorm migration:run -d dist/config/database.config.js",
+    "migration:revert": "npx typeorm migration:revert -d dist/config/database.config.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
