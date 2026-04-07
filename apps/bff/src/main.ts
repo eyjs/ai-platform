@@ -5,8 +5,17 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // CORS — 콤마 구분 환경변수 또는 기본 허용 목록
+  const corsOrigins = (
+    process.env.CORS_ORIGIN ||
+    'http://localhost:3000,https://ai-platform-eight-sigma.vercel.app'
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: corsOrigins.includes('*') ? true : corsOrigins,
     credentials: true,
   });
 

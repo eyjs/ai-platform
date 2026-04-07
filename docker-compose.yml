@@ -88,7 +88,7 @@ services:
       BFF_PORT: 3001
       DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: "http://localhost:3000,https://ai-platform-eight-sigma.vercel.app"
     depends_on:
       postgres:
         condition: service_healthy

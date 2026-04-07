@@ -109,7 +109,12 @@ class Settings(BaseSettings):
 
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
     # 개발 환경: 웹앱(localhost:3000) + BFF(localhost:3001) 기본 허용
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    # 프로덕션: Vercel 배포 도메인 추가
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://ai-platform-eight-sigma.vercel.app",
+    ]
 
     # LLM 응답 최대 토큰 (MLX 기본 512 방지)
     llm_max_tokens: int = 4096
