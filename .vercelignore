@@ -1,0 +1,12 @@
+apps/api
+apps/bff
+alembic
+seeds
+tests
+docs
+.pipeline
+tmp
+*.py
+*.pyc
+__pycache__
+docker-compose.yml

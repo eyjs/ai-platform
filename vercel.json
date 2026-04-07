@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build --workspace @aip/frontend",
-  "installCommand": "npm install",
-  "outputDirectory": "apps/frontend/.next",
+  "buildCommand": "cd ../.. && npm install --ignore-scripts && npm run build --workspace @aip/frontend",
+  "installCommand": "echo 'install handled in buildCommand'",
+  "outputDirectory": ".next",
   "framework": "nextjs"
 }
