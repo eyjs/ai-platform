@@ -72,6 +72,25 @@ services:
         delay: 5s
         max_attempts: 10
 
+  bff:
+    build:
+      context: ./web
+      dockerfile: apps/bff/Dockerfile
+    container_name: aip-bff
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      BFF_PORT: 3001
+      DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
+      JWT_SECRET: "dev-jwt-secret-change-in-production"
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+
 networks:
   kms-aip-shared:
     external: true

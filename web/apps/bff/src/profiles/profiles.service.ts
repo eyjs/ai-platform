@@ -47,10 +47,10 @@ export class ProfilesService {
     if (!parsed.mode) throw new BadRequestException('YAML에 mode 필드가 필요합니다');
 
     const profile = this.profileRepo.create({
-      id: parsed.id,
-      name: parsed.name,
-      description: parsed.description || null,
-      mode: parsed.mode,
+      id: parsed.id as string,
+      name: parsed.name as string,
+      description: (parsed.description as string) || null,
+      mode: parsed.mode as string,
       config: parsed,
       isActive: true,
     });
@@ -90,9 +90,9 @@ export class ProfilesService {
     );
 
     const parsed = this.parseYaml(yamlContent);
-    profile.name = parsed.name || profile.name;
-    profile.description = parsed.description || profile.description;
-    profile.mode = parsed.mode || profile.mode;
+    profile.name = (parsed.name as string) || profile.name;
+    profile.description = (parsed.description as string) || profile.description;
+    profile.mode = (parsed.mode as string) || profile.mode;
     profile.config = parsed;
 
     await this.profileRepo.save(profile);
