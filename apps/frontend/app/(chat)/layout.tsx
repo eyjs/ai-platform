@@ -7,6 +7,7 @@ import { ChatInput } from '@/components/chat/chat-input';
 import { ChatMessageList } from '@/components/chat/chat-message-list';
 import { useChatSessions } from '@/hooks/use-chat-sessions';
 import { useChatStream } from '@/hooks/use-chat-stream';
+import { useAuth } from '@/lib/auth/auth-context';
 import type { ChatMessage } from '@/types/chat';
 
 export default function ChatLayout({
@@ -16,6 +17,7 @@ export default function ChatLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { accessToken } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedProfileName, setSelectedProfileName] = useState('자동 선택');
@@ -129,15 +131,14 @@ export default function ChatLayout({
       };
       addMessage(activeSessionId!, aiMessage);
 
-      // SSE 스트리밍 시작
-      const token = ''; // TODO: auth context에서 가져오기
+      // SSE 스트리밍 시작 — AuthProvider 의 accessToken 을 사용
       await sendMessage(
         {
           question: text,
           chatbot_id: selectedProfileId || undefined,
           session_id: activeSessionId || undefined,
         },
-        token,
+        accessToken ?? '',
       );
     },
     [
@@ -149,6 +150,7 @@ export default function ChatLayout({
       addMessage,
       sendMessage,
       router,
+      accessToken,
     ],
   );
 

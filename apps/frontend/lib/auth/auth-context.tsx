@@ -17,6 +17,7 @@ import {
   getRefreshToken,
   setRefreshToken,
   clearAllTokens,
+  setAuthMarkerCookie,
 } from './token-storage';
 
 interface AuthContextValue {
@@ -32,22 +33,36 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+
+  const applyTokens = useCallback(
+    (access: string, refresh: string) => {
+      setAccessToken(access);
+      setRefreshToken(refresh);
+      setAuthMarkerCookie();
+      setAccessTokenState(access);
+    },
+    [],
+  );
 
   const initAuth = useCallback(async () => {
     try {
       let token = getAccessToken();
 
-      // 메모리에 없으면 refresh 시도
+      // localStorage 에 access 가 없으면 refresh 로 재발급 시도
       if (!token) {
         const refresh = getRefreshToken();
         if (refresh) {
           const result = await authApi.refreshToken(refresh);
-          setAccessToken(result.accessToken);
-          setRefreshToken(result.refreshToken);
+          applyTokens(result.accessToken, result.refreshToken);
           token = result.accessToken;
         }
+      } else {
+        // 기존 토큰 존재 시 마커 쿠키도 보장 (세션 복구)
+        setAuthMarkerCookie();
+        setAccessTokenState(token);
       }
 
       if (token) {
@@ -57,51 +72,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       clearAllTokens();
       setUser(null);
+      setAccessTokenState(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [applyTokens]);
 
   useEffect(() => {
     initAuth();
   }, [initAuth]);
 
-  // 토큰 자동 갱신 (만료 1분 전)
+  // 토큰 자동 갱신 (13분마다 — 15분 만료 전)
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
+    if (!accessToken) return;
 
     const interval = setInterval(async () => {
       const refresh = getRefreshToken();
       if (!refresh) return;
       try {
         const result = await authApi.refreshToken(refresh);
-        setAccessToken(result.accessToken);
-        setRefreshToken(result.refreshToken);
+        applyTokens(result.accessToken, result.refreshToken);
       } catch {
         clearAllTokens();
         setUser(null);
+        setAccessTokenState(null);
         router.push('/login');
       }
-    }, 13 * 60 * 1000); // 13분마다 갱신 (15분 만료 전)
+    }, 13 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [user, router]);
+  }, [accessToken, router, applyTokens]);
 
   const login = useCallback(
     async (email: string, password: string) => {
       const result = await authApi.login(email, password);
-      setAccessToken(result.accessToken);
-      setRefreshToken(result.refreshToken);
+      applyTokens(result.accessToken, result.refreshToken);
       const me = await authApi.getMe(result.accessToken);
       setUser(me);
     },
-    [],
+    [applyTokens],
   );
 
   const logout = useCallback(() => {
     clearAllTokens();
     setUser(null);
+    setAccessTokenState(null);
     router.push('/login');
   }, [router]);
 
@@ -111,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         isLoading,
-        accessToken: getAccessToken(),
+        accessToken,
         login,
         logout,
       }}
