@@ -9,6 +9,7 @@
 
 import asyncio
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -18,11 +19,15 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
 from src.gateway.auth import AuthError
+from src.gateway.gateway_hooks import (
+    latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
+)
 from src.gateway.models import (
     ChatRequest, IngestJobStatus, IngestRequest, IngestResponse, UserContext,
     WorkflowAdvanceRequest, WorkflowStartRequest,
 )
 from src.observability.logging import RequestContext, get_logger, request_context
+from src.observability.request_log_models import RequestLogEntry
 from src.orchestrator.models import OrchestratorResult
 from src.router.execution_plan import ExecutionPlan
 from src.workflow.engine import StepResult
@@ -432,35 +437,85 @@ async def chat(req: ChatRequest, request: Request):
     await _check_rate_limit(request, user_ctx)
     setup: Optional[_ChatSetup] = None
 
-    try:
-        setup = await _prepare_chat(req, request, user_ctx)
+    request_log_svc = getattr(state, "request_log_service", None)
+    cache_svc = getattr(state, "response_cache_service", None)
 
-        response = await state.agent.execute(
-            question=req.question,
-            plan=setup.plan,
-            session_id=setup.session_id,
-            trace=setup.trace,
-        )
+    status_code = 200
+    error_code: Optional[str] = None
+    cache_hit = False
+    response_preview: Optional[str] = None
+    profile_for_log: str = ""
 
-        await state.session_memory.add_turn(setup.session_id, "user", req.question)
-        await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
+    with latency_timer() as timer:
+        try:
+            setup = await _prepare_chat(req, request, user_ctx)
+            profile_for_log = setup.profile_id or ""
 
-        setup.trace.log_summary()
+            profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
+            plan_mode = getattr(setup.plan, "mode", None)
+            mode_str = plan_mode.value if hasattr(plan_mode, "value") else str(plan_mode or "")
+            cacheable = bool(profile) and should_use_cache(profile, mode_str, cache_svc)
 
-        if response.trace:
-            response.trace.request_id = setup.trace.request_id
-            response.trace.latency_ms = setup.trace.total_ms
+            if cacheable:
+                cached_text = await try_cache_get(cache_svc, setup.profile_id, mode_str, req.question)
+                if cached_text is not None:
+                    cache_hit = True
+                    response_preview = RequestLogEntry.truncate_preview(cached_text)
+                    await state.session_memory.add_turn(setup.session_id, "user", req.question)
+                    await state.session_memory.add_turn(setup.session_id, "assistant", cached_text)
+                    return AgentResponse(answer=cached_text)
 
-        return response
+            response = await state.agent.execute(
+                question=req.question,
+                plan=setup.plan,
+                session_id=setup.session_id,
+                trace=setup.trace,
+            )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("chat_error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        if setup:
-            request_context.reset(setup.ctx_token)
+            await state.session_memory.add_turn(setup.session_id, "user", req.question)
+            await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
+
+            setup.trace.log_summary()
+
+            if response.trace:
+                response.trace.request_id = setup.trace.request_id
+                response.trace.latency_ms = setup.trace.total_ms
+
+            response_preview = RequestLogEntry.truncate_preview(response.answer)
+
+            if cacheable and response.answer:
+                await try_cache_put(
+                    cache_svc, setup.profile_id, mode_str, req.question, response.answer,
+                )
+
+            return response
+
+        except HTTPException as he:
+            status_code = he.status_code
+            error_code = f"http_{he.status_code}"
+            raise
+        except Exception as e:
+            status_code = 500
+            error_code = "internal_error"
+            logger.error("chat_error", error=str(e), exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
+        finally:
+            if request_log_svc is not None:
+                safe_enqueue(
+                    request_log_svc,
+                    RequestLogEntry(
+                        api_key_id=getattr(user_ctx, "api_key_id", None),
+                        profile_id=profile_for_log or None,
+                        status_code=status_code,
+                        latency_ms=timer["elapsed_ms"],
+                        cache_hit=cache_hit,
+                        error_code=error_code,
+                        request_preview=RequestLogEntry.truncate_preview(req.question),
+                        response_preview=response_preview,
+                    ),
+                )
+            if setup:
+                request_context.reset(setup.ctx_token)
 
 
 @gateway_router.post("/chat/stream")
@@ -469,12 +524,39 @@ async def chat_stream(req: ChatRequest, request: Request):
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx)
 
+    request_log_svc = getattr(state, "request_log_service", None)
+    stream_timer_start = time.monotonic()
+
     try:
         setup = await _prepare_chat_fast(req, request, user_ctx)
-    except HTTPException:
+    except HTTPException as he:
+        if request_log_svc is not None:
+            elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    status_code=he.status_code,
+                    latency_ms=elapsed_ms,
+                    error_code=f"http_{he.status_code}",
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                ),
+            )
         raise
     except Exception as e:
         logger.error("chat_stream_setup_error", error=str(e), exc_info=True)
+        if request_log_svc is not None:
+            elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    status_code=500,
+                    latency_ms=elapsed_ms,
+                    error_code="internal_error",
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                ),
+            )
         raise HTTPException(status_code=500, detail="Internal server error")
 
     # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
@@ -509,6 +591,9 @@ async def chat_stream(req: ChatRequest, request: Request):
 
     # context reset을 generator 종료 시점으로 연기
     async def event_generator():
+        gen_status_code = 200
+        gen_error_code: Optional[str] = None
+        gen_response_preview: Optional[str] = None
         try:
             answer_parts = []
             async for event in state.agent.execute_stream(
@@ -547,6 +632,12 @@ async def chat_stream(req: ChatRequest, request: Request):
                 answer_len=len(full_answer),
                 total_ms=round(setup.trace.total_ms, 1),
             )
+            gen_response_preview = RequestLogEntry.truncate_preview(full_answer)
+        except Exception as stream_err:
+            gen_status_code = 500
+            gen_error_code = "stream_error"
+            logger.error("chat_stream_error", error=str(stream_err), exc_info=True)
+            raise
         finally:
             # 백그라운드 라우팅 태스크 정리
             if routing_task and not routing_task.done():
@@ -555,6 +646,21 @@ async def chat_stream(req: ChatRequest, request: Request):
                     await routing_task
                 except (asyncio.CancelledError, Exception):
                     pass
+            # Request log enqueue — generator 종료 후 (R1 보장)
+            if request_log_svc is not None:
+                elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+                safe_enqueue(
+                    request_log_svc,
+                    RequestLogEntry(
+                        api_key_id=getattr(user_ctx, "api_key_id", None),
+                        profile_id=setup.profile_id or None,
+                        status_code=gen_status_code,
+                        latency_ms=elapsed_ms,
+                        error_code=gen_error_code,
+                        request_preview=RequestLogEntry.truncate_preview(req.question),
+                        response_preview=gen_response_preview,
+                    ),
+                )
             # SSE 제너레이터는 별도 Task에서 실행되므로
             # ContextVar 토큰 reset은 안전하게 스킵
             try:

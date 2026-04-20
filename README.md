@@ -1,5 +1,20 @@
 # AI Platform
 
+> **최근 업데이트 (2026-04-20): 중앙화 고도화 완료.**
+> - Provider Capability Metadata + Anthropic Stub + Registry (`apps/api/src/infrastructure/providers/`)
+> - API Key 관리 (BFF CRUD + audit + rotate), Admin UI (`apps/frontend/app/admin/api-keys/`)
+> - Profile YAML JSON Schema 검증 + history diff/rollback (`apps/bff/src/profiles/schema/`)
+> - 키별 사용량 대시보드 (`/admin/api-keys/[id]`) — 요청 수, p50/p95, 캐시 적중률
+> - 응답 캐시 (PostgreSQL `response_cache` + TTL sweeper)
+> - Provider 라우팅 정책 (YAML `providers:` 블록 + 2단 fallback)
+> - Alembic 010~013 마이그레이션
+>
+> 상세 문서:
+> - [Provider Switching](docs/provider-switching.md)
+> - [API Key Management](docs/api-key-management.md)
+> - [Profile YAML Schema](docs/profile-yaml-schema.md)
+> - [Provider Routing Policy](docs/provider-routing-policy.md)
+
 **Profile 기반 범용 AI 에이전트 플랫폼.**
 
 API Key 하나와 Profile YAML만으로 도메인별 AI 챗봇을 생성한다.

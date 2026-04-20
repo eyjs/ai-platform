@@ -24,8 +24,12 @@ from src.infrastructure.job_queue import JobQueue
 from src.infrastructure.memory.cache import PgCache
 from src.infrastructure.memory.session import SessionMemory
 from src.infrastructure.providers.factory import ProviderFactory
+from src.infrastructure.providers.registry import ProviderRegistry
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
+from src.observability.request_log_service import RequestLogService
+from src.router.provider_router import ProviderRouter
+from src.services.response_cache import ResponseCacheService
 from src.pipeline.ingest import IngestPipeline
 from src.router.ai_router import AIRouter
 from src.safety.faithfulness import FaithfulnessGuard
@@ -68,6 +72,12 @@ class AppState:
     rate_limiter: PGRateLimiter
     tenant_service: Optional[TenantService] = None
     orchestrator: Optional[MasterOrchestrator] = None
+
+    # Task 009: 통합 서비스
+    provider_registry: Optional[ProviderRegistry] = None
+    provider_router: Optional[ProviderRouter] = None
+    request_log_service: Optional[RequestLogService] = None
+    response_cache_service: Optional[ResponseCacheService] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -310,6 +320,30 @@ async def create_app_state(settings: Settings) -> AppState:
 
     providers = [embedding_provider, router_llm, main_llm, reranker, orchestrator_llm, kms_graph_client]
 
+    # Task 009: Provider Registry + Router + Request Log + Response Cache
+    provider_registry = provider_factory.build_registry()
+    provider_router = ProviderRouter(
+        registry=provider_registry,
+        default_provider_id=main_llm.capability.provider_id,
+    )
+
+    # Async SQLAlchemy session factory (request_log + response_cache 에서 사용)
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    # asyncpg 드라이버 URL 보정
+    db_url = settings.database_url
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    _engine = create_async_engine(db_url, pool_pre_ping=True)
+    _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+
+    request_log_service = RequestLogService(_session_factory)
+    response_cache_service = ResponseCacheService(_session_factory)
+
+    logger.info(
+        "gateway_integration_ready",
+        providers=provider_registry.ids(),
+    )
+
     return AppState(
         settings=settings,
         auth_service=auth_service,
@@ -329,6 +363,10 @@ async def create_app_state(settings: Settings) -> AppState:
         rate_limiter=rate_limiter,
         tenant_service=tenant_service,
         orchestrator=orchestrator,
+        provider_registry=provider_registry,
+        provider_router=provider_router,
+        request_log_service=request_log_service,
+        response_cache_service=response_cache_service,
         providers=providers,
     )
 
@@ -393,6 +431,18 @@ async def seed_dev_api_keys(pool: Any) -> None:
 async def shutdown(state: AppState) -> None:
     """앱 정리: 태스크 취소 + 커넥션 종료."""
     logger.info("shutdown_start")
+
+    # Task 009: 신규 서비스 정리 (역순)
+    if state.response_cache_service:
+        try:
+            await state.response_cache_service.stop_sweeper()
+        except Exception as e:
+            logger.warning("cache_sweeper_stop_error", error=str(e))
+    if state.request_log_service:
+        try:
+            await state.request_log_service.stop()
+        except Exception as e:
+            logger.warning("request_log_stop_error", error=str(e))
 
     if state.cleanup_task:
         state.cleanup_task.cancel()

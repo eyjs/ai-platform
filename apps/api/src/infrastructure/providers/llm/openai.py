@@ -4,7 +4,7 @@ import json
 import logging
 from typing import AsyncIterator
 
-from ..base import LLMProvider
+from ..base import LLMProvider, ProviderCapability
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,17 @@ class OpenAILLMProvider(LLMProvider):
         self._model = model
         self._system_prefix = system_prefix
         self._max_tokens = max_tokens
+
+    @property
+    def capability(self) -> ProviderCapability:
+        return ProviderCapability(
+            provider_id="openai",
+            supports_tool_use=True,
+            supports_streaming=True,
+            max_context=128000,
+            cost_per_1k_tokens=0.01,
+            stub=False,
+        )
 
     async def generate(self, prompt: str, system: str = "") -> str:
         system_msg = self._build_system(system)

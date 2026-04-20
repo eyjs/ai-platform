@@ -19,6 +19,46 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+export interface ProfileDiffResult {
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+  changed: Record<string, { before: unknown; after: unknown }>;
+}
+
+export async function fetchProfileSchema(): Promise<Record<string, unknown>> {
+  const res = await fetch(`${BFF_URL}/bff/profiles/schema`, {
+    headers: authHeaders(),
+  });
+  const data = await handleResponse<{ schema: Record<string, unknown> }>(res);
+  return data.schema;
+}
+
+export async function fetchProfileHistoryDiff(
+  profileId: string,
+  historyId: string,
+): Promise<{
+  history_id: string;
+  previous_history_id: string | null;
+  diff: ProfileDiffResult;
+}> {
+  const res = await fetch(
+    `${BFF_URL}/bff/profiles/${profileId}/history/${historyId}/diff`,
+    { headers: authHeaders() },
+  );
+  return handleResponse(res);
+}
+
+export async function restoreProfileHistory(
+  profileId: string,
+  historyId: string,
+): Promise<ProfileDetail> {
+  const res = await fetch(
+    `${BFF_URL}/bff/profiles/${profileId}/restore/${historyId}`,
+    { method: 'POST', headers: authHeaders() },
+  );
+  return handleResponse(res);
+}
+
 export async function fetchProfiles(): Promise<ProfileListItem[]> {
   const res = await fetch(`${BFF_URL}/bff/profiles`, { headers: authHeaders() });
   return handleResponse(res);

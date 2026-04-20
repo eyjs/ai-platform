@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from ..base import LLMProvider, StreamChunk
+from ..base import LLMProvider, ProviderCapability, StreamChunk
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,24 @@ class HttpLLMProvider(LLMProvider):
         self._client = httpx.AsyncClient(timeout=120.0)
         self._system_prefix = system_prefix
         self._max_tokens = max_tokens
+
+    @property
+    def capability(self) -> ProviderCapability:
+        return ProviderCapability(
+            provider_id="http_llm",
+            supports_tool_use=False,
+            supports_streaming=True,
+            max_context=8192,
+            cost_per_1k_tokens=0.0,
+            stub=False,
+        )
+
+    async def is_available(self) -> bool:
+        try:
+            r = await self._client.get(f"{self._base_url}/health", timeout=3.0)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as yaml from 'js-yaml';
 import { AgentProfile } from '../entities/agent-profile.entity';
 import { ProfileHistory } from '../entities/profile-history.entity';
@@ -14,6 +14,8 @@ import {
   ProfileHistoryItemDto,
   ToolItemDto,
 } from './dto/profile-response.dto';
+import { ProfileSchemaValidator } from './profile-schema.validator';
+import { computeDiff, DiffResult } from './profile-diff.util';
 
 @Injectable()
 export class ProfilesService {
@@ -22,7 +24,58 @@ export class ProfilesService {
     private readonly profileRepo: Repository<AgentProfile>,
     @InjectRepository(ProfileHistory)
     private readonly historyRepo: Repository<ProfileHistory>,
+    private readonly schemaValidator: ProfileSchemaValidator,
+    private readonly dataSource: DataSource,
   ) {}
+
+  getSchema(): Record<string, unknown> {
+    return this.schemaValidator.getSchema();
+  }
+
+  async getHistoryDiff(
+    profileId: string,
+    historyId: string,
+  ): Promise<{ history_id: string; previous_history_id: string | null; diff: DiffResult }> {
+    const current = await this.historyRepo.findOne({
+      where: { id: historyId, profileId },
+    });
+    if (!current) throw new NotFoundException('history not found');
+    const previous = await this.historyRepo.findOne({
+      where: { profileId },
+      order: { changedAt: 'DESC' },
+    });
+    const currentCfg = this.safeParseYaml(current.yamlContent);
+    const prevCfg =
+      previous && previous.id !== current.id
+        ? this.safeParseYaml(previous.yamlContent)
+        : {};
+    return {
+      history_id: current.id,
+      previous_history_id: previous && previous.id !== current.id ? previous.id : null,
+      diff: computeDiff(prevCfg, currentCfg),
+    };
+  }
+
+  async notifyProfileUpdated(profileId: string): Promise<void> {
+    try {
+      await this.dataSource.query('SELECT pg_notify($1, $2)', [
+        'profile_updated',
+        profileId,
+      ]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[profiles] NOTIFY failed', err);
+    }
+  }
+
+  private safeParseYaml(s: string): Record<string, unknown> {
+    try {
+      const v = yaml.load(s);
+      return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
 
   async findAll(): Promise<ProfileListItemDto[]> {
     const profiles = await this.profileRepo.find({
@@ -45,6 +98,14 @@ export class ProfilesService {
     if (!parsed.id) throw new BadRequestException('YAML에 id 필드가 필요합니다');
     if (!parsed.name) throw new BadRequestException('YAML에 name 필드가 필요합니다');
     if (!parsed.mode) throw new BadRequestException('YAML에 mode 필드가 필요합니다');
+
+    const schemaResult = this.schemaValidator.validate(parsed);
+    if (!schemaResult.ok) {
+      throw new BadRequestException({
+        message: 'Profile schema validation failed',
+        errors: schemaResult.errors,
+      });
+    }
 
     const profile = this.profileRepo.create({
       id: parsed.id as string,
@@ -90,12 +151,22 @@ export class ProfilesService {
     );
 
     const parsed = this.parseYaml(yamlContent);
+
+    const schemaResult = this.schemaValidator.validate(parsed);
+    if (!schemaResult.ok) {
+      throw new BadRequestException({
+        message: 'Profile schema validation failed',
+        errors: schemaResult.errors,
+      });
+    }
+
     profile.name = (parsed.name as string) || profile.name;
     profile.description = (parsed.description as string) || profile.description;
     profile.mode = (parsed.mode as string) || profile.mode;
     profile.config = parsed;
 
     await this.profileRepo.save(profile);
+    await this.notifyProfileUpdated(profile.id);
     return this.toDetail(profile);
   }
 

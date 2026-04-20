@@ -6,7 +6,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from ..base import LLMProvider
+from ..base import LLMProvider, ProviderCapability
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,24 @@ class OllamaProvider(LLMProvider):
         self._num_ctx = num_ctx
         self._system_prefix = system_prefix
         self._client = httpx.AsyncClient(timeout=120.0)
+
+    @property
+    def capability(self) -> ProviderCapability:
+        return ProviderCapability(
+            provider_id="ollama",
+            supports_tool_use=False,
+            supports_streaming=True,
+            max_context=self._num_ctx,
+            cost_per_1k_tokens=0.0,
+            stub=False,
+        )
+
+    async def is_available(self) -> bool:
+        try:
+            r = await self._client.get(f"{self._base_url}/api/tags", timeout=3.0)
+            return r.status_code == 200
+        except Exception:
+            return False
 
     async def generate(self, prompt: str, system: str = "") -> str:
         system_msg = self._build_system(system)

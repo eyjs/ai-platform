@@ -1,6 +1,8 @@
 """프로바이더 추상 인터페이스.
 
 LLM, Embedding, Reranker, Parsing 4종.
+
+Task 002: Provider Capability Metadata 추가.
 """
 
 from abc import ABC, abstractmethod
@@ -13,6 +15,21 @@ class StreamChunk:
     """스트리밍 청크. kind로 thinking/answer 구분."""
     kind: str   # "thinking" | "answer"
     content: str
+
+
+@dataclass(frozen=True)
+class ProviderCapability:
+    """Provider 메타데이터. Router Policy 가 후보 선택에 사용.
+
+    provider_id 는 전역 유일. YAML `providers:` 블록과 registry 키가 동일해야 한다.
+    stub=True 인 경우 인터페이스만 구현. generate*() 호출 시 NotImplementedError.
+    """
+    provider_id: str
+    supports_tool_use: bool
+    supports_streaming: bool
+    max_context: int
+    cost_per_1k_tokens: float
+    stub: bool = False
 
 
 class EmbeddingProvider(ABC):
@@ -37,6 +54,25 @@ class LLMProvider(ABC):
         if not system:
             return self._system_prefix
         return f"{self._system_prefix}\n\n{system}"
+
+    @property
+    def capability(self) -> ProviderCapability:
+        """기본 capability. 각 구현체는 이 property 를 오버라이드해야 한다.
+
+        기본값은 안전한 local-provider 기준. 서브클래스가 반드시 재정의.
+        """
+        return ProviderCapability(
+            provider_id=self.__class__.__name__.lower(),
+            supports_tool_use=False,
+            supports_streaming=True,
+            max_context=8192,
+            cost_per_1k_tokens=0.0,
+            stub=False,
+        )
+
+    async def is_available(self) -> bool:
+        """네트워크/헬스 체크. 기본 True. stub 도 True 반환."""
+        return True
 
     @abstractmethod
     async def generate(self, prompt: str, system: str = "") -> str: ...
@@ -75,3 +111,15 @@ class ParsingProvider(ABC):
 
     @abstractmethod
     def supported_types(self) -> List[str]: ...
+
+
+class ProviderUnavailableError(RuntimeError):
+    """Provider 가 호출 불가 상태 (stub, 네트워크 실패, rate limit 등).
+
+    Fallback chain 종료 시 Gateway 로 전파되어 502 응답의 근거가 된다.
+    """
+
+    def __init__(self, provider_id: str, reason: str):
+        self.provider_id = provider_id
+        self.reason = reason
+        super().__init__(f"Provider '{provider_id}' unavailable: {reason}")

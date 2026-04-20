@@ -5,7 +5,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "plugins": [],
-    "assets": [],
-    "watchAssets": false
+    "assets": ["profiles/schema/*.json"],
+    "watchAssets": true
   }
 }

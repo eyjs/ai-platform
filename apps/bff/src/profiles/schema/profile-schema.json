@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ai-platform.local/schemas/profile.schema.json",
+  "title": "AgentProfile",
+  "description": "Profile YAML schema for ai-platform. Single source of truth; copied to apps/api/src/agent/schema/ and apps/bff/src/profiles/schema/.",
+  "type": "object",
+  "required": ["id", "name", "mode"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$",
+      "description": "프로필 고유 식별자. 소문자/숫자/-/_ 만 허용."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "description": { "type": "string", "maxLength": 1000 },
+    "mode": {
+      "type": "string",
+      "enum": ["deterministic", "agentic", "workflow"]
+    },
+    "router": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "intent_classifier": { "type": "string" },
+        "context_resolver": { "type": "string" }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "providers": {
+      "type": "object",
+      "description": "Provider 선택 정책. S6 라우팅.",
+      "required": ["candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["provider_id"],
+            "additionalProperties": false,
+            "properties": {
+              "provider_id": { "type": "string", "minLength": 1 },
+              "priority": { "type": "integer", "minimum": 1, "default": 100 },
+              "require_tool_use": { "type": "boolean", "default": false },
+              "require_streaming": { "type": "boolean", "default": false },
+              "max_cost_per_1k": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        "fallback_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["timeout", "5xx", "unavailable", "rate_limit"]
+          },
+          "default": ["timeout", "5xx", "unavailable"]
+        },
+        "max_fallback_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 2
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 604800, "default": 3600 },
+        "agentic_enabled": { "type": "boolean", "default": false }
+      }
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "faithfulness_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "pii_masking": { "type": "boolean", "default": true }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "system": { "type": "string" },
+        "style": { "type": "string" }
+      }
+    },
+    "security_level_required": {
+      "type": "string",
+      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL"],
+      "default": "PUBLIC"
+    }
+  },
+  "errorMessages": {
+    "ko": {
+      "required.id": "프로필 id 는 필수입니다.",
+      "required.name": "프로필 name 은 필수입니다.",
+      "required.mode": "mode 는 필수입니다 (deterministic | agentic | workflow).",
+      "pattern.id": "id 형식이 올바르지 않습니다. (소문자/숫자/-/_ 만 허용)",
+      "enum.mode": "mode 값은 deterministic/agentic/workflow 중 하나여야 합니다."
+    }
+  }
+}

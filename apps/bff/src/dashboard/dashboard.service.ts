@@ -8,6 +8,22 @@ import {
   DashboardLatencyDto,
   DashboardLogsDto,
 } from './dto/dashboard.dto';
+import type {
+  DashboardRange,
+  DashboardBucket,
+  KeySummaryDto,
+} from './dto/api-key-metrics.dto';
+import type {
+  TimelineDto,
+  ProfileBreakdownDto,
+} from './dto/api-key-timeline.dto';
+import type { RecentLogsDto } from './dto/api-key-recent-logs.dto';
+
+const RANGE_INTERVALS: Record<DashboardRange, string> = {
+  '24h': '24 hours',
+  '7d': '7 days',
+  '30d': '30 days',
+};
 
 /**
  * conversation_sessions 테이블을 직접 쿼리한다.
@@ -147,6 +163,127 @@ export class DashboardService {
       page,
       size,
     };
+  }
+
+  // ---- API Key 전용 집계 (Task 007) ----
+
+  async getKeySummary(keyId: string, range: DashboardRange): Promise<KeySummaryDto> {
+    const manager = this.profileRepo.manager;
+    const intervalLiteral = this.rangeToInterval(range);
+
+    const row = (await manager.query(
+      `SELECT
+         COUNT(*)::int AS request_count,
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::int AS error_count,
+         COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms), 0)::int AS p50_latency_ms,
+         COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0)::int AS p95_latency_ms,
+         SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END)::int AS cache_hit_count,
+         COALESCE(SUM(prompt_tokens), 0)::int AS prompt_tokens_total,
+         COALESCE(SUM(completion_tokens), 0)::int AS completion_tokens_total
+       FROM api_request_logs
+       WHERE api_key_id = $1 AND ts > NOW() - $2::interval`,
+      [keyId, intervalLiteral],
+    ).catch(() => []))[0] as Record<string, number> | undefined;
+
+    const req = Number(row?.request_count || 0);
+    const err = Number(row?.error_count || 0);
+    const hit = Number(row?.cache_hit_count || 0);
+
+    return {
+      range,
+      request_count: req,
+      error_count: err,
+      error_rate: req > 0 ? err / req : 0,
+      p50_latency_ms: Number(row?.p50_latency_ms || 0),
+      p95_latency_ms: Number(row?.p95_latency_ms || 0),
+      cache_hit_rate: req > 0 ? hit / req : 0,
+      prompt_tokens_total: Number(row?.prompt_tokens_total || 0),
+      completion_tokens_total: Number(row?.completion_tokens_total || 0),
+    };
+  }
+
+  async getKeyProfileBreakdown(
+    keyId: string,
+    range: DashboardRange,
+  ): Promise<ProfileBreakdownDto> {
+    const manager = this.profileRepo.manager;
+    const intervalLiteral = this.rangeToInterval(range);
+    const rows = await manager.query(
+      `SELECT profile_id,
+              COUNT(*)::int AS request_count,
+              (SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(*), 0))::float AS error_rate
+       FROM api_request_logs
+       WHERE api_key_id = $1 AND ts > NOW() - $2::interval AND profile_id IS NOT NULL
+       GROUP BY profile_id
+       ORDER BY request_count DESC
+       LIMIT 20`,
+      [keyId, intervalLiteral],
+    ).catch(() => []);
+    return rows.map((r: Record<string, unknown>) => ({
+      profile_id: String(r.profile_id),
+      request_count: Number(r.request_count || 0),
+      error_rate: Number(r.error_rate || 0),
+    }));
+  }
+
+  async getKeyTimeline(
+    keyId: string,
+    range: DashboardRange,
+    bucket: DashboardBucket,
+  ): Promise<TimelineDto> {
+    const manager = this.profileRepo.manager;
+    const intervalLiteral = this.rangeToInterval(range);
+    const bucketUnit = bucket === 'day' ? 'day' : 'hour';
+
+    const rows = await manager.query(
+      `SELECT date_trunc($3, ts) AS bucket_start,
+              COUNT(*)::int AS request_count,
+              SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::int AS error_count,
+              COALESCE(AVG(latency_ms), 0)::int AS avg_latency_ms,
+              SUM(CASE WHEN cache_hit THEN 1 ELSE 0 END)::int AS cache_hit_count
+       FROM api_request_logs
+       WHERE api_key_id = $1 AND ts > NOW() - $2::interval
+       GROUP BY bucket_start
+       ORDER BY bucket_start ASC`,
+      [keyId, intervalLiteral, bucketUnit],
+    ).catch(() => []);
+    return rows.map((r: Record<string, unknown>) => ({
+      bucket_start: new Date(r.bucket_start as string).toISOString(),
+      request_count: Number(r.request_count || 0),
+      error_count: Number(r.error_count || 0),
+      avg_latency_ms: Number(r.avg_latency_ms || 0),
+      cache_hit_count: Number(r.cache_hit_count || 0),
+    }));
+  }
+
+  async getKeyRecentLogs(keyId: string, limit: number): Promise<RecentLogsDto> {
+    const manager = this.profileRepo.manager;
+    const rows = await manager.query(
+      `SELECT id, ts, profile_id, provider_id, status_code, latency_ms,
+              cache_hit, error_code, request_preview, response_preview
+       FROM api_request_logs
+       WHERE api_key_id = $1
+       ORDER BY ts DESC
+       LIMIT $2`,
+      [keyId, Math.min(limit, 500)],
+    ).catch(() => []);
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      ts: new Date(r.ts as string).toISOString(),
+      profile_id: r.profile_id ? String(r.profile_id) : null,
+      provider_id: r.provider_id ? String(r.provider_id) : null,
+      status_code: Number(r.status_code),
+      latency_ms: Number(r.latency_ms),
+      cache_hit: Boolean(r.cache_hit),
+      error_code: r.error_code ? String(r.error_code) : null,
+      request_preview: r.request_preview ? String(r.request_preview) : null,
+      response_preview: r.response_preview ? String(r.response_preview) : null,
+    }));
+  }
+
+  private rangeToInterval(range: DashboardRange): string {
+    return RANGE_INTERVALS[range] || RANGE_INTERVALS['24h'];
   }
 
   private getPeriodStart(period: string): Date {

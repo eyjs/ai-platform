@@ -12,6 +12,7 @@ from src.config import ProviderMode, Settings
 from src.locale.bundle import get_locale
 
 from .base import EmbeddingProvider, LLMProvider, ParsingProvider, RerankerProvider
+from .registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,46 @@ class ProviderFactory:
         from .reranking.llm_reranker import LLMReranker
 
         return LLMReranker(llm=self.get_router_llm())
+
+    def build_registry(self) -> ProviderRegistry:
+        """활성 LLM Provider 들을 등록한 Registry 반환.
+
+        정책:
+        - 기본: main_llm 을 "main" 으로 등록 (하위 호환). provider_id 는 capability 기준.
+        - AIP_PROVIDER_ENABLE_ANTHROPIC=1 → AnthropicStubProvider 추가 (stub).
+        - 환경변수 `AIP_PROVIDER_ENABLE_OPENAI=1` 이면서 openai_api_key 가 있으면 openai 활성.
+        """
+        import os
+
+        registry = ProviderRegistry()
+
+        # 주 Provider (기존 config 기반)
+        main = self.get_main_llm()
+        registry.register_inplace(main)
+
+        # 환경 플래그 기반 추가 Provider
+        enable_anthropic = os.getenv("AIP_PROVIDER_ENABLE_ANTHROPIC", "0") == "1"
+        if enable_anthropic:
+            from .llm.anthropic import AnthropicStubProvider
+            registry.register_inplace(AnthropicStubProvider())
+            logger.info("Registered anthropic_claude (stub)")
+
+        enable_openai = os.getenv("AIP_PROVIDER_ENABLE_OPENAI", "0") == "1"
+        if enable_openai and self._settings.openai_api_key:
+            # 이미 main 이 openai 면 중복 등록 방지
+            if not registry.has("openai"):
+                from .llm.openai import OpenAILLMProvider
+                from src.locale.bundle import get_locale
+                registry.register_inplace(OpenAILLMProvider(
+                    api_key=self._settings.openai_api_key,
+                    model=self._settings.prod_llm_model,
+                    system_prefix=get_locale().prompt("llm_system_prefix"),
+                    max_tokens=self._settings.llm_max_tokens,
+                ))
+                logger.info("Registered openai")
+
+        logger.info("Provider registry built: ids=%s", registry.ids())
+        return registry
 
     @staticmethod
     def _check_server_health(base_url: str, timeout: float = 3.0) -> bool:

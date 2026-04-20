@@ -50,6 +50,12 @@ async def lifespan(app: FastAPI):
         interval=settings.cache_cleanup_interval,
     )
 
+    # Task 009: 신규 서비스 기동
+    if state.request_log_service:
+        await state.request_log_service.start()
+    if state.response_cache_service:
+        await state.response_cache_service.start_sweeper(interval_seconds=60)
+
     await seed_dev_api_keys(state.vector_store.pool)
 
     # app.state에 컴포넌트 등록 (AppState 필드 자동 매핑)

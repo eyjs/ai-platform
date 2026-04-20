@@ -4,6 +4,7 @@ import { getDatabaseConfig } from './config/database.config';
 import { AuthModule } from './auth/auth.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -12,6 +13,7 @@ import { AppController } from './app.controller';
     AuthModule,
     ProfilesModule,
     DashboardModule,
+    ApiKeysModule,
   ],
   controllers: [AppController],
   providers: [],

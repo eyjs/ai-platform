@@ -26,6 +26,15 @@ const menuItems = [
       </svg>
     ),
   },
+  {
+    label: 'API Keys',
+    href: '/admin/api-keys',
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 7a4 4 0 11-8 0 4 4 0 018 0zm6 6l-4.5 4.5-2-2L12 18.5 10 20l-2-2 2-2L8.5 14.5 14 9l7 4z" />
+      </svg>
+    ),
+  },
 ];
 
 const bottomItems = [

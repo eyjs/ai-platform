@@ -24,6 +24,28 @@ import { UpdateProfileDto, RestoreProfileDto } from './dto/update-profile.dto';
 export class ProfilesController {
   constructor(private readonly profilesService: ProfilesService) {}
 
+  @Get('schema')
+  getSchema() {
+    return { schema: this.profilesService.getSchema() };
+  }
+
+  @Get(':id/history/:historyId/diff')
+  getHistoryDiff(
+    @Param('id') id: string,
+    @Param('historyId') historyId: string,
+  ) {
+    return this.profilesService.getHistoryDiff(id, historyId);
+  }
+
+  @Post(':id/restore/:historyId')
+  restoreHistory(
+    @Param('id') id: string,
+    @Param('historyId') historyId: string,
+    @Request() req: { user: { email: string } },
+  ) {
+    return this.profilesService.restore(id, historyId, req.user.email);
+  }
+
   @Get()
   findAll() {
     return this.profilesService.findAll();
