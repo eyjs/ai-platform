@@ -5,13 +5,19 @@ import { ChatBubble } from './chat-bubble';
 import { ChatEmptyState } from './chat-empty-state';
 import { ScrollToBottomFab } from './scroll-to-bottom-fab';
 import type { ChatMessage } from '@/types/chat';
+import type { FeedbackScore } from '@/types/feedback';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
   profileName?: string;
+  onFeedback?: (messageId: string, responseId: string, score: FeedbackScore) => void;
 }
 
-export function ChatMessageList({ messages, profileName }: ChatMessageListProps) {
+export function ChatMessageList({
+  messages,
+  profileName,
+  onFeedback,
+}: ChatMessageListProps) {
   const { scrollRef, bottomRef, showScrollButton, scrollToBottom, handleScroll } =
     useScrollAnchor();
 
@@ -28,7 +34,11 @@ export function ChatMessageList({ messages, profileName }: ChatMessageListProps)
       >
         <div className="mx-auto max-w-[var(--content-max-width)] py-4">
           {messages.map((message) => (
-            <ChatBubble key={message.id} message={message} />
+            <ChatBubble
+              key={message.id}
+              message={message}
+              onFeedback={onFeedback}
+            />
           ))}
           <div ref={bottomRef} />
         </div>

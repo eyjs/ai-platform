@@ -215,7 +215,12 @@ async def run_guardrail_chain(
             t = time.time()
             result = await guardrail.check(answer, context)
             ms = (time.time() - t) * 1000
-            results[name] = {"action": result.action, "ms": round(ms, 1)}
+            # Task 014: guardrail 스코어를 결과에 포함 (None 가능)
+            results[name] = {
+                "action": result.action,
+                "ms": round(ms, 1),
+                "score": result.score,
+            }
 
             if result.action == "block":
                 logger.warning("guardrail_block", guard=name, reason=result.reason)

@@ -112,11 +112,13 @@ class RequestLogService:
                         INSERT INTO api_request_logs
                           (ts, api_key_id, profile_id, provider_id, status_code, latency_ms,
                            prompt_tokens, completion_tokens, cache_hit, error_code,
-                           request_preview, response_preview)
+                           request_preview, response_preview,
+                           response_id, faithfulness_score)
                         VALUES
                           (:ts, :api_key_id, :profile_id, :provider_id, :status_code, :latency_ms,
                            :prompt_tokens, :completion_tokens, :cache_hit, :error_code,
-                           :request_preview, :response_preview)
+                           :request_preview, :response_preview,
+                           :response_id, :faithfulness_score)
                         """
                     ),
                     [
@@ -133,6 +135,8 @@ class RequestLogService:
                             "error_code": e.error_code,
                             "request_preview": RequestLogEntry.truncate_preview(e.request_preview),
                             "response_preview": RequestLogEntry.truncate_preview(e.response_preview),
+                            "response_id": e.response_id,
+                            "faithfulness_score": e.faithfulness_score,
                         }
                         for e in batch
                     ],

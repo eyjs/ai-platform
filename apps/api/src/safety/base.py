@@ -6,7 +6,7 @@ Profile.guardrails 설정에 따라 동적으로 체인 구성.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -27,18 +27,31 @@ class GuardrailResult:
     action: str  # "pass" | "warn" | "block"
     reason: str | None = None
     modified_answer: str | None = None
+    # Task 014: 수치화된 품질 스코어 (0.0~1.0). 측정 불가 시 None.
+    # Faithfulness guard 가 주로 사용하며, 다른 guard 는 None 유지 가능 (하위호환).
+    score: Optional[float] = None
 
     @classmethod
-    def passed(cls) -> GuardrailResult:
-        return cls(action="pass")
+    def passed(cls, score: Optional[float] = None) -> GuardrailResult:
+        return cls(action="pass", score=score)
 
     @classmethod
-    def warn(cls, reason: str, modified_answer: str) -> GuardrailResult:
-        return cls(action="warn", reason=reason, modified_answer=modified_answer)
+    def warn(
+        cls,
+        reason: str,
+        modified_answer: str | None,
+        score: Optional[float] = None,
+    ) -> GuardrailResult:
+        return cls(
+            action="warn",
+            reason=reason,
+            modified_answer=modified_answer,
+            score=score,
+        )
 
     @classmethod
-    def block(cls, reason: str) -> GuardrailResult:
-        return cls(action="block", reason=reason)
+    def block(cls, reason: str, score: Optional[float] = None) -> GuardrailResult:
+        return cls(action="block", reason=reason, score=score)
 
 
 @runtime_checkable

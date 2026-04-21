@@ -35,6 +35,15 @@ const menuItems = [
       </svg>
     ),
   },
+  {
+    label: '피드백',
+    href: '/admin/feedback',
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9A2 2 0 0019.66 9H14z" />
+      </svg>
+    ),
+  },
 ];
 
 const bottomItems = [

@@ -8,7 +8,9 @@ import { ChatMessageList } from '@/components/chat/chat-message-list';
 import { useChatSessions } from '@/hooks/use-chat-sessions';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { useAuth } from '@/lib/auth/auth-context';
+import { submitFeedback } from '@/lib/api/bff-feedback';
 import type { ChatMessage } from '@/types/chat';
+import type { FeedbackScore } from '@/types/feedback';
 
 export default function ChatLayout({
   children,
@@ -32,6 +34,7 @@ export default function ChatLayout({
     updateSessionTitle,
     addMessage,
     updateLastMessage,
+    updateMessageById,
     clearCurrentSession,
   } = useChatSessions();
 
@@ -74,12 +77,17 @@ export default function ChatLayout({
           traceData: data,
         }));
       },
-      onDone: (data: { sources?: Array<{ title: string; url?: string }> }) => {
+      onDone: (data: {
+        sources?: Array<{ title: string; url?: string }>;
+        response_id?: string;
+      }) => {
         if (!currentSessionId) return;
         updateLastMessage(currentSessionId, (msg) => ({
           ...msg,
           isStreaming: false,
           sources: data.sources,
+          // Task 014: 피드백 키 저장. 버튼은 이 값이 있을 때만 활성.
+          responseId: data.response_id ?? msg.responseId,
         }));
       },
       onError: (error: Error) => {
@@ -167,6 +175,34 @@ export default function ChatLayout({
     [switchSession, router],
   );
 
+  // Task 014: 응답 말풍선 👍/👎 클릭 처리.
+  // 낙관적 UI 업데이트 → BFF POST. 실패 시 원상 복구.
+  const handleFeedback = useCallback(
+    async (messageId: string, responseId: string, score: FeedbackScore) => {
+      if (!currentSessionId) return;
+      // 이전 값 저장 (롤백용)
+      const prev = currentSession?.messages.find((m) => m.id === messageId)
+        ?.feedback;
+      // optimistic
+      updateMessageById(currentSessionId, messageId, (msg) => ({
+        ...msg,
+        feedback: score,
+      }));
+      try {
+        await submitFeedback({ response_id: responseId, score });
+      } catch (err) {
+        // 롤백
+        updateMessageById(currentSessionId, messageId, (msg) => ({
+          ...msg,
+          feedback: prev ?? null,
+        }));
+        // eslint-disable-next-line no-console
+        console.warn('feedback submit failed', err);
+      }
+    },
+    [currentSessionId, currentSession, updateMessageById],
+  );
+
   return (
     <div className="flex h-screen overflow-hidden">
       <ChatSidebar
@@ -203,6 +239,7 @@ export default function ChatLayout({
         <ChatMessageList
           messages={currentSession?.messages || []}
           profileName={selectedProfileName !== '자동 선택' ? selectedProfileName : undefined}
+          onFeedback={handleFeedback}
         />
         {/* 입력 영역 */}
         <div className="border-t border-[var(--color-neutral-200)] bg-[var(--surface-page)] px-4 py-3">

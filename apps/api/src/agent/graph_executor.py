@@ -28,6 +28,22 @@ from src.workflow.engine import StepResult, WorkflowEngine
 logger = get_logger(__name__)
 
 
+def _extract_faithfulness_score(guardrail_results: dict) -> Optional[float]:
+    """guardrail_results 에서 faithfulness guard 의 수치 스코어를 추출한다.
+
+    Task 014: api_request_logs.faithfulness_score 저장용.
+    None 이 기본 (측정 불가, 또는 guard 미실행).
+    """
+    if not guardrail_results:
+        return None
+    entry = guardrail_results.get("faithfulness")
+    if isinstance(entry, dict):
+        score = entry.get("score")
+        if isinstance(score, (int, float)):
+            return float(score)
+    return None
+
+
 class GraphExecutor:
     """모드별 LangGraph 그래프를 선택하여 실행한다.
 
@@ -264,6 +280,7 @@ class GraphExecutor:
 
         tools_called = result.get("tools_called", [])
         sources = [SourceRef(**s) for s in result.get("sources", [])]
+        guardrail_score = _extract_faithfulness_score(result.get("guardrail_results") or {})
 
         return AgentResponse(
             answer=result.get("answer", ""),
@@ -273,6 +290,7 @@ class GraphExecutor:
                 mode=plan.mode.value,
                 tools_called=tools_called,
             ),
+            guardrail_score=guardrail_score,
         )
 
     async def _stream_deterministic(
@@ -364,6 +382,7 @@ class GraphExecutor:
 
         # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)
+        faithfulness_score: Optional[float] = None
         if plan.guardrail_chain:
             guardrail_ctx = GuardrailContext(
                 question=question,
@@ -377,14 +396,19 @@ class GraphExecutor:
             if modified != full_answer:
                 yield {"type": "trace", "data": {"step": "guardrail_modified", "results": results}}
                 yield {"type": "replace", "data": modified}
+            # Task 014: faithfulness 스코어 포집 → done 이벤트 동봉
+            faithfulness_score = _extract_faithfulness_score(results)
 
         sources = build_source_dicts(search_results)
+        done_data: dict = {
+            "tools_called": tools_called,
+            "sources": sources,
+        }
+        if faithfulness_score is not None:
+            done_data["faithfulness_score"] = faithfulness_score
         yield {
             "type": "done",
-            "data": {
-                "tools_called": tools_called,
-                "sources": sources,
-            },
+            "data": done_data,
         }
 
     # --- 에이전틱 모드 ---
@@ -436,6 +460,7 @@ class GraphExecutor:
                 answer = last_msg.content or ""
 
         # Guardrail
+        guardrail_score: Optional[float] = None
         if plan.guardrail_chain and answer:
             guardrail_ctx = GuardrailContext(
                 question=question,
@@ -443,9 +468,10 @@ class GraphExecutor:
                 profile_id=session_id,
                 response_policy=plan.response_policy,
             )
-            answer, _ = await run_guardrail_chain(
+            answer, results = await run_guardrail_chain(
                 answer, plan.guardrail_chain, self._guardrails, guardrail_ctx,
             )
+            guardrail_score = _extract_faithfulness_score(results)
 
         return AgentResponse(
             answer=answer,
@@ -455,6 +481,7 @@ class GraphExecutor:
                 mode="agentic",
                 tools_called=tools_called,
             ),
+            guardrail_score=guardrail_score,
         )
 
     async def _stream_agentic(
@@ -526,6 +553,7 @@ class GraphExecutor:
                         answer += chunk.content
 
         # Guardrail
+        faithfulness_score: Optional[float] = None
         if plan.guardrail_chain and answer:
             guardrail_ctx = GuardrailContext(
                 question=question,
@@ -539,11 +567,15 @@ class GraphExecutor:
             if modified != answer:
                 yield {"type": "trace", "data": {"step": "guardrail_modified", "results": results}}
                 yield {"type": "replace", "data": modified}
+            faithfulness_score = _extract_faithfulness_score(results)
 
+        done_data: dict = {
+            "tools_called": tools_called,
+            "sources": [],
+        }
+        if faithfulness_score is not None:
+            done_data["faithfulness_score"] = faithfulness_score
         yield {
             "type": "done",
-            "data": {
-                "tools_called": tools_called,
-                "sources": [],
-            },
+            "data": done_data,
         }

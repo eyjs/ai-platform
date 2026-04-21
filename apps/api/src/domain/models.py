@@ -131,3 +131,8 @@ class AgentResponse(BaseModel):
     answer: str
     sources: list[SourceRef] = Field(default_factory=list)
     trace: TraceInfo | None = None
+    # Task 014: 응답 식별자 (Gateway 가 세팅). 피드백 연결용.
+    response_id: str | None = None
+    # Task 014: 내부 전달용 — faithfulness guardrail 이 산출한 수치 스코어.
+    # Gateway finally 블록에서 RequestLogEntry.faithfulness_score 로 옮긴다.
+    guardrail_score: float | None = None

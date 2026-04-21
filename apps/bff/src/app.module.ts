@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
+import { FeedbackModule } from './feedback/feedback.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -14,6 +15,7 @@ import { AppController } from './app.controller';
     ProfilesModule,
     DashboardModule,
     ApiKeysModule,
+    FeedbackModule,
   ],
   controllers: [AppController],
   providers: [],

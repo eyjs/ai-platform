@@ -29,6 +29,7 @@ from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.request_log_service import RequestLogService
 from src.router.provider_router import ProviderRouter
+from src.services.feedback_service import FeedbackService
 from src.services.response_cache import ResponseCacheService
 from src.pipeline.ingest import IngestPipeline
 from src.router.ai_router import AIRouter
@@ -78,6 +79,8 @@ class AppState:
     provider_router: Optional[ProviderRouter] = None
     request_log_service: Optional[RequestLogService] = None
     response_cache_service: Optional[ResponseCacheService] = None
+    # Task 014: 응답 피드백 서비스 + sweeper
+    feedback_service: Optional[FeedbackService] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -338,6 +341,8 @@ async def create_app_state(settings: Settings) -> AppState:
 
     request_log_service = RequestLogService(_session_factory)
     response_cache_service = ResponseCacheService(_session_factory)
+    # Task 014: 30일 auto-purge sweeper 포함
+    feedback_service = FeedbackService(_session_factory, retention_days=30)
 
     logger.info(
         "gateway_integration_ready",
@@ -367,6 +372,7 @@ async def create_app_state(settings: Settings) -> AppState:
         provider_router=provider_router,
         request_log_service=request_log_service,
         response_cache_service=response_cache_service,
+        feedback_service=feedback_service,
         providers=providers,
     )
 
@@ -432,7 +438,12 @@ async def shutdown(state: AppState) -> None:
     """앱 정리: 태스크 취소 + 커넥션 종료."""
     logger.info("shutdown_start")
 
-    # Task 009: 신규 서비스 정리 (역순)
+    # Task 009/014: 신규 서비스 정리 (역순)
+    if state.feedback_service:
+        try:
+            await state.feedback_service.stop_sweeper()
+        except Exception as e:
+            logger.warning("feedback_sweeper_stop_error", error=str(e))
     if state.response_cache_service:
         try:
             await state.response_cache_service.stop_sweeper()

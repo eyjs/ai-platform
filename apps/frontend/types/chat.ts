@@ -12,6 +12,10 @@ export interface ChatMessage {
   errorMessage?: string;
   sources?: Array<{ title: string; url?: string }>;
   traceData?: Record<string, unknown>;
+  /** api 가 생성한 응답 식별자 (SSE done 이벤트로 수신). 피드백 제출 키. */
+  responseId?: string;
+  /** 사용자가 남긴 피드백 (UI 반영용). 아직 제출 전이면 undefined/null */
+  feedback?: 1 | -1 | null;
 }
 
 /** 채팅 세션 — 사이드바 + localStorage 저장 단위 */

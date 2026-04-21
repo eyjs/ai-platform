@@ -85,6 +85,28 @@ export function useChatSessions() {
     [],
   );
 
+  const updateMessageById = useCallback(
+    (
+      sessionId: string,
+      messageId: string,
+      updater: (msg: ChatMessage) => ChatMessage,
+    ) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === messageId ? updater(m) : m,
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const clearCurrentSession = useCallback(() => {
     setCurrentSessionId(null);
   }, []);
@@ -99,6 +121,7 @@ export function useChatSessions() {
     updateSessionTitle,
     addMessage,
     updateLastMessage,
+    updateMessageById,
     clearCurrentSession,
   };
 }

@@ -8,7 +8,11 @@ interface UseChatStreamCallbacks {
   onToken: (text: string) => void;
   onReplace: (text: string) => void;
   onTrace: (data: Record<string, unknown>) => void;
-  onDone: (data: { sources?: Array<{ title: string; url?: string }> }) => void;
+  onDone: (data: {
+    sources?: Array<{ title: string; url?: string }>;
+    /** api 가 생성한 응답 식별자. 피드백 전송 시 사용. */
+    response_id?: string;
+  }) => void;
   onError: (error: Error) => void;
 }
 

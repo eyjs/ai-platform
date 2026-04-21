@@ -30,6 +30,11 @@ from src.observability.logging import RequestContext, get_logger, request_contex
 from src.observability.request_log_models import RequestLogEntry
 from src.orchestrator.models import OrchestratorResult
 from src.router.execution_plan import ExecutionPlan
+from src.services.feedback_models import (
+    AdminFeedbackPage,
+    FeedbackRequest,
+    FeedbackResponse,
+)
 from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
 from src.domain.agent_context import AgentContext
@@ -440,6 +445,10 @@ async def chat(req: ChatRequest, request: Request):
     request_log_svc = getattr(state, "request_log_service", None)
     cache_svc = getattr(state, "response_cache_service", None)
 
+    # Task 014: 응답 식별자 생성 (api 레이어가 단일 출처)
+    response_id = str(uuid.uuid4())
+    captured_faithfulness_score: Optional[float] = None
+
     status_code = 200
     error_code: Optional[str] = None
     cache_hit = False
@@ -463,7 +472,8 @@ async def chat(req: ChatRequest, request: Request):
                     response_preview = RequestLogEntry.truncate_preview(cached_text)
                     await state.session_memory.add_turn(setup.session_id, "user", req.question)
                     await state.session_memory.add_turn(setup.session_id, "assistant", cached_text)
-                    return AgentResponse(answer=cached_text)
+                    # Task 014: 캐시 응답도 response_id 포함
+                    return AgentResponse(answer=cached_text, response_id=response_id)
 
             response = await state.agent.execute(
                 question=req.question,
@@ -482,12 +492,18 @@ async def chat(req: ChatRequest, request: Request):
                 response.trace.latency_ms = setup.trace.total_ms
 
             response_preview = RequestLogEntry.truncate_preview(response.answer)
+            # Task 014: finally 에서 request_log 에 기록할 점수 캡처
+            captured_faithfulness_score = response.guardrail_score
 
             if cacheable and response.answer:
                 await try_cache_put(
                     cache_svc, setup.profile_id, mode_str, req.question, response.answer,
                 )
 
+            # Task 014: 응답에 response_id 주입 (JSON body)
+            response.response_id = response_id
+            # guardrail_score 는 내부 전달용 — 클라이언트 응답에서 제거
+            response.guardrail_score = None
             return response
 
         except HTTPException as he:
@@ -512,6 +528,9 @@ async def chat(req: ChatRequest, request: Request):
                         error_code=error_code,
                         request_preview=RequestLogEntry.truncate_preview(req.question),
                         response_preview=response_preview,
+                        # Task 014: 응답 식별자 + faithfulness 스코어 영속화
+                        response_id=response_id,
+                        faithfulness_score=captured_faithfulness_score,
                     ),
                 )
             if setup:
@@ -526,6 +545,8 @@ async def chat_stream(req: ChatRequest, request: Request):
 
     request_log_svc = getattr(state, "request_log_service", None)
     stream_timer_start = time.monotonic()
+    # Task 014: 응답 식별자 (api 단일 출처). SSE done 이벤트 + request_log 에 기록.
+    response_id = str(uuid.uuid4())
 
     try:
         setup = await _prepare_chat_fast(req, request, user_ctx)
@@ -540,6 +561,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     latency_ms=elapsed_ms,
                     error_code=f"http_{he.status_code}",
                     request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_id=response_id,
                 ),
             )
         raise
@@ -555,6 +577,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     latency_ms=elapsed_ms,
                     error_code="internal_error",
                     request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_id=response_id,
                 ),
             )
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -594,6 +617,8 @@ async def chat_stream(req: ChatRequest, request: Request):
         gen_status_code = 200
         gen_error_code: Optional[str] = None
         gen_response_preview: Optional[str] = None
+        # Task 014: done 이벤트에서 faithfulness_score 포집 (finally enqueue 에 사용)
+        captured_faithfulness_score: Optional[float] = None
         try:
             answer_parts = []
             async for event in state.agent.execute_stream(
@@ -620,6 +645,11 @@ async def chat_stream(req: ChatRequest, request: Request):
                     done_data.setdefault("answer", "".join(answer_parts))
                     done_data.setdefault("confidence", None)
                     done_data.setdefault("traversal_path", [])
+                    # Task 014: response_id 주입 + faithfulness_score 캡처
+                    done_data["response_id"] = response_id
+                    score_value = done_data.get("faithfulness_score")
+                    if isinstance(score_value, (int, float)):
+                        captured_faithfulness_score = float(score_value)
                     yield {"event": "done", "data": json.dumps(done_data, ensure_ascii=False)}
 
             full_answer = "".join(answer_parts)
@@ -659,6 +689,9 @@ async def chat_stream(req: ChatRequest, request: Request):
                         error_code=gen_error_code,
                         request_preview=RequestLogEntry.truncate_preview(req.question),
                         response_preview=gen_response_preview,
+                        # Task 014: 응답 식별자 + faithfulness 스코어 영속화
+                        response_id=response_id,
+                        faithfulness_score=captured_faithfulness_score,
                     ),
                 )
             # SSE 제너레이터는 별도 Task에서 실행되므로
@@ -867,3 +900,83 @@ async def create_api_key(request: Request):
         "allowed_origins": allowed_origins,
         "message": "이 키는 다시 표시되지 않습니다. 안전하게 보관하세요.",
     }
+
+
+# --- 피드백 (Task 014) ---
+
+
+@gateway_router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(req: FeedbackRequest, request: Request):
+    """응답 피드백을 저장한다 (JWT 또는 API Key 인증 필수).
+
+    - (user_id, response_id) 조합이 이미 존재하면 upsert (score/comment 갱신)
+    - 저장 실패 시 500 반환 (조용히 삼키지 않는다)
+    """
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+
+    feedback_svc = getattr(state, "feedback_service", None)
+    if feedback_svc is None:
+        raise HTTPException(status_code=503, detail="feedback service not initialized")
+
+    if not user_ctx.user_id:
+        raise HTTPException(status_code=401, detail="user_id missing in auth context")
+
+    try:
+        return await feedback_svc.submit(user_ctx.user_id, req)
+    except Exception as e:
+        logger.error("feedback_submit_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="피드백 저장에 실패했습니다.")
+
+
+@gateway_router.get("/admin/feedback", response_model=AdminFeedbackPage)
+async def list_admin_feedback(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    only_negative: bool = False,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """관리자용 피드백 리스트 조회 (JOIN api_request_logs).
+
+    - limit max 200, offset >= 0
+    - only_negative=true → score=-1 만
+    - date_from/date_to: ISO8601
+    - ADMIN 권한 필요
+    """
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+
+    if user_ctx.user_role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="ADMIN 권한이 필요합니다")
+
+    feedback_svc = getattr(state, "feedback_service", None)
+    if feedback_svc is None:
+        raise HTTPException(status_code=503, detail="feedback service not initialized")
+
+    from datetime import datetime as _dt
+
+    def _parse_iso(v: Optional[str]) -> Optional[object]:
+        if not v:
+            return None
+        try:
+            # Python 3.11 fromisoformat 은 Z 를 처리하지 못하므로 치환
+            return _dt.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError as ex:
+            raise HTTPException(status_code=400, detail=f"invalid date: {v}") from ex
+
+    df = _parse_iso(date_from)
+    dt_ = _parse_iso(date_to)
+
+    try:
+        return await feedback_svc.list_for_admin(
+            limit=limit,
+            offset=offset,
+            only_negative=only_negative,
+            date_from=df,
+            date_to=dt_,
+        )
+    except Exception as e:
+        logger.error("feedback_list_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="피드백 조회에 실패했습니다.")

@@ -21,6 +21,9 @@ class RequestLogEntry:
     request_preview: Optional[str] = None
     response_preview: Optional[str] = None
     ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Task 014: 피드백 연결 + 품질 신호
+    response_id: Optional[str] = None
+    faithfulness_score: Optional[float] = None
 
     def with_(self, **changes) -> "RequestLogEntry":
         """불변 업데이트."""

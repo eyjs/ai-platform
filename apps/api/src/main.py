@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
         await state.request_log_service.start()
     if state.response_cache_service:
         await state.response_cache_service.start_sweeper(interval_seconds=60)
+    # Task 014: 30일 auto-purge sweeper (1시간 주기면 충분)
+    if state.feedback_service:
+        await state.feedback_service.start_sweeper(interval_seconds=3600)
 
     await seed_dev_api_keys(state.vector_store.pool)
 

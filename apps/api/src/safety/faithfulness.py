@@ -33,7 +33,8 @@ class FaithfulnessGuard:
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
         if not context.source_documents:
-            return GuardrailResult.passed()
+            # source_documents 가 없으면 측정 불가 → score=None
+            return GuardrailResult.passed(score=None)
 
         # --- Quick-check 1: 숫자 멤버십 ---
         answer_numbers = self._extract_numbers(answer)
@@ -55,7 +56,8 @@ class FaithfulnessGuard:
                     warning = get_locale().message("number_missing", numbers=str(still_unverified))
                     logger.warning("faithfulness_number_missing: %s", warning)
                     modified = answer + f"\n\n[주의: {warning}]"
-                    return GuardrailResult.warn(warning, modified)
+                    # Quick-check 실패 → 0.5
+                    return GuardrailResult.warn(warning, modified, score=0.5)
 
             # --- Quick-check 2: 숫자 co-occurrence ---
             if len(answer_numbers) >= 2:
@@ -74,7 +76,8 @@ class FaithfulnessGuard:
             if deep_result:
                 return deep_result
 
-        return GuardrailResult.passed()
+        # 모든 검증 통과 → 1.0
+        return GuardrailResult.passed(score=1.0)
 
     @staticmethod
     def _check_cooccurrence(
@@ -92,7 +95,7 @@ class FaithfulnessGuard:
                 warning = get_locale().message("cooccurrence_fail", a=a, b=b)
                 logger.warning("faithfulness_cooccurrence: %s", warning)
                 return GuardrailResult.warn(
-                    warning, None,
+                    warning, None, score=0.5,
                 )
         return None
 
@@ -109,7 +112,7 @@ class FaithfulnessGuard:
             if cite not in source_files:
                 warning = get_locale().message("citation_missing", cite=cite)
                 logger.warning("faithfulness_citation: %s", warning)
-                return GuardrailResult.warn(warning, None)
+                return GuardrailResult.warn(warning, None, score=0.5)
         return None
 
     async def _deep_eval(
@@ -127,7 +130,9 @@ class FaithfulnessGuard:
                 reason = result.get("reason", "근거 불충분")
                 logger.warning("faithfulness_deep_eval: %s", reason)
                 return GuardrailResult.warn(
-                    get_locale().message("deep_eval_fail", reason=reason), None,
+                    get_locale().message("deep_eval_fail", reason=reason),
+                    None,
+                    score=0.3,
                 )
         except Exception as e:
             logger.warning("faithfulness_deep_eval_error: %s", str(e))
