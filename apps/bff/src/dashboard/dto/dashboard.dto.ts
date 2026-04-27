@@ -67,3 +67,19 @@ export class DashboardLogsDto {
   page: number;
   size: number;
 }
+
+export class PlatformOverviewDto {
+  totalProfiles: number;
+  activeProfiles: number;
+  todayRequests: number;
+  errorRate: number;
+  avgLatencyMs: number;
+  apiKeys: {
+    total: number;
+    active: number;
+  };
+  requests24h: {
+    hour: string;
+    count: number;
+  }[];
+}

@@ -6,6 +6,9 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { RequestLogsModule } from './request-logs/request-logs.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
+import { ProvidersModule } from './providers/providers.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -16,6 +19,9 @@ import { AppController } from './app.controller';
     DashboardModule,
     ApiKeysModule,
     FeedbackModule,
+    RequestLogsModule,
+    KnowledgeModule,
+    ProvidersModule,
   ],
   controllers: [AppController],
   providers: [],
