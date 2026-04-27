@@ -49,6 +49,7 @@ class ScopedMemoryLoader:
         profile: AgentProfile,
         session_id: str,
         tenant_id: str,
+        max_turns: int = 10,
     ) -> MemoryBundle:
         """profile.memory_scopes에 따라 병렬 조회.
 
@@ -67,7 +68,7 @@ class ScopedMemoryLoader:
 
         if "local" in scopes:
             tasks["local"] = asyncio.create_task(
-                self._load_local(session_id),
+                self._load_local(session_id, max_turns=max_turns),
             )
         if "user" in scopes:
             tasks["user"] = asyncio.create_task(
@@ -128,9 +129,9 @@ class ScopedMemoryLoader:
             tenant_facts=results.get("user", []),
         )
 
-    async def _load_local(self, session_id: str) -> list[dict]:
+    async def _load_local(self, session_id: str, max_turns: int = 10) -> list[dict]:
         """local 스코프: 기존 SessionMemory 위임."""
-        return await self._session_memory.get_turns(session_id)
+        return await self._session_memory.get_turns(session_id, max_turns=max_turns)
 
     async def _load_tenant(self, tenant_id: str) -> list[dict]:
         """user 스코프: tenant_memory 테이블 조회."""

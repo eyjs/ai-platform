@@ -38,6 +38,7 @@ from src.services.feedback_models import (
 from src.workflow.engine import StepResult
 from src.observability.trace_logger import RequestTrace
 from src.domain.agent_context import AgentContext
+from src.infrastructure.memory.memory_extractor import MemoryExtractor
 
 APP_VERSION = "0.1.0"
 
@@ -50,6 +51,40 @@ _active_requests: int = 0
 _shutdown_event = asyncio.Event()
 
 gateway_router = APIRouter()
+
+_memory_extractor = MemoryExtractor()
+
+
+async def _save_extracted_memories(
+    state: object,
+    tenant_id: str,
+    turns: list[dict],
+    retention_days: int | None,
+) -> None:
+    """대화에서 사실을 추출하여 MemoryStore에 저장한다 (fire-and-forget용)."""
+    try:
+        memory_store = getattr(state, "memory_store", None)
+        if memory_store is None:
+            return
+
+        facts = _memory_extractor.extract_facts(turns)
+        for fact in facts:
+            await memory_store.save_memory(
+                tenant_id=tenant_id,
+                key=fact["key"],
+                value=fact["value"],
+                memory_type=fact.get("memory_type", "fact"),
+                retention_days=retention_days,
+            )
+
+        if facts:
+            logger.info(
+                "memory_facts_saved",
+                tenant_id=tenant_id,
+                facts_count=len(facts),
+            )
+    except Exception as e:
+        logger.warning("memory_extraction_failed", error=str(e))
 
 
 def increment_active() -> None:
@@ -273,7 +308,7 @@ async def _prepare_chat(
                     user_id=user_ctx.user_id,
                     ttl_seconds=profile.memory_ttl_seconds,
                 )
-            history = await state.session_memory.get_turns(session_id, max_turns=10)
+            history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
 
             skip_context_resolve = req.chatbot_id is not None
 
@@ -402,7 +437,7 @@ async def _prepare_chat_fast(
             )
             history = []
         else:
-            history = await state.session_memory.get_turns(session_id, max_turns=10)
+            history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
 
             # chatbot_id가 명시적으로 전달된 경우: L0 ContextResolver를 건너뛴다
             # 이미 특정 챗봇을 지정했으므로 대명사 해소/질문 재작성이 불필요
@@ -521,6 +556,17 @@ async def chat(req: ChatRequest, request: Request):
             await state.session_memory.add_turn(setup.session_id, "user", req.question)
             await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
 
+            if profile and profile.memory_type in ("session", "long"):
+                asyncio.create_task(_save_extracted_memories(
+                    state=state,
+                    tenant_id=user_ctx.user_id,
+                    turns=[
+                        {"role": "user", "content": req.question},
+                        {"role": "assistant", "content": response.answer},
+                    ],
+                    retention_days=profile.memory_retention_days,
+                ))
+
             setup.trace.log_summary()
 
             if response.trace:
@@ -623,6 +669,9 @@ async def chat_stream(req: ChatRequest, request: Request):
         decrement_active()
         raise HTTPException(status_code=500, detail="Internal server error")
 
+    # 메모리 추출 대상 프로필 조회
+    stream_profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
+
     # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
     routing_task: Optional[asyncio.Task] = None
     if setup.needs_routing:
@@ -696,6 +745,17 @@ async def chat_stream(req: ChatRequest, request: Request):
             full_answer = "".join(answer_parts)
             await state.session_memory.add_turn(setup.session_id, "user", req.question)
             await state.session_memory.add_turn(setup.session_id, "assistant", full_answer)
+
+            if stream_profile and stream_profile.memory_type in ("session", "long"):
+                asyncio.create_task(_save_extracted_memories(
+                    state=state,
+                    tenant_id=user_ctx.user_id,
+                    turns=[
+                        {"role": "user", "content": req.question},
+                        {"role": "assistant", "content": full_answer},
+                    ],
+                    retention_days=stream_profile.memory_retention_days,
+                ))
 
             setup.trace.log_summary()
             logger.info(
