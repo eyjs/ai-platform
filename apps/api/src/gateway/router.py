@@ -45,7 +45,41 @@ ROLE_LEVELS = {"VIEWER": 0, "EDITOR": 1, "REVIEWER": 2, "APPROVER": 3, "ADMIN": 
 
 logger = get_logger(__name__)
 
+# Graceful shutdown 지원
+_active_requests: int = 0
+_shutdown_event = asyncio.Event()
+
 gateway_router = APIRouter()
+
+
+def increment_active() -> None:
+    """활성 요청 수 증가."""
+    global _active_requests
+    _active_requests += 1
+
+
+def decrement_active() -> None:
+    """활성 요청 수 감소."""
+    global _active_requests
+    _active_requests = max(0, _active_requests - 1)
+
+
+async def wait_for_pending_requests(timeout: float = 30.0) -> None:
+    """진행 중인 요청이 완료될 때까지 대기 (최대 timeout초)."""
+    if _active_requests == 0:
+        return
+
+    logger.info("waiting_for_pending_requests", active_count=_active_requests, timeout=timeout)
+    start_time = time.monotonic()
+
+    while _active_requests > 0:
+        elapsed = time.monotonic() - start_time
+        if elapsed >= timeout:
+            logger.warning("graceful_shutdown_timeout", active_requests=_active_requests, elapsed=elapsed)
+            break
+        await asyncio.sleep(0.1)
+
+    logger.info("pending_requests_complete", active_requests=_active_requests)
 
 
 def _get_app_state(request: Request):
@@ -442,6 +476,8 @@ async def chat(req: ChatRequest, request: Request):
     await _check_rate_limit(request, user_ctx)
     setup: Optional[_ChatSetup] = None
 
+    increment_active()
+
     request_log_svc = getattr(state, "request_log_service", None)
     cache_svc = getattr(state, "response_cache_service", None)
 
@@ -535,6 +571,7 @@ async def chat(req: ChatRequest, request: Request):
                 )
             if setup:
                 request_context.reset(setup.ctx_token)
+            decrement_active()
 
 
 @gateway_router.post("/chat/stream")
@@ -542,6 +579,8 @@ async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx)
+
+    increment_active()
 
     request_log_svc = getattr(state, "request_log_service", None)
     stream_timer_start = time.monotonic()
@@ -564,6 +603,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     response_id=response_id,
                 ),
             )
+        decrement_active()
         raise
     except Exception as e:
         logger.error("chat_stream_setup_error", error=str(e), exc_info=True)
@@ -580,6 +620,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                     response_id=response_id,
                 ),
             )
+        decrement_active()
         raise HTTPException(status_code=500, detail="Internal server error")
 
     # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
@@ -700,6 +741,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 request_context.reset(setup.ctx_token)
             except ValueError:
                 pass  # 다른 Context에서 생성된 토큰
+            decrement_active()
 
     return EventSourceResponse(event_generator())
 

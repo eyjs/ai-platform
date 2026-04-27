@@ -25,13 +25,30 @@ class FaithfulnessGuard:
     """숫자/인용 검증 가드레일."""
 
     name = "faithfulness"
+    MAX_FAITHFULNESS_CHECKS = 3
 
     def __init__(self, router_llm: Optional[LLMProvider] = None):
         self._llm = router_llm
         exts = "|".join(get_locale().citation_extensions)
         self._citation_re = re.compile(rf'[\w가-힣]+\.(?:{exts})', re.IGNORECASE)
+        self._check_count: dict[str, int] = {}  # 세션별 체크 횟수 추적
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
+        # 세션별 체크 횟수 확인 (무한 루프 방지)
+        session_id = getattr(context, 'session_id', 'default')
+        current_count = self._check_count.get(session_id, 0)
+        if current_count >= self.MAX_FAITHFULNESS_CHECKS:
+            logger.warning(
+                "faithfulness_max_checks_exceeded",
+                session_id=session_id,
+                count=current_count,
+                max_checks=self.MAX_FAITHFULNESS_CHECKS,
+            )
+            return GuardrailResult.passed(score=None)
+
+        # 체크 횟수 증가
+        self._check_count[session_id] = current_count + 1
+
         if not context.source_documents:
             # source_documents 가 없으면 측정 불가 → score=None
             return GuardrailResult.passed(score=None)

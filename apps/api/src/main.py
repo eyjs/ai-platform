@@ -18,7 +18,7 @@ from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_c
 from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
 from src.gateway.admin_router import admin_router
-from src.gateway.router import APP_VERSION, gateway_router
+from src.gateway.router import APP_VERSION, gateway_router, wait_for_pending_requests
 from src.gateway.webhook_router import webhook_router
 from src.observability.logging import configure_logging, get_logger
 
@@ -69,6 +69,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("startup_complete")
     yield
+
+    # Graceful shutdown: Profile watcher 중지 + 진행 중 요청 완료 대기
+    if hasattr(state, 'profile_store') and state.profile_store:
+        state.profile_store.stop_watcher()
+    await wait_for_pending_requests(timeout=30.0)
 
     await shutdown(state)
 

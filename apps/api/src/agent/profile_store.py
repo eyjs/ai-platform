@@ -3,6 +3,7 @@
 프로필 관리: 시드 로딩 → DB 저장 → 메모리 캐시.
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -24,6 +25,9 @@ class ProfileStore:
         self._pool = pool
         self._seed_dir = Path(seed_dir)
         self._cache: dict[str, AgentProfile] = {}
+        self._watching: bool = False
+        self._mtimes: dict[str, float] = {}
+        self._watch_task: Optional[asyncio.Task] = None
 
     @property
     def profile_count(self) -> int:
@@ -224,3 +228,64 @@ class ProfileStore:
                 for h in profile.intent_hints
             ],
         }
+
+    def start_watcher(self) -> None:
+        """YAML 파일 변경 감지를 위한 watcher 시작."""
+        if self._watching:
+            return
+        self._watching = True
+        self._watch_task = asyncio.create_task(self._watch_profiles())
+        logger.info("profile_watcher_started", seed_dir=str(self._seed_dir))
+
+    def stop_watcher(self) -> None:
+        """Watcher 정지."""
+        self._watching = False
+        if self._watch_task and not self._watch_task.done():
+            self._watch_task.cancel()
+        logger.info("profile_watcher_stopped")
+
+    async def _watch_profiles(self) -> None:
+        """30초 간격으로 YAML 파일 변경 감지 및 reload."""
+        while self._watching:
+            try:
+                await asyncio.sleep(30)
+                if not self._watching:
+                    break
+                await self._check_and_reload()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("profile_watch_error", error=str(e), exc_info=True)
+
+    async def _check_and_reload(self) -> None:
+        """YAML 파일들의 mtime을 확인하고 변경된 파일을 reload."""
+        if not self._seed_dir.exists():
+            return
+
+        for path in self._seed_dir.glob("*.yaml"):
+            try:
+                current_mtime = path.stat().st_mtime
+                previous_mtime = self._mtimes.get(str(path))
+
+                if previous_mtime is None:
+                    # 처음 발견한 파일: mtime만 기록
+                    self._mtimes[str(path)] = current_mtime
+                elif current_mtime > previous_mtime:
+                    # 파일이 변경됨: reload 수행
+                    logger.info("profile_file_changed", path=path.name, mtime=current_mtime)
+                    await self._reload_single_profile(path)
+                    self._mtimes[str(path)] = current_mtime
+            except Exception as e:
+                logger.error("profile_reload_failed", path=path.name, error=str(e))
+
+    async def _reload_single_profile(self, path: Path) -> None:
+        """단일 프로필 파일을 reload."""
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            profile = self._parse_profile(data)
+            await self._upsert(profile)
+            self._cache[profile.id] = profile
+            logger.info("profile_reloaded", profile_id=profile.id, path=path.name)
+        except Exception as e:
+            logger.error("profile_reload_failed", path=path.name, error=str(e))
