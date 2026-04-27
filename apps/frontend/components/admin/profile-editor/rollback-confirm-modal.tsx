@@ -2,11 +2,12 @@
 
 interface Props {
   historyId: string;
+  version?: number;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function RollbackConfirmModal({ historyId, onConfirm, onCancel }: Props) {
+export function RollbackConfirmModal({ historyId, version, onConfirm, onCancel }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -22,7 +23,12 @@ export function RollbackConfirmModal({ historyId, onConfirm, onCancel }: Props) 
           버전 롤백
         </h2>
         <p className="mt-[var(--spacing-2)] text-[var(--font-size-sm)] text-[var(--color-neutral-600)]">
-          이력 ID <code className="font-mono">{historyId.slice(0, 8)}</code> 버전으로 롤백합니다.
+          {version ? (
+            <>버전 v{version} (<code className="font-mono">{historyId.slice(0, 8)}</code>)</>
+          ) : (
+            <>이력 ID <code className="font-mono">{historyId.slice(0, 8)}</code></>
+          )}
+          으로 롤백합니다.
           현재 상태는 새 이력 엔트리로 저장되어 언제든 복원 가능합니다.
         </p>
         <div className="mt-[var(--spacing-4)] flex justify-end gap-[var(--spacing-2)]">
