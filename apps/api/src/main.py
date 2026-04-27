@@ -18,6 +18,7 @@ from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_c
 from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
 from src.gateway.admin_router import admin_router
+from src.gateway.report_router import report_router
 from src.gateway.router import APP_VERSION, gateway_router
 from src.gateway.webhook_router import webhook_router
 from src.observability.logging import configure_logging, get_logger
@@ -59,10 +60,16 @@ async def lifespan(app: FastAPI):
     if state.feedback_service:
         await state.feedback_service.start_sweeper(interval_seconds=3600)
 
+    # Task 004: Saju Report QueueWorker 시작
+    if state.saju_report_worker:
+        import asyncio
+        asyncio.create_task(state.saju_report_worker.start())
+        logger.info("saju_report_worker_started", worker_id=state.saju_report_worker._worker_id)
+
     await seed_dev_api_keys(state.vector_store.pool)
 
     # app.state에 컴포넌트 등록 (AppState 필드 자동 매핑)
-    _INTERNAL_FIELDS = {"cleanup_task", "providers"}
+    _INTERNAL_FIELDS = {"cleanup_task", "providers", "saju_report_worker"}
     for field_name in state.__dataclass_fields__:
         if field_name not in _INTERNAL_FIELDS:
             setattr(app.state, field_name, getattr(state, field_name))
@@ -91,6 +98,7 @@ app.add_middleware(
 
 app.include_router(gateway_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(report_router, prefix="/api")
 app.include_router(webhook_router, prefix="/api")
 
 
