@@ -81,6 +81,9 @@ class AppState:
     response_cache_service: Optional[ResponseCacheService] = None
     # Task 014: 응답 피드백 서비스 + sweeper
     feedback_service: Optional[FeedbackService] = None
+    # Task 004: Saju 리포트 서비스 + QueueWorker
+    saju_report_service: Optional[Any] = None
+    saju_report_worker: Optional[Any] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -344,6 +347,33 @@ async def create_app_state(settings: Settings) -> AppState:
     # Task 014: 30일 auto-purge sweeper 포함
     feedback_service = FeedbackService(_session_factory, retention_days=30)
 
+    # Task 004: Saju Report Service + QueueWorker
+    from src.services.saju_report_service import SajuReportService
+    from src.infrastructure.job_queue import QueueWorker
+
+    saju_report_service = SajuReportService(pool=pool, main_llm=main_llm)
+
+    # Handler wrapper to inject job_id into payload
+    async def saju_report_handler_wrapper(job_data: dict) -> dict:
+        """QueueWorker에서 받은 job 데이터를 처리하고 job_id를 payload에 주입."""
+        job_id = job_data["id"]
+        payload = job_data["payload"]
+
+        # payload에 job_id 추가
+        payload["job_id"] = job_id
+
+        return await saju_report_service.process_report_job(payload)
+
+    # QueueWorker for saju-report queue
+    saju_report_worker = QueueWorker(
+        queue=job_queue,
+        queue_name="saju-report",
+        handler=saju_report_handler_wrapper,
+        worker_id=f"saju-report-{getattr(settings, 'server_id', None) or 'default'}",
+        poll_interval=2.0,
+        max_concurrent=2,
+    )
+
     logger.info(
         "gateway_integration_ready",
         providers=provider_registry.ids(),
@@ -376,6 +406,8 @@ async def create_app_state(settings: Settings) -> AppState:
         request_log_service=request_log_service,
         response_cache_service=response_cache_service,
         feedback_service=feedback_service,
+        saju_report_service=saju_report_service,
+        saju_report_worker=saju_report_worker,
         providers=providers,
     )
 
@@ -440,6 +472,13 @@ async def seed_dev_api_keys(pool: Any) -> None:
 async def shutdown(state: AppState) -> None:
     """앱 정리: 태스크 취소 + 커넥션 종료."""
     logger.info("shutdown_start")
+
+    # Task 004: Saju Report Worker 정리
+    if state.saju_report_worker:
+        try:
+            await state.saju_report_worker.stop()
+        except Exception as e:
+            logger.warning("saju_report_worker_stop_error", error=str(e))
 
     # Task 009/014: 신규 서비스 정리 (역순)
     if state.feedback_service:
