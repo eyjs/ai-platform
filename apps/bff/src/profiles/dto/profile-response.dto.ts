@@ -25,6 +25,8 @@ export class ProfileHistoryItemDto {
   changedBy: string;
   changedAt: string;
   comment: string | null;
+  changeType: 'create' | 'update' | 'restore';
+  version: number;
 }
 
 export class ToolItemDto {

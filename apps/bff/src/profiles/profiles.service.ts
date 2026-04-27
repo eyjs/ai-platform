@@ -198,14 +198,23 @@ export class ProfilesService {
       order: { changedAt: 'DESC' },
       take: 50,
     });
-    return items.map((h) => ({
+    return items.map((h, index) => ({
       id: h.id,
       profileId: h.profileId,
       yamlContent: h.yamlContent,
       changedBy: h.changedBy,
       changedAt: h.changedAt.toISOString(),
       comment: h.comment,
+      changeType: this.inferChangeType(h.comment),
+      version: items.length - index,
     }));
+  }
+
+  private inferChangeType(comment: string | null): 'create' | 'update' | 'restore' {
+    if (!comment) return 'update';
+    if (comment === '생성') return 'create';
+    if (comment.includes('restore') || comment.includes('복원')) return 'restore';
+    return 'update';
   }
 
   async restore(
@@ -217,7 +226,46 @@ export class ProfilesService {
       where: { id: historyId, profileId: id },
     });
     if (!historyItem) throw new NotFoundException('히스토리 항목을 찾을 수 없습니다');
-    return this.update(id, historyItem.yamlContent, changedBy);
+
+    // Get version number for the history item
+    const allHistory = await this.historyRepo.find({
+      where: { profileId: id },
+      order: { changedAt: 'DESC' },
+    });
+    const historyIndex = allHistory.findIndex(h => h.id === historyId);
+    const version = allHistory.length - historyIndex;
+
+    const profile = await this.profileRepo.findOne({ where: { id } });
+    if (!profile) throw new NotFoundException(`Profile ${id} not found`);
+
+    // Save current state before restore
+    const currentYaml = yaml.dump(profile.config);
+    await this.historyRepo.save(
+      this.historyRepo.create({
+        profileId: id,
+        yamlContent: currentYaml,
+        changedBy,
+        comment: `restore from version ${version}`,
+      }),
+    );
+
+    const parsed = this.parseYaml(historyItem.yamlContent);
+    const schemaResult = this.schemaValidator.validate(parsed);
+    if (!schemaResult.ok) {
+      throw new BadRequestException({
+        message: 'Profile schema validation failed',
+        errors: schemaResult.errors,
+      });
+    }
+
+    profile.name = (parsed.name as string) || profile.name;
+    profile.description = (parsed.description as string) || profile.description;
+    profile.mode = (parsed.mode as string) || profile.mode;
+    profile.config = parsed;
+
+    await this.profileRepo.save(profile);
+    await this.notifyProfileUpdated(profile.id);
+    return this.toDetail(profile);
   }
 
   async getTools(): Promise<ToolItemDto[]> {

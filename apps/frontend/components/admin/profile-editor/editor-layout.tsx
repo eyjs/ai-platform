@@ -137,6 +137,7 @@ export function EditorLayout({ profileId }: EditorLayoutProps) {
         hasChanges={hasChanges}
         isSaving={isSaving}
         isNew={isNew}
+        profileId={profileId}
         onSave={handleSave}
         onBack={() => router.push('/admin/profiles')}
         onHistoryToggle={() => setShowHistory(!showHistory)}

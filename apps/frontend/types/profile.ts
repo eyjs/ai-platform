@@ -27,6 +27,8 @@ export interface ProfileHistoryItem {
   changedBy: string;
   changedAt: string;
   comment: string | null;
+  changeType: 'create' | 'update' | 'restore';
+  version: number;
 }
 
 export interface ToolItem {

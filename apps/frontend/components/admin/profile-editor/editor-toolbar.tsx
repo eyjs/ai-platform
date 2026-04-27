@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/cn';
@@ -9,6 +10,7 @@ interface EditorToolbarProps {
   hasChanges: boolean;
   isSaving: boolean;
   isNew: boolean;
+  profileId?: string;
   onSave: () => void;
   onBack: () => void;
   onHistoryToggle: () => void;
@@ -19,6 +21,7 @@ export function EditorToolbar({
   hasChanges,
   isSaving,
   isNew,
+  profileId,
   onSave,
   onBack,
   onHistoryToggle,
@@ -48,10 +51,17 @@ export function EditorToolbar({
         )}
       </div>
       <div className="flex items-center gap-2">
-        {!isNew && (
-          <Button variant="ghost" size="sm" onClick={onHistoryToggle}>
-            히스토리
-          </Button>
+        {!isNew && profileId && (
+          <>
+            <Link href={`/admin/profiles/${profileId}/history`}>
+              <Button variant="ghost" size="sm">
+                변경 이력
+              </Button>
+            </Link>
+            <Button variant="ghost" size="sm" onClick={onHistoryToggle}>
+              히스토리
+            </Button>
+          </>
         )}
         <Button
           variant="primary"
