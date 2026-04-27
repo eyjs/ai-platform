@@ -349,6 +349,9 @@ async def create_app_state(settings: Settings) -> AppState:
         providers=provider_registry.ids(),
     )
 
+    # Profile YAML Hot Reload 시작
+    profile_store.start_watcher()
+
     return AppState(
         settings=settings,
         auth_service=auth_service,
