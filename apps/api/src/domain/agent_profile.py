@@ -81,6 +81,8 @@ class AgentProfile:
     memory_ttl_seconds: int = 3600
     memory_scopes: list[str] = field(default_factory=lambda: ["local"])
     memory_project_id: str | None = None
+    memory_max_turns: int = 10
+    memory_retention_days: int | None = None
 
     # 검증 넛지
     validation_nudge_enabled: bool = False
