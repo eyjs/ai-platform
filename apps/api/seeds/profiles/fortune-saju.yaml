@@ -17,6 +17,14 @@ tools:
       max_vector_chunks: 5
   - name: "fact_lookup"
     config: {}
+  - name: "saju_report_paper"
+    config:
+      max_sections: 7
+      timeout_per_section: 30
+  - name: "saju_report_compatibility"
+    config:
+      max_sections: 6
+      timeout_per_section: 30
 
 system_prompt: |
   당신은 천명관(天命館)의 사주 해석 전문가 '천명'입니다.
@@ -69,6 +77,11 @@ main_model: "sonnet"
 
 memory_type: "session"
 memory_ttl_seconds: 600
+memory_max_turns: 10
+memory_retention_days: 30
+memory_scopes:
+  - "local"
+  - "user"
 
 intent_hints:
   - name: "SAJU_ANALYSIS"
@@ -95,3 +108,9 @@ intent_hints:
   - name: "RELATIONSHIP_INQUIRY"
     patterns: ["관계", "직장", "상사", "동료", "친구", "부모", "자녀"]
     description: "대인관계 관련 상담"
+  - name: "REPORT_PAPER"
+    patterns: ["리포트", "보고서", "종합분석", "상세분석", "전체운세", "사주분석서"]
+    description: "사주팔자 종합 리포트 생성 요청"
+  - name: "REPORT_COMPATIBILITY"
+    patterns: ["궁합리포트", "궁합분석서", "궁합보고서", "상성분석"]
+    description: "두 사람 궁합 종합 리포트 생성 요청"
