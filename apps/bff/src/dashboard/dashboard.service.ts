@@ -7,6 +7,7 @@ import {
   DashboardUsageDto,
   DashboardLatencyDto,
   DashboardLogsDto,
+  PlatformOverviewDto,
 } from './dto/dashboard.dto';
 import type {
   DashboardRange,
@@ -284,6 +285,75 @@ export class DashboardService {
 
   private rangeToInterval(range: DashboardRange): string {
     return RANGE_INTERVALS[range] || RANGE_INTERVALS['24h'];
+  }
+
+  async getPlatformOverview(): Promise<PlatformOverviewDto> {
+    const manager = this.profileRepo.manager;
+
+    // 프로필 통계
+    const profileResult = await manager.query(
+      `SELECT
+         COUNT(*)::int AS total_profiles,
+         COUNT(*) FILTER (WHERE is_active = true)::int AS active_profiles
+       FROM agent_profiles`,
+    ).catch(() => [{ total_profiles: 0, active_profiles: 0 }]);
+
+    // 오늘 요청 통계
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const requestResult = await manager.query(
+      `SELECT
+         COUNT(*)::int AS today_requests,
+         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::int AS error_count,
+         COALESCE(AVG(latency_ms), 0)::int AS avg_latency_ms
+       FROM api_request_logs
+       WHERE ts >= $1`,
+      [todayStart],
+    ).catch(() => [{ today_requests: 0, error_count: 0, avg_latency_ms: 0 }]);
+
+    // API Key 통계
+    const apiKeyResult = await manager.query(
+      `SELECT
+         COUNT(*)::int AS total_api_keys,
+         COUNT(*) FILTER (WHERE is_active = true)::int AS active_api_keys
+       FROM api_keys`,
+    ).catch(() => [{ total_api_keys: 0, active_api_keys: 0 }]);
+
+    // 최근 24시간 요청 추이
+    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const hourlyResult = await manager.query(
+      `SELECT
+         date_trunc('hour', ts) AS hour,
+         COUNT(*)::int AS count
+       FROM api_request_logs
+       WHERE ts >= $1
+       GROUP BY hour
+       ORDER BY hour ASC`,
+      [last24h],
+    ).catch(() => []);
+
+    const profiles = profileResult[0];
+    const requests = requestResult[0];
+    const apiKeys = apiKeyResult[0];
+
+    const todayRequests = Number(requests.today_requests);
+    const errorCount = Number(requests.error_count);
+
+    return {
+      totalProfiles: Number(profiles.total_profiles),
+      activeProfiles: Number(profiles.active_profiles),
+      todayRequests,
+      errorRate: todayRequests > 0 ? errorCount / todayRequests : 0,
+      avgLatencyMs: Number(requests.avg_latency_ms),
+      apiKeys: {
+        total: Number(apiKeys.total_api_keys),
+        active: Number(apiKeys.active_api_keys),
+      },
+      requests24h: hourlyResult.map((row: Record<string, unknown>) => ({
+        hour: new Date(row.hour as string).toISOString(),
+        count: Number(row.count),
+      })),
+    };
   }
 
   private getPeriodStart(period: string): Date {
