@@ -20,6 +20,7 @@ export function ApiKeyTable({ items, onRevoke, onRotate }: Props) {
             <th className="px-[var(--spacing-3)] py-[var(--spacing-2)]">허용 Profile</th>
             <th className="px-[var(--spacing-3)] py-[var(--spacing-2)]">Rate/분</th>
             <th className="px-[var(--spacing-3)] py-[var(--spacing-2)]">상태</th>
+            <th className="px-[var(--spacing-3)] py-[var(--spacing-2)]">마지막 사용</th>
             <th className="px-[var(--spacing-3)] py-[var(--spacing-2)] text-right">액션</th>
           </tr>
         </thead>
@@ -27,7 +28,7 @@ export function ApiKeyTable({ items, onRevoke, onRotate }: Props) {
           {items.length === 0 && (
             <tr>
               <td
-                colSpan={6}
+                colSpan={7}
                 className="px-[var(--spacing-3)] py-[var(--spacing-6)] text-center text-[var(--color-neutral-400)]"
               >
                 등록된 API Key 가 없습니다.
@@ -52,7 +53,21 @@ export function ApiKeyTable({ items, onRevoke, onRotate }: Props) {
                 {k.preview}
               </td>
               <td className="px-[var(--spacing-3)] py-[var(--spacing-2)]">
-                {k.allowed_profiles.length === 0 ? '(전체)' : k.allowed_profiles.join(', ')}
+                {k.allowed_profiles.length === 0 ? (
+                  <span className="text-[var(--color-neutral-400)]">(전체)</span>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {k.allowed_profiles.map((pid) => (
+                      <Link
+                        key={pid}
+                        href={`/admin/profiles/${pid}`}
+                        className="rounded-[var(--radius-sm)] bg-[var(--color-primary-50)] px-1.5 py-0.5 text-[10px] text-[var(--color-primary-700)] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary-500)]"
+                      >
+                        {pid}
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </td>
               <td className="px-[var(--spacing-3)] py-[var(--spacing-2)]">
                 {k.rate_limit_per_min}
@@ -67,6 +82,11 @@ export function ApiKeyTable({ items, onRevoke, onRotate }: Props) {
                 >
                   {k.is_active ? '활성' : '폐기'}
                 </span>
+              </td>
+              <td className="px-[var(--spacing-3)] py-[var(--spacing-2)] text-[var(--color-neutral-500)]">
+                {k.last_used_at
+                  ? new Date(k.last_used_at).toLocaleDateString('ko-KR')
+                  : '-'}
               </td>
               <td className="px-[var(--spacing-3)] py-[var(--spacing-2)] text-right">
                 <button

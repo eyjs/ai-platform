@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { FeedbackFilters } from '@/components/admin/feedback/feedback-filters';
 import type { FeedbackFilterValue } from '@/components/admin/feedback/feedback-filters';
 import { FeedbackList } from '@/components/admin/feedback/feedback-list';
 import { fetchAdminFeedback } from '@/lib/api/bff-feedback';
+import { fetchProfiles } from '@/lib/api/bff-profiles';
 import type { AdminFeedbackItem } from '@/types/feedback';
+import type { ProfileListItem } from '@/types/profile';
 
 const PAGE_SIZE = 50;
 
@@ -19,6 +21,11 @@ export default function AdminFeedbackPage() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<ProfileListItem[]>([]);
+
+  useEffect(() => {
+    fetchProfiles().then(setProfiles).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -30,6 +37,8 @@ export default function AdminFeedbackPage() {
         only_negative: filter.only_negative,
         date_from: filter.date_from,
         date_to: filter.date_to,
+        profile_id: filter.profile_id,
+        keyword: filter.keyword,
       });
       setItems(page.items);
       setTotal(page.total);
@@ -52,6 +61,20 @@ export default function AdminFeedbackPage() {
   const hasPrev = offset > 0;
   const hasNext = offset + PAGE_SIZE < total;
 
+  const stats = useMemo(() => {
+    const positive = items.filter((i) => i.score === 1).length;
+    const negative = items.filter((i) => i.score === -1).length;
+    const ratio = positive + negative > 0
+      ? Math.round((positive / (positive + negative)) * 100)
+      : 0;
+    return { positive, negative, ratio };
+  }, [items]);
+
+  const profileOptions = useMemo(
+    () => profiles.map((p) => ({ id: p.id, name: p.name })),
+    [profiles],
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <header className="flex items-center justify-between">
@@ -63,7 +86,28 @@ export default function AdminFeedbackPage() {
         </Button>
       </header>
 
-      <FeedbackFilters value={filter} onChange={handleFilterChange} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="피드백 요약">
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] px-4 py-3">
+          <p className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">좋아요</p>
+          <p className="text-[var(--font-size-xl)] font-bold text-[var(--color-success)]">
+            {stats.positive}
+          </p>
+        </div>
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] px-4 py-3">
+          <p className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">별로예요</p>
+          <p className="text-[var(--font-size-xl)] font-bold text-[var(--color-error)]">
+            {stats.negative}
+          </p>
+        </div>
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] px-4 py-3">
+          <p className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">긍정 비율</p>
+          <p className="text-[var(--font-size-xl)] font-bold text-[var(--color-primary-600)]">
+            {stats.ratio}%
+          </p>
+        </div>
+      </div>
+
+      <FeedbackFilters value={filter} onChange={handleFilterChange} profiles={profileOptions} />
 
       {error && (
         <div

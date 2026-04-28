@@ -28,6 +28,8 @@ export interface AdminFeedbackItem {
   question_preview: string | null;
   answer_preview: string | null;
   response_ts: string | null;
+  routing_info: string | null;
+  tools_used: string[] | null;
 }
 
 export interface AdminFeedbackPage {
@@ -43,4 +45,6 @@ export interface AdminFeedbackListQuery {
   only_negative?: boolean;
   date_from?: string;
   date_to?: string;
+  profile_id?: string;
+  keyword?: string;
 }

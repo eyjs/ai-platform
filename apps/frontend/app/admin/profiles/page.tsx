@@ -14,16 +14,23 @@ import {
   deactivateProfile,
   deleteProfile,
 } from '@/lib/api/bff-profiles';
+import { listApiKeys } from '@/lib/api/bff-api-keys';
 import type { ProfileListItem } from '@/types/profile';
+import type { ApiKey } from '@/types/api-key';
+
+export interface ProfileListItemEnriched extends ProfileListItem {
+  connectedConsumers: number;
+  recentRequestCount?: number;
+}
 
 export default function ProfileListPage() {
-  const [profiles, setProfiles] = useState<ProfileListItem[]>([]);
+  const [profiles, setProfiles] = useState<ProfileListItemEnriched[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<ProfileListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProfileListItemEnriched | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
 
@@ -31,8 +38,17 @@ export default function ProfileListPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchProfiles();
-      setProfiles(data);
+      const [data, apiKeys] = await Promise.all([
+        fetchProfiles(),
+        listApiKeys().catch(() => [] as ApiKey[]),
+      ]);
+      const enriched: ProfileListItemEnriched[] = data.map((p) => ({
+        ...p,
+        connectedConsumers: apiKeys.filter(
+          (k) => k.is_active && k.allowed_profiles.includes(p.id),
+        ).length,
+      }));
+      setProfiles(enriched);
     } catch (err) {
       setError(err instanceof Error ? err.message : '목록 로딩 실패');
     } finally {

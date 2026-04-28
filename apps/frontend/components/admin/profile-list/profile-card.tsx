@@ -7,8 +7,13 @@ import { Toggle } from '@/components/ui/toggle';
 import { Button } from '@/components/ui/button';
 import type { ProfileListItem } from '@/types/profile';
 
+interface ProfileListItemEnriched extends ProfileListItem {
+  connectedConsumers: number;
+  recentRequestCount?: number;
+}
+
 interface ProfileCardProps {
-  profile: ProfileListItem;
+  profile: ProfileListItemEnriched;
   onToggleActive: (id: string, isActive: boolean) => void;
   onDelete: (id: string) => void;
 }
@@ -63,6 +68,20 @@ export function ProfileCard({ profile, onToggleActive, onDelete }: ProfileCardPr
         <span>도구 {profile.toolsCount}개</span>
         <span className="mx-2">|</span>
         <span>{profile.routerModel} / {profile.mainModel}</span>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        <Badge variant="neutral" size="sm">
+          Consumer {profile.connectedConsumers}개
+        </Badge>
+        {profile.recentRequestCount !== undefined && (
+          <Badge variant="primary" size="sm">
+            7d 요청 {profile.recentRequestCount.toLocaleString()}
+          </Badge>
+        )}
+        <Badge variant={profile.isActive ? 'success' : 'error'} size="sm">
+          {profile.isActive ? '활성' : '비활성'}
+        </Badge>
       </div>
 
       <div className="flex gap-2 pt-1 border-t border-[var(--color-neutral-100)]">
