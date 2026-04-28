@@ -12,6 +12,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../entities/web-user.entity';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { UpdateApiKeyDto } from './dto/update-api-key.dto';
@@ -26,7 +27,7 @@ function getActor(req: RequestWithUser): string {
 
 @Controller('api-keys')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles(UserRole.ADMIN)
 export class ApiKeysController {
   constructor(private readonly service: ApiKeysService) {}
 
