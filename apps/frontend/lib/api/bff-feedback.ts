@@ -51,6 +51,8 @@ export async function fetchAdminFeedback(
   if (query.only_negative) params.set('only_negative', 'true');
   if (query.date_from) params.set('date_from', query.date_from);
   if (query.date_to) params.set('date_to', query.date_to);
+  if (query.profile_id) params.set('profile_id', query.profile_id);
+  if (query.keyword) params.set('keyword', query.keyword);
 
   const qs = params.toString();
   const url = `${BFF_URL}/bff/admin/feedback${qs ? `?${qs}` : ''}`;
