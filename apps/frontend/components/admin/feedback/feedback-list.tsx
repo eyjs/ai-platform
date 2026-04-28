@@ -77,22 +77,22 @@ export function FeedbackList({ items, isLoading, total }: FeedbackListProps) {
             </div>
           </dl>
           {(item.routing_info || (item.tools_used && item.tools_used.length > 0)) && (
-            <div className=”flex flex-wrap items-center gap-1”>
+            <div className="flex flex-wrap items-center gap-1">
               {item.routing_info && (
-                <Badge variant=”primary” size=”sm”>
+                <Badge variant="primary" size="sm">
                   {item.routing_info}
                 </Badge>
               )}
               {item.tools_used?.map((tool) => (
-                <Badge key={tool} variant=”secondary” size=”sm”>
+                <Badge key={tool} variant="secondary" size="sm">
                   {tool}
                 </Badge>
               ))}
             </div>
           )}
           {item.comment && (
-            <p className=”rounded-[var(--radius-sm)] bg-[var(--color-neutral-100)] px-2 py-1 text-[var(--font-size-xs)] text-[var(--color-neutral-700)]”>
-              “{item.comment}”
+            <p className="rounded-[var(--radius-sm)] bg-[var(--color-neutral-100)] px-2 py-1 text-[var(--font-size-xs)] text-[var(--color-neutral-700)]">
+              "{item.comment}"
             </p>
           )}
         </article>
