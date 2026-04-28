@@ -5,7 +5,6 @@
 
 import asyncio
 import json
-import logging
 from pathlib import Path
 from typing import Optional
 
@@ -14,8 +13,9 @@ import yaml
 
 from src.domain.models import AgentMode
 from src.domain.agent_profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
+from src.observability.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ProfileStore:
@@ -37,7 +37,7 @@ class ProfileStore:
     async def load_seeds(self) -> int:
         """YAML 시드 파일을 DB에 로딩한다."""
         if not self._seed_dir.exists():
-            logger.warning("Seed directory not found: %s", self._seed_dir)
+            logger.warning("seed_directory_not_found", seed_dir=str(self._seed_dir))
             return 0
 
         count = 0
@@ -49,9 +49,9 @@ class ProfileStore:
                 await self._upsert(profile)
                 self._cache[profile.id] = profile
                 count += 1
-                logger.info("Loaded profile: %s (%s)", profile.id, profile.name)
+                logger.info("profile_loaded", profile_id=profile.id, name=profile.name)
             except Exception as e:
-                logger.error("Failed to load seed %s: %s", path.name, e)
+                logger.error("seed_load_failed", path=path.name, error=str(e))
 
         return count
 

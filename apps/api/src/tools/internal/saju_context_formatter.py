@@ -6,9 +6,9 @@ saju_report_paper / saju_report_compatibility 에서 공유한다.
 
 from __future__ import annotations
 
-import logging
+from src.observability.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def format_single_person_context(data: dict, label: str = "사용자") -> str:

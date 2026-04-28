@@ -27,7 +27,7 @@ report_router = APIRouter()
 class ReportGenerateRequest(BaseModel):
     """리포트 생성 요청."""
 
-    report_type: str = Field(..., description="리포트 타입", regex=r"^(paper|compatibility)$")
+    report_type: str = Field(..., description="리포트 타입", pattern=r"^(paper|compatibility)$")
     saju_data: Dict[str, Any] = Field(..., description="사주 데이터")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="추가 메타데이터")
 
