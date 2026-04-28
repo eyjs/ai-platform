@@ -76,7 +76,7 @@ def _block_external_llm_http(monkeypatch):
         host = str(url)
         for blocked in _BLOCKED_LLM_HOSTS:
             if blocked in host:
-                pytest.fail(f"Outbound commercial LLM call blocked: {host}")
+                raise RuntimeError(f"Outbound commercial LLM call blocked: {host}")
 
     async def _async_send(self, request, *args, **kwargs):
         _check(str(request.url))

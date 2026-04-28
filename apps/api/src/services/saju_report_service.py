@@ -17,7 +17,6 @@ from typing import Any, Dict, Optional
 import asyncpg
 
 from src.domain.agent_context import AgentContext
-from src.domain.models import SearchScope
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.tools.internal.saju_report_compatibility import SajuReportCompatibilityTool
@@ -79,7 +78,6 @@ class SajuReportService:
             agent_context = AgentContext(
                 user_id=user_id,
                 session_id=f"report_{job_id}",
-                search_scopes=[SearchScope.ALL],  # saju report는 전역 검색
             )
 
             # 3. 리포트 타입별 Tool 호출

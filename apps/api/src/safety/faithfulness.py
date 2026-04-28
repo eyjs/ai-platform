@@ -9,16 +9,16 @@ Deep eval (STRICT + router_llm 있을 때만):
   4. LLM 근거 검증 — "이 답변이 소스에 근거하는가?"
 """
 
-import logging
 import re
 from itertools import combinations
 from typing import Optional
 
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
+from src.observability.logging import get_logger
 from src.safety.base import GuardrailContext, GuardrailResult
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FaithfulnessGuard:
@@ -71,7 +71,7 @@ class FaithfulnessGuard:
                 ]
                 if still_unverified:
                     warning = get_locale().message("number_missing", numbers=str(still_unverified))
-                    logger.warning("faithfulness_number_missing: %s", warning)
+                    logger.warning("faithfulness_number_missing", detail=warning)
                     modified = answer + f"\n\n[주의: {warning}]"
                     # Quick-check 실패 → 0.5
                     return GuardrailResult.warn(warning, modified, score=0.5)
@@ -110,7 +110,7 @@ class FaithfulnessGuard:
                     break
             if not found_together:
                 warning = get_locale().message("cooccurrence_fail", a=a, b=b)
-                logger.warning("faithfulness_cooccurrence: %s", warning)
+                logger.warning("faithfulness_cooccurrence", detail=warning)
                 return GuardrailResult.warn(
                     warning, None, score=0.5,
                 )
@@ -128,7 +128,7 @@ class FaithfulnessGuard:
         for cite in cited:
             if cite not in source_files:
                 warning = get_locale().message("citation_missing", cite=cite)
-                logger.warning("faithfulness_citation: %s", warning)
+                logger.warning("faithfulness_citation", detail=warning)
                 return GuardrailResult.warn(warning, None, score=0.5)
         return None
 
@@ -145,14 +145,14 @@ class FaithfulnessGuard:
 
             if not result.get("faithful", True):
                 reason = result.get("reason", "근거 불충분")
-                logger.warning("faithfulness_deep_eval: %s", reason)
+                logger.warning("faithfulness_deep_eval", reason=reason)
                 return GuardrailResult.warn(
                     get_locale().message("deep_eval_fail", reason=reason),
                     None,
                     score=0.3,
                 )
         except Exception as e:
-            logger.warning("faithfulness_deep_eval_error: %s", str(e))
+            logger.warning("faithfulness_deep_eval_error", error=str(e))
         return None
 
     @staticmethod

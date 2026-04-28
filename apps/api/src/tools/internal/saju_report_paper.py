@@ -10,16 +10,16 @@ loveRelation, careerWealth, verdictV2) 순차 생성.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from src.domain.agent_context import AgentContext
 from src.infrastructure.providers.base import LLMProvider
+from src.observability.logging import get_logger
 from src.tools.base import ToolResult
 from src.tools.internal.saju_context_formatter import format_single_person_context
 from src.tools.internal.saju_prompts import PAPER_V2_SECTION_KEYS, get_paper_section_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _PAPER_REQUIRED_SECTIONS = frozenset(PAPER_V2_SECTION_KEYS)
 
