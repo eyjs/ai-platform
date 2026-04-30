@@ -28,12 +28,12 @@ services:
     environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       AIP_PROVIDER_MODE: development
-      # MLX GPU 서버 (호스트에서 실행 중) — 2026-04-24 Python 3.13 + Qwen3 마이그레이션
-      # 포트 매핑: 8104=Main(32B), 8105=Router(8B). 반대로 쓰면 성능 뒤집어짐
+      # MLX GPU 서버 (호스트에서 실행 중) — 2026-04-30 Qwen3-14B 도입
+      # 포트 매핑: 8104=Main(14B), 8105=Router/Orchestrator(8B)
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105  # 8B — 경량 (Intent 분류)
-      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104    # 32B — 실제 응답 생성
+      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104    # 14B — 최종 응답 생성
       # 오케스트레이터 (8B — 프로필 선택은 경량 작업)
       AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-8B-4bit
       AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
