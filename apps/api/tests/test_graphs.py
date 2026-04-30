@@ -35,11 +35,17 @@ def test_deterministic_graph_has_expected_nodes():
         guardrails={},
     )
     node_names = set(graph.nodes.keys())
+    # 기존 노드
     assert "execute_tools" in node_names
     assert "generate_with_context" in node_names
     assert "direct_generate" in node_names
     assert "run_guardrails" in node_names
     assert "build_response" in node_names
+    # Plan-and-Execute 신규 노드
+    assert "plan_execution" in node_names
+    assert "evaluate_results" in node_names
+    assert "rewrite_query" in node_names
+    assert "regenerate" in node_names
 
 
 @pytest.mark.asyncio
@@ -263,7 +269,7 @@ def test_graph_enrich_node_exists_when_kms_configured():
 
 
 def test_backward_compat_no_kms():
-    """kms_graph_client=None -> graph_enrich 노드 없이 기존 5개 노드만."""
+    """kms_graph_client=None -> graph_enrich 노드 없이 동작."""
     mock_llm = MagicMock()
     mock_registry = MagicMock()
 
@@ -276,8 +282,13 @@ def test_backward_compat_no_kms():
     )
     node_names = set(graph.nodes.keys())
     assert "graph_enrich" not in node_names
+    # 필수 노드 존재
+    assert "plan_execution" in node_names
     assert "execute_tools" in node_names
+    assert "evaluate_results" in node_names
+    assert "rewrite_query" in node_names
     assert "generate_with_context" in node_names
     assert "direct_generate" in node_names
     assert "run_guardrails" in node_names
+    assert "regenerate" in node_names
     assert "build_response" in node_names

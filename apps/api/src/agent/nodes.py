@@ -7,10 +7,14 @@ import asyncio
 import time
 from typing import Callable
 
+from collections import defaultdict
+
 from src.agent.state import AgentState
+from src.config import settings
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
+from src.router.execution_plan import ToolCall
 from src.safety.base import Guardrail, GuardrailContext
 from src.domain.agent_context import AgentContext
 from src.tools.registry import ToolRegistry
@@ -23,14 +27,73 @@ MAX_SOURCES = 5
 MIN_SOURCE_SCORE = 0.3
 
 
+# --- 헬퍼 함수 ---
+
+
+def _steps_to_tool_groups(steps: list[dict]) -> list[list[ToolCall]]:
+    """Planner가 생성한 steps를 tool_groups 형식으로 변환한다.
+
+    같은 group 번호의 step은 같은 리스트에 넣어 병렬 실행.
+    group 번호 순으로 정렬하여 순차 실행 순서 보장.
+    """
+    groups: dict[int, list[ToolCall]] = defaultdict(list)
+    for step in steps:
+        group_num = step.get("group", 1)
+        groups[group_num].append(
+            ToolCall(tool_name=step["tool"], params=step.get("params", {})),
+        )
+    return [groups[k] for k in sorted(groups.keys())]
+
+
 # --- 라우팅 함수 (조건부 엣지) ---
 
 
 def route_by_rag(state: AgentState) -> str:
     """needs_rag 여부로 다음 노드를 결정한다."""
     if state["plan"].strategy.needs_rag:
-        return "execute_tools"
+        return "plan_execution"
     return "direct_generate"
+
+
+def route_by_evaluation(state: AgentState) -> str:
+    """검색 결과 품질에 따라 다음 노드를 결정한다.
+
+    - 결과 충분 (score >= 0.4): generate_with_context로 진행
+    - 결과 불충분 & retry 가능: rewrite_query로 재시도
+    - 결과 불충분 & retry 소진: generate_with_context로 진행 (best-effort)
+    """
+    results = state.get("search_results", [])
+    retry_count = state.get("retry_count", 0)
+
+    # 결과가 있고 최소 품질 기준 충족
+    if results and max(r.get("score", 0) for r in results) >= 0.4:
+        return "generate_with_context"
+
+    # 최대 재시도 도달
+    if retry_count >= settings.planner_max_retries:
+        return "generate_with_context"
+
+    # 재시도 필요 (evaluate_results에서 retry_count가 이미 증가된 상태)
+    if retry_count > 0:
+        return "rewrite_query"
+
+    return "generate_with_context"
+
+
+def route_by_guardrail(state: AgentState) -> str:
+    """Guardrail 결과에 따라 재생성 여부를 결정한다."""
+    gr = state.get("guardrail_results", {})
+    if not gr:
+        return "build_response"
+
+    regenerate_needed = gr.get("_regenerate_needed", False)
+    # retry_count를 재사용하되, guardrail 재생성은 1회만 허용
+    # _guardrail_regen_count로 별도 추적
+    regen_count = gr.get("_regen_count", 0)
+
+    if regenerate_needed and regen_count < 1:
+        return "regenerate"
+    return "build_response"
 
 
 # --- 노드 팩토리 함수 ---
@@ -68,7 +131,14 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
         tools_called = []
         tool_latencies = []
 
-        for group in plan.tool_groups:
+        # Step-aware 실행: Planner가 생성한 steps가 있으면 사용, 없으면 기존 tool_groups 폴백
+        planned_steps = state.get("planned_steps", [])
+        if planned_steps:
+            tool_groups = _steps_to_tool_groups(planned_steps)
+        else:
+            tool_groups = plan.tool_groups
+
+        for group in tool_groups:
             tasks = [
                 _execute_single(tc, context, plan.scope, trace)
                 for tc in group
@@ -108,6 +178,127 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
         }
 
     return execute_tools
+
+
+def create_evaluate_results() -> Callable:
+    """검색 결과 품질 평가 노드.
+
+    score >= 0.4인 결과가 있으면 충분, 없으면 retry_count를 증가시켜
+    route_by_evaluation에서 재시도 경로를 선택하도록 한다.
+    """
+
+    async def evaluate_results(state: AgentState) -> dict:
+        results = state.get("search_results", [])
+        retry_count = state.get("retry_count", 0)
+
+        # 결과가 충분하면 그대로 진행
+        if results and max(r.get("score", 0) for r in results) >= 0.4:
+            return {"retry_count": retry_count}
+
+        # 최대 재시도 도달
+        if retry_count >= settings.planner_max_retries:
+            return {"retry_count": retry_count}
+
+        # 재시도 필요: retry_count 증가
+        return {"retry_count": retry_count + 1}
+
+    return evaluate_results
+
+
+def create_rewrite_query(llm: LLMProvider) -> Callable:
+    """쿼리 재작성 노드.
+
+    검색 결과가 불충분할 때 LLM에게 쿼리를 재작성 요청하고,
+    새로운 planned_steps를 반환하여 execute_tools가 재실행되도록 한다.
+    """
+
+    async def rewrite_query(state: AgentState) -> dict:
+        question = state["question"]
+        results = state.get("search_results", [])
+
+        max_score = max((r.get("score", 0) for r in results), default=0)
+        prompt = (
+            f"원래 질문에 대한 검색 결과가 불충분합니다.\n"
+            f"원래 질문: {question}\n"
+            f"검색 결과 수: {len(results)}\n"
+            f"최고 유사도: {max_score:.2f}\n\n"
+            f"검색 쿼리를 재작성하세요. 더 일반적이거나 다른 표현을 사용하세요.\n"
+            f'JSON 형식: {{"steps": [{{"step_id": "retry", "tool": "rag_search", '
+            f'"params": {{"query": "재작성된 쿼리"}}, "group": 1}}], '
+            f'"reasoning": "재작성 이유"}}'
+        )
+
+        try:
+            result = await asyncio.wait_for(
+                llm.generate_json(prompt),
+                timeout=settings.planner_timeout,
+            )
+            new_steps = result.get("steps", [])
+            reasoning = result.get("reasoning", "")
+            if new_steps:
+                logger.info("rewrite_query_success", reasoning=reasoning[:100])
+                return {
+                    "planned_steps": new_steps,
+                    "planning_reasoning": f"retry: {reasoning}",
+                }
+        except Exception as e:
+            logger.warning("rewrite_query_failed", error=str(e))
+
+        # 실패 시 원래 질문으로 rag_search 재실행
+        return {
+            "planned_steps": [
+                {"step_id": "retry_fallback", "tool": "rag_search",
+                 "params": {"query": question}, "group": 1},
+            ],
+            "planning_reasoning": "rewrite failed, retrying with original query",
+        }
+
+    return rewrite_query
+
+
+def create_regenerate(llm: LLMProvider) -> Callable:
+    """Guardrail 실패 시 답변 재생성 노드.
+
+    이전 답변의 guardrail 실패 이유를 system_prompt에 추가하여
+    LLM에게 개선된 답변을 요청한다. 최대 1회만 실행.
+    """
+
+    async def regenerate(state: AgentState) -> dict:
+        plan = state["plan"]
+        question = state["question"]
+        results = state.get("search_results", [])
+        gr = state.get("guardrail_results", {})
+
+        # guardrail 실패 이유 수집
+        warnings = []
+        for name, v in gr.items():
+            if name.startswith("_"):
+                continue
+            if isinstance(v, dict) and v.get("action") == "warn":
+                warnings.append(f"{name}: score={v.get('score')}")
+
+        warning_text = ", ".join(warnings) if warnings else "low quality"
+
+        # 프롬프트에 guardrail 피드백 추가
+        max_chunks = plan.strategy.max_vector_chunks
+        prompt_results = results[:max_chunks]
+        prompt = build_prompt(question, plan, prompt_results)
+
+        enhanced_system = (
+            f"{plan.system_prompt}\n\n"
+            f"[IMPORTANT] 이전 답변이 품질 검증에서 부족한 평가를 받았습니다 "
+            f"({warning_text}). "
+            f"참고 문서에 충실하게 답변하세요. 근거 없는 내용은 포함하지 마세요."
+        )
+
+        answer = await llm.generate(prompt, system=enhanced_system)
+        logger.info("regenerate_answer", answer_len=len(answer), warnings=warning_text)
+
+        # _regen_count 증가하여 재생성 루프 방지
+        updated_gr = {**gr, "_regenerate_needed": False, "_regen_count": gr.get("_regen_count", 0) + 1}
+        return {"answer": answer, "guardrail_results": updated_gr}
+
+    return regenerate
 
 
 def create_generate_with_context(llm: LLMProvider) -> Callable:
@@ -175,6 +366,16 @@ def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
         answer, results = await run_guardrail_chain(
             answer, plan.guardrail_chain, guardrails, context,
         )
+
+        # Guardrail 재생성 판단: warn + score < 0.5이면 재생성 후보
+        regenerate_needed = any(
+            isinstance(v, dict) and v.get("action") == "warn"
+            and v.get("score") is not None and v.get("score") < 0.5
+            for v in results.values()
+        )
+        results["_regenerate_needed"] = regenerate_needed
+        results["_regen_count"] = state.get("guardrail_results", {}).get("_regen_count", 0)
+
         return {"answer": answer, "guardrail_results": results}
 
     return run_guardrails

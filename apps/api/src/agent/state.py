@@ -43,10 +43,15 @@ class AgentState(TypedDict):
     # 그래프 보강
     graph_enrichment: dict
 
+    # Planner 출력 (Plan-and-Execute)
+    planned_steps: list[dict]       # Planner가 생성한 steps
+    planning_reasoning: str         # Planner의 판단 근거
+    retry_count: int                # 현재 retry 횟수 (adaptive loop)
+
     # 메타데이터
     latency_ms: float
 
-    # Trace (Optional — 병렬 실행 시 레이턴시 기록용)
+    # Trace (Optional -- 병렬 실행 시 레이턴시 기록용)
     trace: Any
 
 
@@ -71,6 +76,9 @@ def create_initial_state(
         sources=[],
         is_streaming=is_streaming,
         graph_enrichment={},
+        planned_steps=[],
+        planning_reasoning="",
+        retry_count=0,
         latency_ms=0.0,
         trace=trace,
     )

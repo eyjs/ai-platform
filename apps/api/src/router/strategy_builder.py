@@ -6,6 +6,7 @@ STRATEGY_MATRIX 소유 + SearchScope + tools + system_prompt + guardrails + conv
 import logging
 from typing import List, Optional, Union
 
+from src.config import settings
 from src.domain.agent_profile import AgentProfile
 from src.domain.models import (
     AgentMode, ResponsePolicy, SearchScope, SecurityLevel,
@@ -104,6 +105,11 @@ class StrategyBuilder:
                 f"--- 참고 컨텍스트 ---\n{external_context}"
             ) if profile.system_prompt else f"--- 참고 컨텍스트 ---\n{external_context}"
 
+        # needs_planning 판단
+        needs_planning = self._determine_needs_planning(
+            question_type, profile,
+        )
+
         return ExecutionPlan(
             mode=mode,
             scope=scope,
@@ -119,6 +125,7 @@ class StrategyBuilder:
             max_tool_calls=profile.max_tool_calls,
             agent_timeout_seconds=profile.agent_timeout_seconds,
             external_context=external_context,
+            needs_planning=needs_planning,
         )
 
     @staticmethod
@@ -133,6 +140,29 @@ class StrategyBuilder:
                 content = pat.sub(replacement, content)
             sanitized.append({**turn, "content": content})
         return sanitized
+
+    @staticmethod
+    def _determine_needs_planning(
+        question_type: QuestionType,
+        profile: AgentProfile,
+    ) -> bool:
+        """Planner 실행 필요 여부를 판단한다.
+
+        스킵 조건:
+          - planner_enabled == False (글로벌 킬스위치)
+          - profile.planning_disabled == True
+          - QuestionType이 GREETING 또는 SYSTEM_META (단순 응답)
+        """
+        if not settings.planner_enabled:
+            return False
+
+        if getattr(profile, "planning_disabled", False):
+            return False
+
+        if question_type in (QuestionType.GREETING, QuestionType.SYSTEM_META):
+            return False
+
+        return True
 
     @staticmethod
     def _build_tool_groups(

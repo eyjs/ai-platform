@@ -38,7 +38,7 @@ def test_route_by_rag_needs_search():
         question_type=QuestionType.STANDALONE,
     )
     state = create_initial_state("보험 약관", plan)
-    assert route_by_rag(state) == "execute_tools"
+    assert route_by_rag(state) == "plan_execution"
 
 
 def test_route_by_rag_no_search():

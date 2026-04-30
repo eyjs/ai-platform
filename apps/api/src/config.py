@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 
+    # Planner (Plan-and-Execute 아키텍처)
+    planner_enabled: bool = True         # 글로벌 킬스위치
+    planner_timeout: float = 5.0         # Planner LLM 호출 타임아웃 (초)
+    planner_max_retries: int = 2         # Adaptive Retry Loop 최대 재시도
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000

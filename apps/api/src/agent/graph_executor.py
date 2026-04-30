@@ -338,7 +338,16 @@ class GraphExecutor:
             for node_name, state_update in chunk.items():
                 if not state_update:
                     continue
-                if node_name == "execute_tools":
+                if node_name == "plan_execution":
+                    planned_steps = state_update.get("planned_steps", [])
+                    planning_reasoning = state_update.get("planning_reasoning", "")
+                    if planned_steps:
+                        yield {"type": "trace", "data": {
+                            "step": "planning",
+                            "steps_count": len(planned_steps),
+                            "reasoning": planning_reasoning,
+                        }}
+                elif node_name == "execute_tools":
                     tools_called = state_update.get("tools_called", [])
                     search_results = state_update.get("search_results", [])
                     for tl in state_update.get("tool_latencies", []):

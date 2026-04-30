@@ -97,6 +97,9 @@ class AgentProfile:
     agent_timeout_seconds: int = 30
     llm_system_prefix: str | None = None  # None = 플랫폼 기본값 사용
 
+    # Planner (Plan-and-Execute)
+    planning_disabled: bool = False  # True이면 이 프로필에서 Planner 비활성화
+
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
 
