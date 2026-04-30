@@ -49,10 +49,10 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
               const data = JSON.parse(event.data);
               switch (event.event) {
                 case 'token':
-                  callbacks.onToken(data.text || data);
+                  callbacks.onToken(data.delta || data.text || String(data));
                   break;
                 case 'replace':
-                  callbacks.onReplace(data.text || data);
+                  callbacks.onReplace(data.delta || data.text || String(data));
                   break;
                 case 'trace':
                   callbacks.onTrace(data);
