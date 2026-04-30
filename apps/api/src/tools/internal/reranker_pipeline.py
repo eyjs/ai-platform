@@ -5,8 +5,7 @@ from src.observability.logging import get_logger
 logger = get_logger(__name__)
 
 PREFERRED_MIN_SCORE = 0.5
-FALLBACK_MIN_SCORE = 0.15
-LAST_RESORT_COUNT = 3
+FALLBACK_MIN_SCORE = 0.25
 RERANKER_WEIGHT = 0.7
 VECTOR_SCORE_WEIGHT = 0.3
 SLIDING_WINDOW_SIZE = 1500
@@ -48,7 +47,7 @@ async def rerank_3tier(
     elif tier2:
         results = tier2[:top_k]
     else:
-        results = scored[:LAST_RESORT_COUNT]
+        results = []
 
     logger.info(
         "rerank_3tier",

@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 MAX_CONTENT_PREVIEW_LEN = 1500
 MAX_SOURCE_PREVIEW_LEN = 200
 MAX_SOURCES = 5
+MIN_SOURCE_SCORE = 0.3
 
 
 # --- 라우팅 함수 (조건부 엣지) ---
@@ -239,12 +240,14 @@ def build_source_dicts(results: list[dict]) -> list[dict]:
     sources = []
     seen: set[str] = set()
     for r in results:
+        score = r.get("score", 0.0)
+        if score < MIN_SOURCE_SCORE:
+            continue
         doc_id = r.get("document_id", "")
         if doc_id in seen:
             continue
         seen.add(doc_id)
         title = r.get("title") or r.get("file_name") or ""
-        score = r.get("score", 0.0)
         sources.append({
             "document_id": doc_id,
             "title": title,
