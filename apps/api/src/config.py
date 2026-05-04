@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     docforge_url: str = "http://localhost:5001"
     docforge_timeout_sec: float = 120.0
     docforge_fallback_enabled: bool = False
+    docforge_internal_key: str = ""
 
     # 청킹
     chunk_size: int = 1000

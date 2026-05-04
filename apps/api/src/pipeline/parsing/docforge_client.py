@@ -44,9 +44,11 @@ class DocForgeClient:
         self,
         base_url: str = "http://localhost:5001",
         timeout_sec: float = 120.0,
+        internal_key: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_sec
+        self._internal_key = internal_key
 
     async def parse(
         self,
@@ -79,10 +81,15 @@ class DocForgeClient:
         t0 = time.time()
 
         try:
+            headers = {}
+            if self._internal_key:
+                headers["X-Internal-Key"] = self._internal_key
+
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
                     url,
                     files={"file": (file_name, file_bytes, mime_type)},
+                    headers=headers,
                 )
 
             latency_ms = (time.time() - t0) * 1000
@@ -178,8 +185,12 @@ class DocForgeClient:
         """
         url = f"{self._base_url}/v1/health"
         try:
+            headers = {}
+            if self._internal_key:
+                headers["X-Internal-Key"] = self._internal_key
+
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(url)
+                resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 body = resp.json()
                 return body.get("success", False)

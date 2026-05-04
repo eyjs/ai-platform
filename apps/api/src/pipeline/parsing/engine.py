@@ -74,10 +74,12 @@ class ParsingEngine:
         docforge_url: str = "http://localhost:5001",
         docforge_timeout_sec: float = 120.0,
         docforge_fallback_enabled: bool = False,
+        docforge_internal_key: str = "",
     ):
         self._docforge_client = DocForgeClient(
             base_url=docforge_url,
             timeout_sec=docforge_timeout_sec,
+            internal_key=docforge_internal_key,
         )
         self._pdf_parser = PdfParser(
             docforge_client=self._docforge_client,
