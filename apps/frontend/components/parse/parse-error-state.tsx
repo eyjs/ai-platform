@@ -22,7 +22,7 @@ export function ParseErrorState({ error, onRetry }: ParseErrorStateProps) {
   return (
     <div className="flex w-full max-w-md flex-col items-center gap-[var(--spacing-6)] rounded-[var(--radius-xl)] border border-[var(--color-error-light)] bg-[var(--color-error-light)] p-[var(--spacing-8)]">
       {/* Error Icon */}
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-error-light)]">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white">
         <svg
           className="h-7 w-7 text-[var(--color-error)]"
           fill="none"

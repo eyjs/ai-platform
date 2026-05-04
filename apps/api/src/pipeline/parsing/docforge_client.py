@@ -70,12 +70,12 @@ class DocForgeClient:
         Returns
         -------
         DocForgeResult:
-            마크다운 + 메타데이터 + ��계.
+            마크다운 + 메타데이터 + 통계.
 
         Raises
         ------
         ParseError:
-            DocForge ��출 실패 (타임아웃, 네트워크, 서버 에러).
+            DocForge 호출 실패 (타임아웃, 네트워크, 서버 에러).
         """
         url = f"{self._base_url}/v1/parse/sync"
         t0 = time.time()
