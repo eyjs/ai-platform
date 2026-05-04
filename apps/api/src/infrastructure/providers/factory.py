@@ -112,13 +112,11 @@ class ProviderFactory:
             engine = ParsingEngine(
                 docforge_url=self._settings.docforge_url,
                 docforge_timeout_sec=self._settings.docforge_timeout_sec,
-                docforge_fallback_enabled=self._settings.docforge_fallback_enabled,
                 docforge_internal_key=self._settings.docforge_internal_key,
             )
             logger.info(
-                "Using unified parsing engine (docforge=%s, fallback=%s)",
+                "Using DocForge parsing service: %s",
                 self._settings.docforge_url,
-                self._settings.docforge_fallback_enabled,
             )
             return ParsingEngineProvider(engine)
 

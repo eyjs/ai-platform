@@ -48,7 +48,6 @@ services:
       AIP_PARSER_PROVIDER: engine
       AIP_DOCFORGE_URL: http://docforge:5051
       AIP_DOCFORGE_INTERNAL_KEY: ${DOCFORGE_INTERNAL_KEY:-dev-docforge-key-change-in-production}
-      AIP_DOCFORGE_FALLBACK_ENABLED: "true"
       # 로깅
       AIP_LOG_FORMAT: json
       AIP_LOG_LEVEL: INFO
