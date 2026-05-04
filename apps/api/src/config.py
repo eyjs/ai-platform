@@ -54,12 +54,10 @@ class Settings(BaseSettings):
     llamaparse_api_key: str = ""
     parser_timeout: float = 120.0
 
-    # 통합 파싱 엔진 (parser_provider=engine 일 때)
-    parser_enable_docling: bool = True
-    parser_enable_vlm: bool = False
-    vlm_ocr_endpoint: str = ""         # VLM OCR 서버 (예: http://localhost:8087)
-    parser_csv_max_rows: int = 10000
-    parser_excel_max_rows: int = 10000
+    # DocForge 파싱 서비스 (parser_provider=engine 일 때)
+    docforge_url: str = "http://localhost:5001"
+    docforge_timeout_sec: float = 120.0
+    docforge_fallback_enabled: bool = False
 
     # 청킹
     chunk_size: int = 1000

@@ -1,7 +1,10 @@
 """통합 파싱 엔진 테스트.
 
-ParsingEngine 라우팅, 확장자 감지, deny, 각 파서 단위 검증.
+ParsingEngine 라우팅, 확장자 감지, deny, PDF 파서, DocForge 위임 검증.
+CSV/Excel 파싱은 DocForge 서비스로 위임되었으므로 DocForgeClient 테스트를 참조.
 """
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -17,8 +20,7 @@ from src.pipeline.parsing.base import (
     ParseMetrics,
     ParseResult,
 )
-from src.pipeline.parsing.csv_parser import CsvParser, _rows_to_markdown_table, _detect_dialect
-from src.pipeline.parsing.excel_parser import ExcelParser
+from src.pipeline.parsing.docforge_client import DocForgeResult
 from src.pipeline.parsing.metrics import compute_markdown_metrics
 from src.pipeline.parsing.pdf_analyzer import (
     _detect_table_hints,
@@ -80,7 +82,7 @@ class TestParsingEngineRouting:
 
     @pytest.fixture
     def engine(self):
-        return ParsingEngine(enable_docling=False, enable_vlm=False)
+        return ParsingEngine()
 
     def test_is_supported_pdf(self, engine):
         assert engine.is_supported("report.pdf") is True
@@ -112,7 +114,7 @@ class TestParsingEngineRouting:
 
     @pytest.mark.asyncio
     async def test_deny_unsupported_extension(self, engine):
-        """미지원 확장자 → UnsupportedFormatError."""
+        """미지원 확장자 -> UnsupportedFormatError."""
         with pytest.raises(UnsupportedFormatError) as exc_info:
             await engine.parse(b"data", "report.docx")
         assert exc_info.value.extension == "docx"
@@ -145,129 +147,48 @@ class TestParsingEngineRouting:
         with pytest.raises(UnsupportedFormatError):
             await engine.parse(b"data", "archive.zip")
 
-
-# --- CSV 파서 ---
-
-
-class TestCsvParser:
-
-    @pytest.fixture
-    def parser(self):
-        return CsvParser()
-
     @pytest.mark.asyncio
-    async def test_basic_csv(self, parser):
-        csv_data = "이름,나이,부서\n홍길동,30,개발팀\n김철수,25,기획팀"
-        result = await parser.parse(csv_data.encode("utf-8"), "test.csv")
+    async def test_csv_delegates_to_docforge(self, engine):
+        """CSV 파일은 DocForge에 위임된다."""
+        mock_result = DocForgeResult(
+            markdown="| name | age |\n| --- | --- |\n| Alice | 30 |",
+            metadata={"confidence": 0.95},
+            stats={"parse_time_ms": 50},
+        )
+        with patch.object(engine._docforge_client, "parse", new_callable=AsyncMock, return_value=mock_result):
+            result = await engine.parse(b"name,age\nAlice,30", "data.csv")
 
         assert isinstance(result, ParseResult)
-        assert "홍길동" in result.markdown
-        assert "| 이름 | 나이 | 부서 |" in result.markdown
-        assert "| --- | --- | --- |" in result.markdown
-        assert result.metrics.parser_used == "csv"
-        assert result.metrics.table_count >= 1
-
-    @pytest.mark.asyncio
-    async def test_semicolon_delimiter(self, parser):
-        csv_data = "name;age\nAlice;30\nBob;25"
-        result = await parser.parse(csv_data.encode("utf-8"), "test.csv")
         assert "Alice" in result.markdown
-        assert "Bob" in result.markdown
+        assert result.source_mime_type == "text/csv"
 
     @pytest.mark.asyncio
-    async def test_empty_csv(self, parser):
-        result = await parser.parse(b"", "empty.csv")
-        assert result.markdown == ""
-
-    @pytest.mark.asyncio
-    async def test_max_rows_truncation(self):
-        parser = CsvParser(max_rows=5)
-        # 헤더 1행 + 데이터 100행 = 101행 입력, max_rows=5이면 데이터 5행까지만
-        rows = ["col1,col2"] + [f"a{i},b{i}" for i in range(100)]
-        csv_data = "\n".join(rows)
-        result = await parser.parse(csv_data.encode("utf-8"), "big.csv")
-        assert "잘렸습니다" in result.markdown
-
-    @pytest.mark.asyncio
-    async def test_exact_max_rows_no_truncation(self):
-        """헤더 + 정확히 max_rows행 → 잘림 없음."""
-        parser = CsvParser(max_rows=3)
-        rows = ["col1,col2", "a1,b1", "a2,b2", "a3,b3"]  # 헤더 + 3행 = max_rows
-        csv_data = "\n".join(rows)
-        result = await parser.parse(csv_data.encode("utf-8"), "exact.csv")
-        assert "잘렸습니다" not in result.markdown
-
-    @pytest.mark.asyncio
-    async def test_pipe_escape(self, parser):
-        csv_data = "name,value\ntest|name,100"
-        result = await parser.parse(csv_data.encode("utf-8"), "pipe.csv")
-        assert "\\|" in result.markdown
-
-    def test_rows_to_markdown_table(self):
-        rows = [["A", "B"], ["1", "2"], ["3", "4"]]
-        md = _rows_to_markdown_table(rows, "test.csv")
-        assert "| A | B |" in md
-        assert "| 1 | 2 |" in md
-
-    def test_detect_dialect_comma(self):
-        d = _detect_dialect("a,b,c\n1,2,3")
-        assert d.delimiter == ","
-
-    def test_detect_dialect_semicolon(self):
-        d = _detect_dialect("a;b;c\n1;2;3\n4;5;6")
-        assert d.delimiter == ";"
-
-
-# --- Excel 파서 ---
-
-
-class TestExcelParser:
-
-    @pytest.fixture
-    def parser(self):
-        return ExcelParser()
-
-    @pytest.mark.asyncio
-    async def test_basic_xlsx(self, parser):
-        """openpyxl로 간단한 xlsx를 생성하고 파싱한다."""
-        xlsx_bytes = _create_test_xlsx([
-            ("Sheet1", [["이름", "나이"], ["홍길동", "30"], ["김철수", "25"]]),
-        ])
-        result = await parser.parse(xlsx_bytes, "test.xlsx")
+    async def test_xlsx_delegates_to_docforge(self, engine):
+        """xlsx 파일은 DocForge에 위임된다."""
+        mock_result = DocForgeResult(
+            markdown="| col1 | col2 |\n| --- | --- |\n| a | b |",
+            metadata={},
+            stats={},
+        )
+        with patch.object(engine._docforge_client, "parse", new_callable=AsyncMock, return_value=mock_result):
+            result = await engine.parse(b"fake-xlsx", "sheet.xlsx")
 
         assert isinstance(result, ParseResult)
-        assert "홍길동" in result.markdown
-        assert "Sheet1" in result.markdown
-        assert "| 이름 | 나이 |" in result.markdown
-        assert result.metrics.parser_used == "excel"
+        assert result.source_mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     @pytest.mark.asyncio
-    async def test_multi_sheet(self, parser):
-        xlsx_bytes = _create_test_xlsx([
-            ("매출", [["월", "금액"], ["1월", "1000"]]),
-            ("비용", [["항목", "금액"], ["인건비", "500"]]),
-        ])
-        result = await parser.parse(xlsx_bytes, "multi.xlsx")
-        assert "매출" in result.markdown
-        assert "비용" in result.markdown
+    async def test_xls_delegates_to_docforge(self, engine):
+        """xls 파일은 DocForge에 위임된다."""
+        mock_result = DocForgeResult(
+            markdown="| data |",
+            metadata={},
+            stats={},
+        )
+        with patch.object(engine._docforge_client, "parse", new_callable=AsyncMock, return_value=mock_result):
+            result = await engine.parse(b"fake-xls", "legacy.xls")
 
-    @pytest.mark.asyncio
-    async def test_empty_sheet_skipped(self, parser):
-        xlsx_bytes = _create_test_xlsx([
-            ("빈시트", []),
-            ("데이터", [["A", "B"], ["1", "2"]]),
-        ])
-        result = await parser.parse(xlsx_bytes, "empty_sheet.xlsx")
-        assert "빈시트" not in result.markdown
-        assert "데이터" in result.markdown
-
-    @pytest.mark.asyncio
-    async def test_empty_header_gets_column_name(self, parser):
-        xlsx_bytes = _create_test_xlsx([
-            ("Sheet1", [["", "값"], ["데이터", "100"]]),
-        ])
-        result = await parser.parse(xlsx_bytes, "no_header.xlsx")
-        assert "Column_1" in result.markdown
+        assert isinstance(result, ParseResult)
+        assert result.source_mime_type == "application/vnd.ms-excel"
 
 
 # --- PDF 분석기 ---
@@ -301,7 +222,7 @@ class TestPdfAnalyzer:
             has_tables=True, image_area_ratio=0.05, avg_chars=500,
         )
         assert complexity == DocumentComplexity.TEXT_WITH_TABLES
-        assert parser == "docling"
+        assert parser == "docforge"
 
     def test_determine_complexity_image_heavy(self):
         complexity, parser = _determine_complexity(
@@ -309,7 +230,7 @@ class TestPdfAnalyzer:
             has_tables=False, image_area_ratio=0.8, avg_chars=20,
         )
         assert complexity == DocumentComplexity.IMAGE_HEAVY
-        assert parser == "vlm"
+        assert parser == "docforge"
 
     def test_determine_complexity_mixed(self):
         complexity, parser = _determine_complexity(
@@ -317,7 +238,7 @@ class TestPdfAnalyzer:
             has_tables=False, image_area_ratio=0.3, avg_chars=300,
         )
         assert complexity == DocumentComplexity.MIXED
-        assert parser == "docling"
+        assert parser == "docforge"
 
 
 # --- 메트릭 ---
@@ -361,7 +282,7 @@ class TestPdfParserIntegration:
 
     @pytest.fixture
     def engine(self):
-        return ParsingEngine(enable_docling=False, enable_vlm=False)
+        return ParsingEngine()
 
     @staticmethod
     def _create_text_pdf(text: str = "테스트 문서입니다.\n\n이것은 본문입니다.") -> bytes:
@@ -377,7 +298,7 @@ class TestPdfParserIntegration:
 
     @pytest.mark.asyncio
     async def test_text_only_pdf_uses_pymupdf(self, engine):
-        """텍스트만 있는 PDF → pymupdf 경로 선택."""
+        """텍스트만 있는 PDF -> pymupdf 경로 선택."""
         pdf_bytes = self._create_text_pdf()
         result = await engine.parse(pdf_bytes, "report.pdf")
 
@@ -412,21 +333,20 @@ class TestPdfParserIntegration:
         assert profile.recommended_parser == "pymupdf"
 
     @pytest.mark.asyncio
-    async def test_docling_disabled_fallback(self):
-        """docling 비활성 + 표 있는 PDF → pymupdf 폴백."""
-        engine = ParsingEngine(enable_docling=False, enable_vlm=False)
+    async def test_docforge_unavailable_pymupdf_fallback(self):
+        """DocForge 미설정 + 표 있는 PDF -> pymupdf 폴백."""
+        engine = ParsingEngine()
         pdf_bytes = self._create_text_pdf("| A | B |\n| --- | --- |\n| 1 | 2 |")
         result = await engine.parse(pdf_bytes, "table.pdf")
-        # docling 비활성이므로 pymupdf 폴백
+        # DocForge에 연결할 수 없으므로 pymupdf 폴백
         assert result.metrics.parser_used == "pymupdf"
 
     @pytest.mark.asyncio
-    async def test_vlm_disabled_fallback(self):
-        """vlm 비활성 → docling 또는 pymupdf 폴백."""
-        engine = ParsingEngine(enable_docling=False, enable_vlm=False)
+    async def test_text_only_pdf_bypasses_docforge(self):
+        """텍스트만 있는 PDF는 DocForge 없이 pymupdf 직접 추출."""
+        engine = ParsingEngine()
         pdf_bytes = self._create_text_pdf()
         result = await engine.parse(pdf_bytes, "scan.pdf")
-        # 둘 다 비활성이므로 pymupdf
         assert result.metrics.parser_used == "pymupdf"
 
 
@@ -436,14 +356,33 @@ class TestPdfParserIntegration:
 class TestParsingEngineProvider:
 
     @pytest.mark.asyncio
-    async def test_csv_through_provider(self):
+    async def test_pdf_through_provider(self):
+        """PDF를 Provider 어댑터를 통해 파싱한다."""
         from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
 
-        engine = ParsingEngine(enable_docling=False, enable_vlm=False)
+        engine = ParsingEngine()
         provider = ParsingEngineProvider(engine)
 
-        csv_data = "name,age\nAlice,30"
-        result = await provider.parse(csv_data.encode("utf-8"), "text/csv")
+        pdf_bytes = TestPdfParserIntegration._create_text_pdf("Provider test text")
+        result = await provider.parse(pdf_bytes, "application/pdf")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    @pytest.mark.asyncio
+    async def test_csv_through_provider_delegates_to_docforge(self):
+        """CSV를 Provider 어댑터를 통해 요청하면 DocForge에 위임된다."""
+        from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
+
+        engine = ParsingEngine()
+        provider = ParsingEngineProvider(engine)
+
+        mock_result = DocForgeResult(
+            markdown="| name | age |\n| --- | --- |\n| Alice | 30 |",
+            metadata={},
+            stats={},
+        )
+        with patch.object(engine._docforge_client, "parse", new_callable=AsyncMock, return_value=mock_result):
+            result = await provider.parse(b"name,age\nAlice,30", "text/csv")
         assert "Alice" in result
         assert isinstance(result, str)
 
@@ -451,7 +390,7 @@ class TestParsingEngineProvider:
     async def test_unsupported_mime_raises(self):
         from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
 
-        engine = ParsingEngine(enable_docling=False, enable_vlm=False)
+        engine = ParsingEngine()
         provider = ParsingEngineProvider(engine)
 
         with pytest.raises(ValueError, match="지원하지 않는"):
@@ -460,7 +399,7 @@ class TestParsingEngineProvider:
     def test_supported_types(self):
         from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
 
-        engine = ParsingEngine(enable_docling=False, enable_vlm=False)
+        engine = ParsingEngine()
         provider = ParsingEngineProvider(engine)
 
         types = provider.supported_types()
@@ -482,25 +421,3 @@ class TestFactoryEngineIntegration:
         factory = ProviderFactory(s)
         provider = factory.get_parsing_provider()
         assert isinstance(provider, ParsingEngineProvider)
-
-
-# --- 헬퍼 ---
-
-
-def _create_test_xlsx(sheets: list[tuple[str, list[list[str]]]]) -> bytes:
-    """테스트용 xlsx 바이트를 생성한다."""
-    import io
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    # 기본 시트 제거
-    wb.remove(wb.active)
-
-    for sheet_name, rows in sheets:
-        ws = wb.create_sheet(title=sheet_name)
-        for row in rows:
-            ws.append(row)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()

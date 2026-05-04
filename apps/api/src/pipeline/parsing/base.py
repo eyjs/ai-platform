@@ -14,9 +14,9 @@ from typing import Protocol, runtime_checkable
 class DocumentComplexity(str, Enum):
     """문서 복잡도 등급. PDF 라우팅 판단 기준."""
     TEXT_ONLY = "text_only"       # 순수 텍스트 (PyMuPDF로 충분)
-    TEXT_WITH_TABLES = "text_tables"  # 텍스트 + 표 (Docling 권장)
-    MIXED = "mixed"              # 텍스트 + 이미지 혼합 (Docling + OCR)
-    IMAGE_HEAVY = "image_heavy"  # 이미지 위주/스캔 (VLM OCR 필수)
+    TEXT_WITH_TABLES = "text_tables"  # 텍스트 + 표 (DocForge 권장)
+    MIXED = "mixed"              # 텍스트 + 이미지 혼합 (DocForge 위임)
+    IMAGE_HEAVY = "image_heavy"  # 이미지 위주/스캔 (DocForge OCR 위임)
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class DocumentProfile:
     avg_chars_per_page: float = 0.0
     image_area_ratio: float = 0.0  # 이미지 면적 / 전체 페이지 면적 비율 (0~1)
     complexity: DocumentComplexity = DocumentComplexity.TEXT_ONLY
-    recommended_parser: str = "pymupdf"  # pymupdf | docling | vlm
+    recommended_parser: str = "pymupdf"  # pymupdf | docforge
 
 
 @dataclass(frozen=True)

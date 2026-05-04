@@ -9,8 +9,6 @@ PyMuPDF로 PDF 내부를 빠르게 스캔하여 DocumentProfile을 생성한다.
 
 from __future__ import annotations
 
-import io
-
 from src.observability.logging import get_logger
 from src.pipeline.parsing.base import DocumentComplexity, DocumentProfile
 
@@ -35,7 +33,7 @@ def analyze_pdf(file_bytes: bytes) -> DocumentProfile:
         logger.warning("pymupdf_not_installed, falling back to default profile")
         return DocumentProfile(
             complexity=DocumentComplexity.MIXED,
-            recommended_parser="docling",
+            recommended_parser="docforge",
         )
 
     with fitz.open(stream=file_bytes, filetype="pdf") as doc:
@@ -140,7 +138,7 @@ def _detect_table_hints(text: str) -> bool:
     """텍스트에서 표 구조 힌트를 감지한다.
 
     완벽한 표 감지가 아닌 빠른 휴리스틱.
-    실제 표 추출은 Docling이 담당한다.
+    실제 표 추출은 DocForge가 담당한다.
     """
     lines = text.split("\n")
     consecutive_short = 0
@@ -183,22 +181,22 @@ def _determine_complexity(
 
     핵심 원칙:
     - 텍스트만 있는 깨끗한 PDF → PyMuPDF (AI 파서에 넣으면 글자 변형 위험)
-    - 표가 있으면 → Docling (TableFormer로 구조 보존)
-    - 이미지 위주 → VLM OCR (PaddleOCR-VL 등)
+    - 표가 있으면 → DocForge (구조 보존)
+    - 이미지 위주 → DocForge (OCR 위임)
     """
     image_only_ratio = image_only_pages / total_pages if total_pages > 0 else 0.0
 
     # Case 1: 이미지 위주 (스캔 문서)
     if image_only_ratio >= _IMAGE_HEAVY_RATIO:
-        return DocumentComplexity.IMAGE_HEAVY, "vlm"
+        return DocumentComplexity.IMAGE_HEAVY, "docforge"
 
     # Case 2: 텍스트 + 이미지 혼합
     if image_only_pages > 0 and image_area_ratio > _IMAGE_AREA_TABLE_HINT:
-        return DocumentComplexity.MIXED, "docling"
+        return DocumentComplexity.MIXED, "docforge"
 
     # Case 3: 텍스트 + 표
     if has_tables or image_area_ratio > _IMAGE_AREA_TABLE_HINT:
-        return DocumentComplexity.TEXT_WITH_TABLES, "docling"
+        return DocumentComplexity.TEXT_WITH_TABLES, "docforge"
 
     # Case 4: 순수 텍스트 — PyMuPDF가 최적
     # AI 파서에 넣으면 멀쩡한 글자가 변형될 수 있음

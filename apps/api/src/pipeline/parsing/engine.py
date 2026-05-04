@@ -4,24 +4,26 @@
 확장자 → MIME 타입 → 전용 파서 라우팅 → ParseResult (markdown + metrics).
 
 허용 확장자: pdf, csv, xlsx/xls
-그 외 확장자는 UnsupportedFormatError를 던져 프론트에서 안내한다.
+PDF의 TEXT_ONLY는 로컬 PyMuPDF, 나머지는 DocForge API로 위임.
+CSV/Excel은 DocForge API로 직접 위임.
 
 사용법:
-    engine = ParsingEngine(...)
+    engine = ParsingEngine(
+        docforge_url="http://localhost:5001",
+        docforge_timeout_sec=120.0,
+    )
     result = await engine.parse(file_bytes, "계약서.pdf")
-    # result.markdown → 마크다운 텍스트
-    # result.metrics  → 파싱 성능/품질 메트릭
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import time
 
 from src.observability.logging import get_logger
-from src.pipeline.parsing.base import ParseResult
-from src.pipeline.parsing.csv_parser import CsvParser
-from src.pipeline.parsing.excel_parser import ExcelParser
+from src.pipeline.parsing.base import ParseMetrics, ParseResult
+from src.pipeline.parsing.docforge_client import DocForgeClient, ParseError
+from src.pipeline.parsing.metrics import compute_markdown_metrics
 from src.pipeline.parsing.pdf_parser import PdfParser
 
 logger = get_logger(__name__)
@@ -51,37 +53,36 @@ _EXT_TO_MIME: dict[str, str] = {
 # 허용 확장자 목록 (프론트 안내용)
 ALLOWED_EXTENSIONS: list[str] = ["pdf", "csv", "xlsx", "xls"]
 
+# DocForge로 직접 위임하는 MIME 타입 (CSV, Excel)
+_DOCFORGE_DIRECT_MIMES: set[str] = {
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+}
+
 
 class ParsingEngine:
     """통합 파싱 엔진.
 
     진입점이 하나이고, 확장자로 내부 파서를 라우팅한다.
-    각 확장자별 파서는 독립적으로 고도화할 수 있다.
+    PDF의 TEXT_ONLY는 로컬 PyMuPDF, 나머지는 DocForge API로 위임.
+    CSV/Excel은 DocForge API로 직접 위임.
     """
 
     def __init__(
         self,
-        enable_docling: bool = True,
-        enable_vlm: bool = False,
-        vlm_endpoint: str = "",
-        csv_max_rows: int = 10000,
-        excel_max_rows_per_sheet: int = 10000,
+        docforge_url: str = "http://localhost:5001",
+        docforge_timeout_sec: float = 120.0,
+        docforge_fallback_enabled: bool = False,
     ):
-        self._pdf_parser = PdfParser(
-            enable_docling=enable_docling,
-            enable_vlm=enable_vlm,
-            vlm_endpoint=vlm_endpoint,
+        self._docforge_client = DocForgeClient(
+            base_url=docforge_url,
+            timeout_sec=docforge_timeout_sec,
         )
-        self._csv_parser = CsvParser(max_rows=csv_max_rows)
-        self._excel_parser = ExcelParser(max_rows_per_sheet=excel_max_rows_per_sheet)
-
-        # MIME → 파서 매핑
-        self._parsers: dict[str, object] = {
-            "application/pdf": self._pdf_parser,
-            "text/csv": self._csv_parser,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": self._excel_parser,
-            "application/vnd.ms-excel": self._excel_parser,
-        }
+        self._pdf_parser = PdfParser(
+            docforge_client=self._docforge_client,
+            fallback_enabled=docforge_fallback_enabled,
+        )
 
     async def parse(self, file_bytes: bytes, file_name: str) -> ParseResult:
         """파일을 파싱하여 마크다운으로 변환한다.
@@ -113,18 +114,65 @@ class ParsingEngine:
                 allowed=ALLOWED_EXTENSIONS,
             )
 
-        parser = self._parsers[mime_type]
-
         logger.info(
             "parsing_engine_dispatch",
             file_name=file_name,
             extension=ext,
             mime_type=mime_type,
-            parser=type(parser).__name__,
         )
 
-        result = await parser.parse(file_bytes, file_name)
-        return result
+        # PDF → PdfParser (TEXT_ONLY는 로컬, 나머지는 DocForge)
+        if mime_type == "application/pdf":
+            return await self._pdf_parser.parse(file_bytes, file_name)
+
+        # CSV/Excel → DocForge 직접 위임
+        if mime_type in _DOCFORGE_DIRECT_MIMES:
+            return await self._parse_with_docforge(file_bytes, file_name, mime_type)
+
+        # Unreachable (모든 MIME이 위에서 처리됨)
+        raise UnsupportedFormatError(
+            extension=ext.lstrip("."),
+            allowed=ALLOWED_EXTENSIONS,
+        )
+
+    async def _parse_with_docforge(
+        self,
+        file_bytes: bytes,
+        file_name: str,
+        mime_type: str,
+    ) -> ParseResult:
+        """DocForge API로 파일을 직접 위임한다 (CSV/Excel)."""
+        t0 = time.time()
+
+        docforge_result = await self._docforge_client.parse(
+            file_bytes=file_bytes,
+            file_name=file_name,
+            mime_type=mime_type,
+        )
+
+        elapsed_ms = (time.time() - t0) * 1000
+
+        # 파서 유형 결정 (로깅/메트릭용)
+        parser_used = "docforge"
+        if "text/csv" in mime_type:
+            parser_used = "docforge_csv"
+        elif "spreadsheet" in mime_type or "ms-excel" in mime_type:
+            parser_used = "docforge_excel"
+
+        metrics = compute_markdown_metrics(
+            markdown=docforge_result.markdown,
+            parse_time_ms=elapsed_ms,
+            total_pages=1,
+            parser_used=parser_used,
+            parser_reason=f"mime={mime_type}, docforge_delegated",
+        )
+
+        return ParseResult(
+            markdown=docforge_result.markdown,
+            metrics=metrics,
+            source_mime_type=mime_type,
+            source_file_name=file_name,
+        )
 
     def is_supported(self, file_name: str) -> bool:
         """파일명의 확장자가 지원되는지 확인한다."""

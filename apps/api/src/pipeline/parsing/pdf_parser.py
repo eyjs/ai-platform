@@ -4,29 +4,25 @@
 
 1. PyMuPDF 사전 분석 → DocumentProfile (문서 프로파일링)
 2. 복잡도에 따라 파서 자동 선택:
-   - TEXT_ONLY → PyMuPDF 직접 추출 (AI 파서 불필요, 글자 변형 방지)
-   - TEXT_WITH_TABLES → Docling (TableFormer로 표 구조 완벽 보존)
-   - MIXED → Docling (레이아웃 + 표 + OCR 통합)
-   - IMAGE_HEAVY → VLM OCR (PaddleOCR-VL/외부 API)
+   - TEXT_ONLY → PyMuPDF 직접 추출 (빠르고 정확, API 호출 불필요)
+   - TEXT_WITH_TABLES / MIXED / IMAGE_HEAVY → DocForge API 위임
 
-의존성: PyMuPDF(필수), Docling(선택), VLM(선택)
+의존성: PyMuPDF(필수), DocForgeClient(선택)
 """
 
 from __future__ import annotations
 
-import io
-import re
 import time
 
 from src.observability.logging import get_logger
 from src.pipeline.parsing.base import (
     DocumentComplexity,
-    FormatParser,
     ParseMetrics,
     ParseResult,
 )
-from src.pipeline.parsing.pdf_analyzer import analyze_pdf
+from src.pipeline.parsing.docforge_client import DocForgeClient, ParseError
 from src.pipeline.parsing.metrics import compute_markdown_metrics
+from src.pipeline.parsing.pdf_analyzer import analyze_pdf
 
 logger = get_logger(__name__)
 
@@ -38,13 +34,11 @@ class PdfParser:
 
     def __init__(
         self,
-        enable_docling: bool = True,
-        enable_vlm: bool = False,
-        vlm_endpoint: str = "",
+        docforge_client: DocForgeClient | None = None,
+        fallback_enabled: bool = False,
     ):
-        self._enable_docling = enable_docling
-        self._enable_vlm = enable_vlm
-        self._vlm_endpoint = vlm_endpoint
+        self._docforge_client = docforge_client
+        self._fallback_enabled = fallback_enabled
 
     async def parse(self, file_bytes: bytes, file_name: str = "") -> ParseResult:
         """PDF를 분석하고 최적 파서로 마크다운 변환한다."""
@@ -61,38 +55,43 @@ class PdfParser:
         parser_reason = f"complexity={profile.complexity.value}"
 
         if recommended == "pymupdf":
+            # TEXT_ONLY → 로컬 PyMuPDF 직접 추출
             markdown = self._parse_with_pymupdf(file_bytes)
             parser_used = "pymupdf"
-            parser_reason += ", text_only → PyMuPDF 직접 추출 (AI 파서 불필요)"
+            parser_reason += ", text_only → PyMuPDF 직접 추출"
 
-        elif recommended == "docling" and self._enable_docling:
-            markdown = await self._parse_with_docling(file_bytes)
-            parser_used = "docling"
-            parser_reason += ", 표/레이아웃 → Docling (TableFormer)"
+        elif recommended == "docforge" and self._docforge_client is not None:
+            # TEXT_WITH_TABLES / MIXED / IMAGE_HEAVY → DocForge 위임
+            try:
+                docforge_result = await self._docforge_client.parse(
+                    file_bytes=file_bytes,
+                    file_name=file_name,
+                    mime_type="application/pdf",
+                )
+                markdown = docforge_result.markdown
+                parser_used = "docforge"
+                parser_reason += f", {profile.complexity.value} → DocForge 위임"
+            except ParseError:
+                if self._fallback_enabled:
+                    logger.warning(
+                        "docforge_unavailable_fallback",
+                        file_name=file_name,
+                        complexity=profile.complexity.value,
+                    )
+                    markdown = self._parse_with_pymupdf(file_bytes)
+                    parser_used = "pymupdf"
+                    parser_reason += ", DocForge 실패 → PyMuPDF 폴백"
+                else:
+                    raise
 
-        elif recommended == "vlm" and self._enable_vlm:
-            markdown = await self._parse_with_vlm(file_bytes)
-            parser_used = "vlm"
-            parser_reason += ", 이미지 위주 → VLM OCR"
-
-        elif recommended == "docling" and not self._enable_docling:
-            # Docling 비활성 → PyMuPDF 폴백
+        elif recommended == "docforge" and self._docforge_client is None:
+            # DocForge 미설정 → PyMuPDF 폴백
             markdown = self._parse_with_pymupdf(file_bytes)
             parser_used = "pymupdf"
-            parser_reason += ", docling 비활성 → PyMuPDF 폴백"
-
-        elif recommended == "vlm" and not self._enable_vlm:
-            # VLM 비활성 → Docling 또는 PyMuPDF 폴백
-            if self._enable_docling:
-                markdown = await self._parse_with_docling(file_bytes)
-                parser_used = "docling"
-                parser_reason += ", vlm 비활성 → Docling 폴백"
-            else:
-                markdown = self._parse_with_pymupdf(file_bytes)
-                parser_used = "pymupdf"
-                parser_reason += ", vlm+docling 비활성 → PyMuPDF 폴백"
+            parser_reason += ", DocForge 미설정 → PyMuPDF 폴백"
 
         else:
+            # 기본 폴백
             markdown = self._parse_with_pymupdf(file_bytes)
             parser_used = "pymupdf"
             parser_reason += ", default fallback"
@@ -152,64 +151,3 @@ class PdfParser:
                     pages.append(text.strip())
 
         return "\n\n".join(pages)
-
-    @staticmethod
-    async def _parse_with_docling(file_bytes: bytes) -> str:
-        """Docling으로 레이아웃+표 보존 파싱.
-
-        DocLayNet(레이아웃 감지) + TableFormer(표 구조 복원)를 결합하여
-        복잡한 표, 병합 셀, 다단 레이아웃을 완벽한 마크다운으로 변환한다.
-        """
-        try:
-            from docling.document_converter import DocumentConverter
-        except ImportError:
-            raise ImportError("Docling is required: pip install docling")
-
-        import asyncio
-        import tempfile
-        from pathlib import Path
-
-        # Docling은 파일 경로를 받으므로 임시 파일 생성
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(file_bytes)
-            tmp_path = tmp.name
-
-        try:
-            converter = DocumentConverter()
-            # Docling은 동기 API이므로 executor에서 실행
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: converter.convert(Path(tmp_path)).document,
-            )
-            markdown = result.export_to_markdown()
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
-
-        return markdown
-
-    async def _parse_with_vlm(self, file_bytes: bytes) -> str:
-        """VLM OCR로 이미지 기반 문서 파싱.
-
-        PaddleOCR-VL, olmOCR 등 VLM 서버에 이미지를 전송하여
-        스캔 문서/이미지 PDF에서 구조화된 마크다운을 추출한다.
-
-        현재: 외부 HTTP API 호출 구조 (vLLM 서버).
-        향후: 로컬 모델 직접 로드 지원.
-        """
-        if not self._vlm_endpoint:
-            raise RuntimeError(
-                "VLM endpoint not configured. "
-                "Set AIP_VLM_OCR_ENDPOINT for image-heavy PDF parsing."
-            )
-
-        import httpx
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{self._vlm_endpoint}/parse",
-                files={"file": ("document.pdf", file_bytes, "application/pdf")},
-                data={"output_format": "markdown"},
-            )
-            resp.raise_for_status()
-            return resp.json().get("markdown", "")
