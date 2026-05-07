@@ -202,6 +202,8 @@ class ProfileStore:
             max_tool_calls=data.get("max_tool_calls", 5),
             agent_timeout_seconds=data.get("agent_timeout_seconds", 30),
             intent_hints=intent_hints,
+            workflow_action_endpoint=data.get("workflow_action_endpoint"),
+            workflow_action_headers=data.get("workflow_action_headers", {}),
         )
 
     @staticmethod
@@ -235,6 +237,8 @@ class ProfileStore:
                 {"name": h.name, "patterns": h.patterns, "description": h.description}
                 for h in profile.intent_hints
             ],
+            "workflow_action_endpoint": profile.workflow_action_endpoint,
+            "workflow_action_headers": profile.workflow_action_headers,
         }
 
     def start_watcher(self) -> None:

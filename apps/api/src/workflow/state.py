@@ -21,6 +21,8 @@ class WorkflowSession:
     started_at: float = field(default_factory=time.time)
     completed: bool = False
     retry_count: int = 0  # 현재 스텝 연속 실패 횟수
+    awaiting_callback: bool = False  # 외부 API 응답 대기 중
+    callback_response: dict = field(default_factory=dict)  # 외부 API 응답 데이터
 
     @property
     def elapsed_seconds(self) -> float:

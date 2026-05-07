@@ -157,7 +157,7 @@ class GraphExecutor:
                 trace=TraceInfo(mode="workflow"),
             )
 
-        step_result = self._run_workflow_step(question, plan, session_id)
+        step_result = await self._run_workflow_step(question, plan, session_id)
         return self._step_result_to_response(step_result, plan)
 
     async def _stream_workflow(
@@ -172,7 +172,7 @@ class GraphExecutor:
             yield {"type": "done", "data": {"tools_called": [], "sources": []}}
             return
 
-        step_result = self._run_workflow_step(question, plan, session_id)
+        step_result = await self._run_workflow_step(question, plan, session_id)
 
         yield {"type": "trace", "data": {
             "step": "workflow",
@@ -206,7 +206,7 @@ class GraphExecutor:
             },
         }}
 
-    def _run_workflow_step(
+    async def _run_workflow_step(
         self,
         question: str,
         plan: ExecutionPlan,
@@ -214,7 +214,7 @@ class GraphExecutor:
     ) -> StepResult:
         """워크플로우 시작 또는 진행."""
         engine = self._workflow_engine
-        session = engine.get_session(session_id)
+        session = await engine.get_session(session_id)
 
         if not session or session.completed:
             # 새 워크플로우 시작
@@ -230,10 +230,10 @@ class GraphExecutor:
                 workflow_id=workflow_id,
                 session_id=session_id,
             )
-            return engine.start(workflow_id, session_id)
+            return await engine.start(workflow_id, session_id)
 
         # 기존 세션 진행
-        return engine.advance(session_id, question)
+        return await engine.advance(session_id, question)
 
     @staticmethod
     def _step_result_to_response(

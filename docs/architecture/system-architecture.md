@@ -114,8 +114,8 @@ pgvector (ANN) + tsvector (FTS) + pg_trgm (fuzzy)
 |------|-------|------|------|
 | 8102 | bge-reranker-v2-m3 | Reranker (MPS) | ~1GB |
 | 8103 | BGE-m3-ko (1024d) | Embedding (MPS) | ~1.5GB |
-| 8104 | Qwen3-14B-4bit | Orchestrator/Router LLM | ~8GB |
-| 8105 | Qwen3-8B-4bit | Answer LLM | ~5GB |
+| 8104 | Qwen3-14B-4bit | Main LLM (최종 응답 생성) | ~8GB |
+| 8105 | Qwen3-8B-4bit | Router/Orchestrator LLM | ~5GB |
 | 8106 | Qwen2.5-7B-4bit | Other system | ~4GB |
 | **Total** | | | **~19.5GB** |
 

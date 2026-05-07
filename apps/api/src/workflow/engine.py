@@ -4,13 +4,12 @@
 엔진은 상태(WorkflowSession)를 받아서 현재 스텝을 처리하고,
 다음 스텝으로 전이한 결과를 반환한다.
 
-사용법:
-    engine = WorkflowEngine(store)
-    result = engine.start("insurance_contract", session_id)
-    # → StepResult(bot_message="어떤 보험에 가입하시겠어요?", options=[...])
+모든 공개 메서드는 async — 세션 영속화 + 외부 API 호출 지원.
 
-    result = engine.advance(session_id, user_input="자동차")
-    # → StepResult(bot_message="차량 연식이 어떻게 되나요?", ...)
+사용법:
+    engine = WorkflowEngine(store, session_store=session_store, action_client=action_client)
+    result = await engine.start("insurance_contract", session_id)
+    result = await engine.advance(session_id, user_input="자동차")
 """
 
 from __future__ import annotations
@@ -22,9 +21,12 @@ from typing import Optional
 
 from src.common.exceptions import GatewayError
 from src.observability.logging import get_logger
+from src.workflow.action_client import ActionClient, WorkflowActionError
 from src.workflow.definition import WorkflowDefinition, WorkflowStep
+from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.state import WorkflowSession
 from src.workflow.store import WorkflowStore
+from src.workflow.template import render_template
 
 logger = get_logger(__name__)
 
@@ -64,17 +66,62 @@ _VALIDATORS: dict[str, re.Pattern] = {
 class WorkflowEngine:
     """순차적 챗봇 실행 엔진.
 
-    세션 상태는 외부(SessionMemory)에서 관리하고,
-    엔진은 순수하게 상태를 받아서 다음 상태를 반환한다.
+    세션 영속화: session_store가 주입되면 PostgreSQL에 저장,
+    없으면 인메모리 dict 사용 (하위 호환).
+
+    Action step: action_client가 주입되면 외부 HTTP 호출 가능,
+    없으면 action step에서 에러 메시지 반환.
     """
 
-    def __init__(self, store: WorkflowStore) -> None:
+    def __init__(
+        self,
+        store: WorkflowStore,
+        session_store: WorkflowSessionStore | None = None,
+        action_client: ActionClient | None = None,
+    ) -> None:
         self._store = store
+        self._session_store = session_store
+        self._action_client = action_client
+        # 인메모리 폴백 (session_store 미주입 시)
         self._sessions: dict[str, WorkflowSession] = {}
 
-    def start(self, workflow_id: str, session_id: str) -> StepResult:
-        """워크플로우를 시작하고, 첫 번째 스텝의 봇 메시지를 반환한다."""
-        self._cleanup_expired_sessions()
+    async def _load_session(self, session_id: str) -> WorkflowSession | None:
+        """세션을 로드한다. session_store 우선, 없으면 인메모리."""
+        if self._session_store:
+            return await self._session_store.load(session_id)
+        return self._sessions.get(session_id)
+
+    async def _save_session(self, session_id: str, session: WorkflowSession) -> None:
+        """세션을 저장한다. session_store 우선, 없으면 인메모리."""
+        if self._session_store:
+            await self._session_store.save(session_id, session)
+        else:
+            self._sessions[session_id] = session
+
+    async def _delete_session(self, session_id: str) -> None:
+        """세션을 삭제한다."""
+        if self._session_store:
+            await self._session_store.delete(session_id)
+        else:
+            self._sessions.pop(session_id, None)
+
+    async def start(
+        self,
+        workflow_id: str,
+        session_id: str,
+        action_endpoint: str | None = None,
+        action_headers: dict | None = None,
+    ) -> StepResult:
+        """워크플로우를 시작하고, 첫 번째 스텝의 봇 메시지를 반환한다.
+
+        Args:
+            workflow_id: 워크플로우 정의 ID
+            session_id: 대화 세션 ID
+            action_endpoint: Profile 기본 action 엔드포인트 (step에 미지정 시 사용)
+            action_headers: Profile 기본 action 헤더 (step에 미지정 시 사용)
+        """
+        if not self._session_store:
+            self._cleanup_expired_sessions()
 
         definition = self._store.get(workflow_id)
         if not definition:
@@ -94,7 +141,7 @@ class WorkflowEngine:
             workflow_id=workflow_id,
             current_step_id=entry_id,
         )
-        self._sessions[session_id] = session
+        await self._save_session(session_id, session)
 
         logger.info(
             "workflow_start",
@@ -104,11 +151,30 @@ class WorkflowEngine:
             first_step=entry_id,
         )
 
-        return self._process_current_step(definition, session)
+        result = await self._process_current_step(
+            definition, session, session_id,
+            action_endpoint=action_endpoint,
+            action_headers=action_headers,
+        )
+        await self._save_session(session_id, session)
+        return result
 
-    def advance(self, session_id: str, user_input: str) -> StepResult:
-        """사용자 입력을 받아 다음 스텝으로 전이한다."""
-        session = self._sessions.get(session_id)
+    async def advance(
+        self,
+        session_id: str,
+        user_input: str,
+        action_endpoint: str | None = None,
+        action_headers: dict | None = None,
+    ) -> StepResult:
+        """사용자 입력을 받아 다음 스텝으로 전이한다.
+
+        Args:
+            session_id: 대화 세션 ID
+            user_input: 사용자 입력 텍스트
+            action_endpoint: Profile 기본 action 엔드포인트
+            action_headers: Profile 기본 action 헤더
+        """
+        session = await self._load_session(session_id)
         if not session:
             raise GatewayError(
                 "활성 워크플로우 세션이 없습니다",
@@ -136,6 +202,24 @@ class WorkflowEngine:
                 error_code="ERR_WORKFLOW_STEP_MISSING",
             )
 
+        result = await self._advance_inner(
+            session, session_id, definition, current_step, user_input,
+            action_endpoint, action_headers,
+        )
+        await self._save_session(session_id, session)
+        return result
+
+    async def _advance_inner(
+        self,
+        session: WorkflowSession,
+        session_id: str,
+        definition: WorkflowDefinition,
+        current_step: WorkflowStep,
+        user_input: str,
+        action_endpoint: str | None,
+        action_headers: dict | None,
+    ) -> StepResult:
+        """advance 내부 로직. 세션 저장은 호출자가 담당한다."""
         # 이탈 감지 (escape_policy="allow"일 때만)
         escape_result = self._check_escape(user_input, session, definition)
         if escape_result:
@@ -148,7 +232,6 @@ class WorkflowEngine:
             if session.step_history:
                 prev_step_id = session.step_history.pop()
                 prev_step = definition.get_step(prev_step_id)
-                # 이전 스텝에서 수집한 데이터 제거
                 if prev_step and prev_step.save_as and prev_step.save_as in session.collected:
                     del session.collected[prev_step.save_as]
                 session.current_step_id = prev_step_id
@@ -160,7 +243,11 @@ class WorkflowEngine:
                     from_step=current_step.id,
                     to_step=prev_step_id,
                 )
-                return self._process_current_step(definition, session)
+                return await self._process_current_step(
+                    definition, session, session_id,
+                    action_endpoint=action_endpoint,
+                    action_headers=action_headers,
+                )
             else:
                 return StepResult(
                     bot_message="첫 번째 단계입니다. 더 이상 뒤로 갈 수 없습니다.",
@@ -197,7 +284,7 @@ class WorkflowEngine:
                 collected=dict(session.collected),
             )
 
-        # 검증 통과 → retry 카운터 리셋
+        # 검증 통과 -> retry 카운터 리셋
         session.retry_count = 0
 
         # 데이터 수집
@@ -238,21 +325,26 @@ class WorkflowEngine:
 
         session.step_history.append(current_step.id)
         session.current_step_id = next_step_id
-        return self._process_current_step(definition, session)
+        return await self._process_current_step(
+            definition, session, session_id,
+            action_endpoint=action_endpoint,
+            action_headers=action_headers,
+        )
 
-    def get_session(self, session_id: str) -> Optional[WorkflowSession]:
+    async def get_session(self, session_id: str) -> Optional[WorkflowSession]:
         """세션 상태를 조회한다."""
-        return self._sessions.get(session_id)
+        return await self._load_session(session_id)
 
-    def cancel(self, session_id: str) -> bool:
+    async def cancel(self, session_id: str) -> bool:
         """워크플로우를 취소한다."""
-        if session_id in self._sessions:
-            del self._sessions[session_id]
+        session = await self._load_session(session_id)
+        if session:
+            await self._delete_session(session_id)
             logger.info("workflow_cancel", layer="WORKFLOW", session_id=session_id)
             return True
         return False
 
-    def resume(
+    async def resume(
         self,
         workflow_id: str,
         session_id: str,
@@ -279,7 +371,7 @@ class WorkflowEngine:
             current_step_id=step_id,
             collected=dict(collected),
         )
-        self._sessions[session_id] = session
+        await self._save_session(session_id, session)
 
         logger.info(
             "workflow_resume",
@@ -290,7 +382,9 @@ class WorkflowEngine:
             collected_keys=list(collected.keys()),
         )
 
-        return self._process_current_step(definition, session)
+        result = await self._process_current_step(definition, session, session_id)
+        await self._save_session(session_id, session)
+        return result
 
     def _check_escape(
         self,
@@ -298,12 +392,24 @@ class WorkflowEngine:
         session: WorkflowSession,
         definition: WorkflowDefinition,
     ) -> Optional[StepResult]:
-        """이탈 키워드를 감지한다. escape_policy에 따라 처리."""
+        """이탈 키워드를 감지한다. escape_policy에 따라 처리.
+
+        워크플로우별 escape_keywords가 정의되어 있으면 우선 사용하고,
+        없으면 전역 _ESCAPE_KEYWORDS를 사용한다.
+        """
         if definition.escape_policy != "allow":
             return None
 
         normalized = user_input.strip().lower()
-        if normalized not in _ESCAPE_KEYWORDS:
+
+        # 워크플로우별 escape_keywords 우선, 없으면 전역 폴백
+        keywords = (
+            {kw.lower() for kw in definition.escape_keywords}
+            if definition.escape_keywords
+            else _ESCAPE_KEYWORDS
+        )
+
+        if normalized not in keywords:
             return None
 
         # 워크플로우 취소
@@ -323,7 +429,7 @@ class WorkflowEngine:
         )
 
     def _cleanup_expired_sessions(self) -> None:
-        """만료된 세션을 정리한다."""
+        """만료된 인메모리 세션을 정리한다 (session_store 미사용 시)."""
         now = time.time()
         expired = [
             sid for sid, session in self._sessions.items()
@@ -334,14 +440,18 @@ class WorkflowEngine:
         if expired:
             logger.info("workflow_sessions_cleaned", count=len(expired))
 
-    def _process_current_step(
+    async def _process_current_step(
         self,
         definition: WorkflowDefinition,
         session: WorkflowSession,
+        session_id: str = "",
+        action_endpoint: str | None = None,
+        action_headers: dict | None = None,
     ) -> StepResult:
         """현재 스텝을 처리하고 StepResult를 반환한다.
 
         message 타입은 자동으로 다음 스텝으로 체이닝된다.
+        action 타입은 외부 API를 호출하고 결과에 따라 다음 스텝으로 전이한다.
         무한 루프 방지를 위해 _MAX_MESSAGE_CHAIN 깊이 제한을 적용한다.
         """
         message_parts: list[str] = []
@@ -352,7 +462,32 @@ class WorkflowEngine:
                 session.completed = True
                 return StepResult(bot_message="스텝 오류", completed=True)
 
-            rendered = _render_template(step.prompt, session.collected)
+            rendered = render_template(step.prompt, session.collected)
+
+            # action 타입: 외부 API 호출 후 자동 진행
+            if step.type == "action":
+                action_result = await self._execute_action_step(
+                    step, session, action_endpoint, action_headers,
+                )
+                if action_result.completed or not step.next:
+                    # 액션 실패 또는 다음 스텝 없음 -> 종료
+                    if message_parts:
+                        action_result = StepResult(
+                            bot_message="\n\n".join(message_parts) + "\n\n" + action_result.bot_message,
+                            options=action_result.options,
+                            step_id=action_result.step_id,
+                            step_type=action_result.step_type,
+                            collected=action_result.collected,
+                            completed=action_result.completed,
+                            action_result=action_result.action_result,
+                        )
+                    return action_result
+
+                # 액션 성공 + 다음 스텝 있음 -> 메시지 축적 후 다음 스텝으로
+                if action_result.bot_message:
+                    message_parts.append(action_result.bot_message)
+                session.current_step_id = step.next
+                continue
 
             # message 이외 타입: 메시지 축적 후 반환
             if step.type != "message":
@@ -396,6 +531,117 @@ class WorkflowEngine:
             completed=True,
             collected=dict(session.collected),
         )
+
+    async def _execute_action_step(
+        self,
+        step: WorkflowStep,
+        session: WorkflowSession,
+        profile_endpoint: str | None = None,
+        profile_headers: dict | None = None,
+    ) -> StepResult:
+        """action step을 실행한다.
+
+        1. endpoint: step.endpoint > profile_endpoint (둘 다 없으면 에러)
+        2. headers: step.headers_template + profile_headers 병합
+        3. payload: step.payload_template
+        4. 호출 성공 -> on_success_message + 다음 스텝 진행
+        5. 호출 실패 -> on_error_message + 워크플로우 종료
+        """
+        if not self._action_client:
+            logger.error(
+                "action_step_no_client",
+                layer="WORKFLOW",
+                step_id=step.id,
+            )
+            return StepResult(
+                bot_message=step.on_error_message or "외부 연동 기능이 비활성화되어 있습니다.",
+                step_id=step.id,
+                step_type="action",
+                collected=dict(session.collected),
+                completed=True,
+            )
+
+        # 엔드포인트 결정: step > profile
+        endpoint = step.endpoint or profile_endpoint
+        if not endpoint:
+            logger.error(
+                "action_step_no_endpoint",
+                layer="WORKFLOW",
+                step_id=step.id,
+            )
+            return StepResult(
+                bot_message=step.on_error_message or "외부 API 엔드포인트가 설정되지 않았습니다.",
+                step_id=step.id,
+                step_type="action",
+                collected=dict(session.collected),
+                completed=True,
+            )
+
+        # 헤더 병합: profile 기본값 + step 오버라이드
+        merged_headers = dict(profile_headers or {})
+        if step.headers_template:
+            merged_headers.update(step.headers_template)
+
+        try:
+            response_data = await self._action_client.call(
+                endpoint=endpoint,
+                method=step.http_method,
+                headers=merged_headers if merged_headers else None,
+                payload=step.payload_template if step.payload_template else None,
+                timeout=step.timeout_seconds,
+                collected=session.collected,
+            )
+
+            # 응답 데이터를 세션에 저장 (save_as가 있으면)
+            if step.save_as:
+                session.collected[step.save_as] = response_data
+
+            # 콜백 응답도 세션에 기록
+            session.callback_response = response_data
+
+            success_message = render_template(
+                step.on_success_message or "처리가 완료되었습니다.",
+                session.collected,
+            )
+
+            logger.info(
+                "action_step_success",
+                layer="WORKFLOW",
+                step_id=step.id,
+                endpoint=endpoint[:100],
+            )
+
+            return StepResult(
+                bot_message=success_message,
+                step_id=step.id,
+                step_type="action",
+                collected=dict(session.collected),
+                action_result=response_data,
+            )
+
+        except WorkflowActionError as e:
+            logger.warning(
+                "action_step_failed",
+                layer="WORKFLOW",
+                step_id=step.id,
+                endpoint=endpoint[:100],
+                status_code=e.status_code,
+                error=str(e),
+            )
+
+            error_message = render_template(
+                step.on_error_message or "외부 시스템 연동 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                session.collected,
+            )
+
+            return StepResult(
+                bot_message=error_message,
+                step_id=step.id,
+                step_type="action",
+                collected=dict(session.collected),
+                completed=True,
+                action_result={"error": str(e), "status_code": e.status_code},
+            )
 
 
 def _resolve_next(step: WorkflowStep, user_input: str) -> str | None:
@@ -455,14 +701,3 @@ def _validate_input(step: WorkflowStep, user_input: str) -> str:
         return hints.get(step.validation, f"입력 형식이 올바르지 않습니다. ({step.validation})")
 
     return ""
-
-
-def _render_template(template: str, data: dict) -> str:
-    """수집된 데이터를 템플릿에 대입한다.
-
-    예: "{{name}}님, 연락처를 알려주세요." → "홍길동님, 연락처를 알려주세요."
-    """
-    result = template
-    for key, value in data.items():
-        result = result.replace("{{" + key + "}}", str(value))
-    return result

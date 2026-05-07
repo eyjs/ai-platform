@@ -31,6 +31,15 @@ class WorkflowStep:
     tool_params: dict = field(default_factory=dict)
     validation: str = ""  # 입력 검증 규칙 (예: "phone", "email", "number")
 
+    # action step 전용 필드
+    endpoint: str = ""  # 외부 API URL (빈 문자열이면 Profile 기본값 사용)
+    http_method: str = "POST"  # HTTP 메서드
+    headers_template: dict = field(default_factory=dict)  # {{field}} 치환 가능
+    payload_template: dict = field(default_factory=dict)  # {{field}} 치환 가능
+    timeout_seconds: int = 30  # HTTP 타임아웃
+    on_success_message: str = ""  # 성공 시 봇 메시지
+    on_error_message: str = ""  # 실패 시 봇 메시지
+
 
 @dataclass(frozen=True)
 class WorkflowDefinition:
@@ -43,6 +52,7 @@ class WorkflowDefinition:
     steps: list[WorkflowStep] = field(default_factory=list)
     escape_policy: str = "allow"  # "allow" | "block" | "queue"
     max_retries: int = 3  # 같은 스텝에서 연속 검증 실패 시 자동 취소
+    escape_keywords: list[str] = field(default_factory=list)  # 빈 리스트면 전역 _ESCAPE_KEYWORDS 사용
 
     def get_step(self, step_id: str) -> WorkflowStep | None:
         """step_id로 단계를 찾는다."""

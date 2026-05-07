@@ -45,7 +45,9 @@ from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
 from src.services.null_kms_client import NullKmsClient
+from src.workflow.action_client import ActionClient
 from src.workflow.engine import WorkflowEngine
+from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.store import WorkflowStore
 
 logger = get_logger(__name__)
@@ -84,6 +86,9 @@ class AppState:
     # Task 004: Saju 리포트 서비스 + QueueWorker
     saju_report_service: Optional[Any] = None
     saju_report_worker: Optional[Any] = None
+    # Workflow action client (외부 API 호출)
+    action_client: Optional[ActionClient] = None
+    workflow_session_store: Optional[WorkflowSessionStore] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -227,7 +232,13 @@ async def create_app_state(settings: Settings) -> AppState:
     # 10. Workflow Engine (Agent보다 먼저 — Agent가 의존)
     workflow_store = WorkflowStore(pool=pool, seed_dir="seeds/workflows")
     await workflow_store.load_seeds()
-    workflow_engine = WorkflowEngine(workflow_store)
+    workflow_session_store = WorkflowSessionStore(pool=pool)
+    action_client = ActionClient()
+    workflow_engine = WorkflowEngine(
+        workflow_store,
+        session_store=workflow_session_store,
+        action_client=action_client,
+    )
     logger.info("workflows_loaded", count=workflow_store.count)
 
     # KMS 지식그래프 클라이언트 (미설정 시 NullKmsClient)
@@ -408,6 +419,8 @@ async def create_app_state(settings: Settings) -> AppState:
         feedback_service=feedback_service,
         saju_report_service=saju_report_service,
         saju_report_worker=saju_report_worker,
+        action_client=action_client,
+        workflow_session_store=workflow_session_store,
         providers=providers,
     )
 
@@ -417,6 +430,7 @@ def start_cleanup_task(
     session_memory: SessionMemory,
     job_queue: JobQueue,
     interval: int,
+    workflow_session_store: WorkflowSessionStore | None = None,
 ) -> asyncio.Task:
     """만료 캐시/세션/stale 작업 주기적 정리 태스크를 시작한다."""
 
@@ -427,6 +441,8 @@ def start_cleanup_task(
                 await cache.cleanup_expired()
                 await session_memory.cleanup_expired()
                 await job_queue.cleanup_stale(stale_seconds=600)
+                if workflow_session_store:
+                    await workflow_session_store.cleanup_expired()
             except Exception as e:
                 logger.warning("cleanup_failed", error=str(e))
 
@@ -510,6 +526,12 @@ async def shutdown(state: AppState) -> None:
                 await provider.close()
             except Exception as e:
                 logger.warning("provider_close_error", error=str(e))
+
+    if state.action_client:
+        try:
+            await state.action_client.close()
+        except Exception as e:
+            logger.warning("action_client_close_error", error=str(e))
 
     await state.vector_store.close()
     logger.info("shutdown_complete")

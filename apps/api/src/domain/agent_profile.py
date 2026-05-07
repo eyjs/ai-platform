@@ -100,6 +100,10 @@ class AgentProfile:
     # Planner (Plan-and-Execute)
     planning_disabled: bool = False  # True이면 이 프로필에서 Planner 비활성화
 
+    # 워크플로우 액션 기본값
+    workflow_action_endpoint: str | None = None  # action step endpoint 기본값
+    workflow_action_headers: dict = field(default_factory=dict)  # action step headers 기본값
+
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
 

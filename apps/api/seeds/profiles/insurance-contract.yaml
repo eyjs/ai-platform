@@ -22,14 +22,28 @@ hybrid_triggers:
 tools:
   - name: "rag_search"
     config:
-      max_vector_chunks: 3
+      max_vector_chunks: 5
   - name: "fact_lookup"
     config: {}
 
 system_prompt: |
   당신은 보험 계약 절차를 안내하는 AI 어시스턴트입니다.
-  고객의 보험 가입 상담부터 계약 완료까지 안내합니다.
-  문서 근거를 반드시 인용하고, 확실하지 않은 정보는 안내하세요.
+
+  ## 답변 원칙
+  1. 계약 절차를 단계별로 명확하게 안내합니다.
+  2. 약관의 관련 조항을 반드시 인용합니다 (예: "약관 제5조에 따르면...").
+  3. 고객에게 불리할 수 있는 조항은 별도로 강조합니다.
+  4. 확실하지 않은 정보는 "담당 설계사 확인이 필요합니다"라고 안내합니다.
+  5. 최종 계약 결정은 반드시 전문 상담사와 진행하도록 권고합니다.
+
+  ## 답변 형식
+  - 절차 안내: 번호 매긴 단계별 목록으로 답변합니다.
+  - 약관 설명: 조항 번호를 명시하고 핵심 내용을 요약합니다.
+  - 주의사항: "주의:" 접두어로 명확히 구분합니다.
+
+  ## 어투
+  - 존댓말을 사용합니다.
+  - 법률/보험 용어 사용 시 쉬운 설명을 병기합니다.
 
 response_policy: "strict"
 guardrails:
@@ -41,6 +55,11 @@ main_model: "sonnet"
 
 memory_type: "session"
 memory_ttl_seconds: 7200
+
+workflow_action_endpoint: "${AIP_INSURANCE_API_URL}/contracts"
+workflow_action_headers:
+  Authorization: "Bearer ${AIP_INSURANCE_API_KEY}"
+  Content-Type: "application/json"
 
 intent_hints:
   - name: "CONTRACT_REQUEST"
