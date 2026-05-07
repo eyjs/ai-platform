@@ -110,16 +110,13 @@ class ProviderFactory:
             from src.pipeline.parsing.provider_adapter import ParsingEngineProvider
 
             engine = ParsingEngine(
-                enable_docling=self._settings.parser_enable_docling,
-                enable_vlm=self._settings.parser_enable_vlm,
-                vlm_endpoint=self._settings.vlm_ocr_endpoint,
-                csv_max_rows=self._settings.parser_csv_max_rows,
-                excel_max_rows_per_sheet=self._settings.parser_excel_max_rows,
+                docforge_url=self._settings.docforge_url,
+                docforge_timeout_sec=self._settings.docforge_timeout_sec,
+                docforge_internal_key=self._settings.docforge_internal_key,
             )
             logger.info(
-                "Using unified parsing engine (docling=%s, vlm=%s)",
-                self._settings.parser_enable_docling,
-                self._settings.parser_enable_vlm,
+                "Using DocForge parsing service: %s",
+                self._settings.docforge_url,
             )
             return ParsingEngineProvider(engine)
 

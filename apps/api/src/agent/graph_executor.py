@@ -18,6 +18,7 @@ from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.trace_logger import RequestTrace
 from src.router.execution_plan import ExecutionPlan
+from src.router.graph_cache import GraphCache
 from src.safety.base import GuardrailContext
 from src.safety.base import Guardrail
 from src.services.kms_graph_client import KmsGraphClient
@@ -60,12 +61,14 @@ class GraphExecutor:
         workflow_engine: Optional[WorkflowEngine] = None,
         kms_graph_client: Optional[KmsGraphClient] = None,
         vector_store: Optional[VectorStore] = None,
+        graph_cache: Optional[GraphCache] = None,
     ):
         self._main_llm = main_llm
         self._registry = tool_registry
         self._guardrails = guardrails or {}
         self._chat_model = chat_model
         self._workflow_engine = workflow_engine
+        self._graph_cache = graph_cache or GraphCache()
 
         # 결정론적 그래프 (한 번 컴파일, 재사용)
         det_graph = build_deterministic_graph(
@@ -157,7 +160,7 @@ class GraphExecutor:
                 trace=TraceInfo(mode="workflow"),
             )
 
-        step_result = self._run_workflow_step(question, plan, session_id)
+        step_result = await self._run_workflow_step(question, plan, session_id)
         return self._step_result_to_response(step_result, plan)
 
     async def _stream_workflow(
@@ -172,7 +175,7 @@ class GraphExecutor:
             yield {"type": "done", "data": {"tools_called": [], "sources": []}}
             return
 
-        step_result = self._run_workflow_step(question, plan, session_id)
+        step_result = await self._run_workflow_step(question, plan, session_id)
 
         yield {"type": "trace", "data": {
             "step": "workflow",
@@ -206,7 +209,7 @@ class GraphExecutor:
             },
         }}
 
-    def _run_workflow_step(
+    async def _run_workflow_step(
         self,
         question: str,
         plan: ExecutionPlan,
@@ -214,7 +217,7 @@ class GraphExecutor:
     ) -> StepResult:
         """워크플로우 시작 또는 진행."""
         engine = self._workflow_engine
-        session = engine.get_session(session_id)
+        session = await engine.get_session(session_id)
 
         if not session or session.completed:
             # 새 워크플로우 시작
@@ -230,10 +233,10 @@ class GraphExecutor:
                 workflow_id=workflow_id,
                 session_id=session_id,
             )
-            return engine.start(workflow_id, session_id)
+            return await engine.start(workflow_id, session_id)
 
         # 기존 세션 진행
-        return engine.advance(session_id, question)
+        return await engine.advance(session_id, question)
 
     @staticmethod
     def _step_result_to_response(
@@ -422,6 +425,36 @@ class GraphExecutor:
 
     # --- 에이전틱 모드 ---
 
+    def _get_or_build_agentic_graph(self, lc_tools: list, plan: ExecutionPlan):
+        """캐시된 agentic graph를 반환하거나 새로 빌드한다."""
+        tool_names = [t.name for t in lc_tools]
+        cache_key = GraphCache.make_key(plan.system_prompt, tool_names)
+
+        cached = self._graph_cache.get(cache_key)
+        if cached is not None:
+            logger.debug(
+                "agentic_graph_cache_hit",
+                tool_names=tool_names,
+            )
+            return cached
+
+        agent_app = build_agentic_graph(
+            chat_model=self._chat_model,
+            tools=lc_tools,
+            system_prompt=plan.system_prompt,
+        )
+
+        # profile_id는 plan에서 추출 (무효화 연동용)
+        profile_id = getattr(plan, "profile_id", None)
+        self._graph_cache.put(cache_key, agent_app, profile_id=profile_id)
+
+        logger.debug(
+            "agentic_graph_cache_miss",
+            tool_names=tool_names,
+            cache_size=self._graph_cache.size,
+        )
+        return agent_app
+
     async def _execute_agentic(
         self,
         question: str,
@@ -445,11 +478,7 @@ class GraphExecutor:
             logger.warning("agentic_no_tools, falling back to deterministic")
             return await self._execute_deterministic(question, plan, session_id, trace=trace)
 
-        agent_app = build_agentic_graph(
-            chat_model=self._chat_model,
-            tools=lc_tools,
-            system_prompt=plan.system_prompt,
-        )
+        agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
         result = await agent_app.ainvoke(
             {"messages": [{"role": "user", "content": question}]},
@@ -522,11 +551,7 @@ class GraphExecutor:
                 yield event
             return
 
-        agent_app = build_agentic_graph(
-            chat_model=self._chat_model,
-            tools=lc_tools,
-            system_prompt=plan.system_prompt,
-        )
+        agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
         yield {"type": "trace", "data": {"step": "agentic_start", "mode": "agentic"}}
 

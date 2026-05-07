@@ -5,6 +5,27 @@
 
 ---
 
+## [0.10.0] — 2026-05-04
+
+### Added
+- `DocForgeClient` for async HTTP communication with DocForge parsing service (`src/pipeline/parsing/docforge_client.py`)
+- 3 new config settings: `docforge_url`, `docforge_timeout_sec`, `docforge_fallback_enabled`
+
+### Removed
+- Local CSV parser (`csv_parser.py`) -- delegated to DocForge
+- Local Excel parser (`excel_parser.py`) -- delegated to DocForge
+- Docling integration and VLM OCR references
+- `openpyxl` from ai-platform dependencies (now DocForge-only)
+- 5 deprecated config settings: `parser_enable_docling`, `parser_enable_vlm`, `vlm_ocr_endpoint`, `parser_csv_max_rows`, `parser_excel_max_rows`
+
+### Changed
+- `ParsingEngine` constructor: `docforge_url`/`docforge_timeout_sec`/`docforge_fallback_enabled` replace `enable_docling`/`enable_vlm`
+- `PdfParser`: DocForge replaces Docling/VLM for non-TEXT_ONLY PDFs
+- `pdf_analyzer`: recommended_parser values unified to "docforge" (was "docling"/"vlm")
+- `test_parsing_engine.py` fully rewritten for DocForge-based architecture
+
+---
+
 ## [Unreleased] — 2026-04-06
 
 ### Added — 웹 애플리케이션 신규 구축

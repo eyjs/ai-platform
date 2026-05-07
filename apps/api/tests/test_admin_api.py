@@ -256,7 +256,7 @@ class TestWorkflowCRUD:
         resp = client.get("/api/admin/workflows/del-flow", headers={"X-API-Key": "test"})
         assert resp.status_code == 404
 
-    def test_created_workflow_runs_in_engine(self, client):
+    async def test_created_workflow_runs_in_engine(self, client):
         """Admin API로 생성한 워크플로우가 실제 WorkflowEngine에서 실행되는지 검증."""
         from src.workflow.engine import WorkflowEngine
 
@@ -275,10 +275,10 @@ class TestWorkflowCRUD:
         store = app.state.workflow_store
         engine = WorkflowEngine(store)
 
-        result = engine.start("api-created", "s1")
+        result = await engine.start("api-created", "s1")
         assert "이름?" in result.bot_message
 
-        result = engine.advance("s1", "김관리자")
+        result = await engine.advance("s1", "김관리자")
         assert result.completed
         assert "김관리자" in result.bot_message
 

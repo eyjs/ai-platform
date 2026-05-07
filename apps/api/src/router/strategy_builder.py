@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
     QuestionType.GREETING: QuestionStrategy(needs_rag=False, history_turns=0),
     QuestionType.SYSTEM_META: QuestionStrategy(needs_rag=False, history_turns=0),
-    QuestionType.STANDALONE: QuestionStrategy(needs_rag=True, history_turns=0),
+    QuestionType.STANDALONE: QuestionStrategy(needs_rag=True, history_turns=3),
     QuestionType.SAME_DOC_FOLLOWUP: QuestionStrategy(
         needs_rag=True, history_turns=3, max_vector_chunks=3,
     ),
@@ -29,7 +29,7 @@ STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
         needs_rag=True, history_turns=5,
     ),
     QuestionType.CROSS_DOC_INTEGRATION: QuestionStrategy(
-        needs_rag=True, history_turns=3, max_vector_chunks=8,
+        needs_rag=True, history_turns=3, max_vector_chunks=10,
     ),
 }
 

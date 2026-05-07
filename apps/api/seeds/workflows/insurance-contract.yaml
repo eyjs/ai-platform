@@ -1,8 +1,9 @@
 # 보험 가입 신청 워크플로우
-# 보험 종류 선택 → 고객 정보 수집 → 확인 → 완료
+# 보험 종류 선택 → 고객 정보 수집 → 확인 → 외부 API 접수 → 완료
 id: "insurance_contract"
 name: "보험 가입 신청"
 escape_policy: "allow"
+escape_keywords: ["취소", "나가기", "그만", "cancel"]
 
 steps:
   - id: "welcome"
@@ -55,8 +56,25 @@ steps:
     prompt: "아래 내용으로 가입 신청을 진행할까요? (예/아니오)"
     save_as: "confirmed"
     branches:
-      "예": "complete"
+      "예": "submit_action"
       "아니오": "select_type"
+
+  - id: "submit_action"
+    type: "action"
+    prompt: "가입 신청을 접수 중입니다..."
+    save_as: "submit_result"
+    endpoint: "${AIP_INSURANCE_API_URL}/contracts"
+    http_method: "POST"
+    headers_template:
+      Content-Type: "application/json"
+    payload_template:
+      insurance_type: "{{insurance_type}}"
+      customer_name: "{{customer_name}}"
+      phone: "{{phone}}"
+    timeout_seconds: 30
+    on_success_message: "{{customer_name}}님의 {{insurance_type}} 가입 신청이 성공적으로 접수되었습니다."
+    on_error_message: "죄송합니다, 접수 중 오류가 발생했습니다. 담당자가 확인 후 연락드리겠습니다."
+    next: "complete"
 
   - id: "complete"
     type: "message"

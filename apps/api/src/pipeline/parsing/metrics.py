@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from src.pipeline.parsing.base import DocumentProfile, ParseMetrics
+from src.pipeline.parsing.base import ParseMetrics
 
 
 def compute_markdown_metrics(
@@ -17,7 +17,6 @@ def compute_markdown_metrics(
     total_pages: int = 0,
     parser_used: str = "",
     parser_reason: str = "",
-    document_profile: DocumentProfile | None = None,
 ) -> ParseMetrics:
     """마크다운 텍스트에서 구조적 메트릭을 계산한다."""
     if not markdown:
@@ -26,30 +25,21 @@ def compute_markdown_metrics(
             total_pages=total_pages,
             parser_used=parser_used,
             parser_reason=parser_reason,
-            document_profile=document_profile,
         )
 
     lines = markdown.split("\n")
     total_lines = len(lines)
     non_empty_lines = [l for l in lines if l.strip()]
 
-    # 헤딩 카운트
     heading_count = sum(1 for l in lines if re.match(r"^#{1,6}\s", l))
-
-    # 테이블 카운트 (| --- | 구분선 패턴으로 감지)
     table_count = sum(1 for l in lines if _is_table_separator(l.strip()))
-
-    # 리스트 카운트
     list_count = sum(1 for l in lines if re.match(r"^\s*[-*+]\s", l) or re.match(r"^\s*\d+\.\s", l))
 
-    # 코드 블록 카운트
     code_block_count = sum(1 for l in lines if l.strip().startswith("```"))
-    code_block_count = code_block_count // 2  # 열림/닫힘 쌍
+    code_block_count = code_block_count // 2
 
-    # 이미지 참조
     image_ref_count = sum(1 for l in lines if re.search(r"!\[.*?\]\(.*?\)", l))
 
-    # 품질 지표
     empty_line_ratio = (total_lines - len(non_empty_lines)) / total_lines if total_lines > 0 else 0.0
     avg_line_length = (
         sum(len(l) for l in non_empty_lines) / len(non_empty_lines)
@@ -70,7 +60,6 @@ def compute_markdown_metrics(
         avg_line_length=round(avg_line_length, 1),
         parser_used=parser_used,
         parser_reason=parser_reason,
-        document_profile=document_profile,
     )
 
 

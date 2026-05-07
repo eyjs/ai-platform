@@ -38,11 +38,29 @@ class AnthropicStubProvider(LLMProvider):
             max_context=200000,
             cost_per_1k_tokens=0.008,
             stub=True,
+            supports_prompt_caching=True,
         )
 
     async def is_available(self) -> bool:
         # stub 은 항상 True (등록은 가능, 호출 시 분기)
         return True
+
+    def _build_system_blocks(self, system: str = "") -> list[dict]:
+        """Anthropic Prompt Caching용 system 블록 구성.
+
+        프로덕션 전환 시 cache_control: {"type": "ephemeral"} 블록으로
+        system_prefix를 캐시 가능하게 전달한다.
+        """
+        blocks = []
+        if self._system_prefix:
+            blocks.append({
+                "type": "text",
+                "text": self._system_prefix,
+                "cache_control": {"type": "ephemeral"},
+            })
+        if system:
+            blocks.append({"type": "text", "text": system})
+        return blocks
 
     async def generate(self, prompt: str, system: str = "") -> str:
         if self._stub_mode == "echo":

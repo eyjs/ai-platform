@@ -21,7 +21,7 @@ from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
-MAX_CONTENT_PREVIEW_LEN = 1500
+MAX_CONTENT_PREVIEW_LEN = 2500
 MAX_SOURCE_PREVIEW_LEN = 200
 MAX_SOURCES = 5
 MIN_SOURCE_SCORE = 0.3
@@ -367,10 +367,11 @@ def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
             answer, plan.guardrail_chain, guardrails, context,
         )
 
-        # Guardrail 재생성 판단: warn + score < 0.5이면 재생성 후보
+        # Guardrail 재생성 판단: warn + score < 0.35이면 재생성 후보
+        # (0.5에서 0.35로 하향: 과도한 재생성 루프 억제)
         regenerate_needed = any(
             isinstance(v, dict) and v.get("action") == "warn"
-            and v.get("score") is not None and v.get("score") < 0.5
+            and v.get("score") is not None and v.get("score") < 0.35
             for v in results.values()
         )
         results["_regenerate_needed"] = regenerate_needed

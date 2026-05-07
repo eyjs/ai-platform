@@ -32,12 +32,12 @@ def _make_definition(wf_id="test-wf"):
     )
 
 
-def test_resume_from_step_2(engine, store):
+async def test_resume_from_step_2(engine, store):
     """step_2에서 재개한다."""
     definition = _make_definition()
     store.get.return_value = definition
 
-    result = engine.resume(
+    result = await engine.resume(
         workflow_id="test-wf",
         session_id="sess-1",
         step_id="step_2",
@@ -50,12 +50,12 @@ def test_resume_from_step_2(engine, store):
     assert result.collected == {"name": "김"}
 
 
-def test_resume_from_step_3(engine, store):
+async def test_resume_from_step_3(engine, store):
     """step_3 (select)에서 재개한다."""
     definition = _make_definition()
     store.get.return_value = definition
 
-    result = engine.resume(
+    result = await engine.resume(
         workflow_id="test-wf",
         session_id="sess-1",
         step_id="step_3",
@@ -67,56 +67,56 @@ def test_resume_from_step_3(engine, store):
     assert "자동차" in result.options
 
 
-def test_resume_creates_session(engine, store):
+async def test_resume_creates_session(engine, store):
     """resume 후 세션이 메모리에 존재한다."""
     store.get.return_value = _make_definition()
 
-    engine.resume("test-wf", "sess-2", "step_2", {"name": "박"})
+    await engine.resume("test-wf", "sess-2", "step_2", {"name": "박"})
 
-    session = engine.get_session("sess-2")
+    session = await engine.get_session("sess-2")
     assert session is not None
     assert session.workflow_id == "test-wf"
     assert session.current_step_id == "step_2"
     assert session.collected == {"name": "박"}
 
 
-def test_resume_then_advance(engine, store):
+async def test_resume_then_advance(engine, store):
     """resume 후 advance로 다음 스텝으로 진행한다."""
     store.get.return_value = _make_definition()
 
-    engine.resume("test-wf", "sess-3", "step_2", {"name": "이"})
-    result = engine.advance("sess-3", "010-9999-8888")
+    await engine.resume("test-wf", "sess-3", "step_2", {"name": "이"})
+    result = await engine.advance("sess-3", "010-9999-8888")
 
     assert result.step_id == "step_3"
     assert result.step_type == "select"
 
-    session = engine.get_session("sess-3")
+    session = await engine.get_session("sess-3")
     assert session.collected["phone"] == "010-9999-8888"
 
 
-def test_resume_workflow_not_found(engine, store):
+async def test_resume_workflow_not_found(engine, store):
     """워크플로우를 찾을 수 없으면 GatewayError."""
     store.get.return_value = None
 
     with pytest.raises(GatewayError, match="워크플로우를 찾을 수 없습니다"):
-        engine.resume("nonexistent", "sess-1", "step_1", {})
+        await engine.resume("nonexistent", "sess-1", "step_1", {})
 
 
-def test_resume_step_not_found(engine, store):
+async def test_resume_step_not_found(engine, store):
     """스텝을 찾을 수 없으면 GatewayError."""
     store.get.return_value = _make_definition()
 
     with pytest.raises(GatewayError, match="스텝을 찾을 수 없습니다"):
-        engine.resume("test-wf", "sess-1", "nonexistent-step", {})
+        await engine.resume("test-wf", "sess-1", "nonexistent-step", {})
 
 
-def test_resume_replaces_existing_session(engine, store):
+async def test_resume_replaces_existing_session(engine, store):
     """기존 세션이 있어도 resume으로 덮어쓴다."""
     store.get.return_value = _make_definition()
 
-    engine.resume("test-wf", "sess-4", "step_1", {})
-    engine.resume("test-wf", "sess-4", "step_3", {"name": "최", "phone": "010"})
+    await engine.resume("test-wf", "sess-4", "step_1", {})
+    await engine.resume("test-wf", "sess-4", "step_3", {"name": "최", "phone": "010"})
 
-    session = engine.get_session("sess-4")
+    session = await engine.get_session("sess-4")
     assert session.current_step_id == "step_3"
     assert session.collected == {"name": "최", "phone": "010"}

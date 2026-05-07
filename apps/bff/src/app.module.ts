@@ -9,6 +9,7 @@ import { FeedbackModule } from './feedback/feedback.module';
 import { RequestLogsModule } from './request-logs/request-logs.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { ProvidersModule } from './providers/providers.module';
+import { ParseModule } from './parse/parse.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -22,6 +23,7 @@ import { AppController } from './app.controller';
     RequestLogsModule,
     KnowledgeModule,
     ProvidersModule,
+    ParseModule,
   ],
   controllers: [AppController],
   providers: [],

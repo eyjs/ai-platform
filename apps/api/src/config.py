@@ -54,12 +54,10 @@ class Settings(BaseSettings):
     llamaparse_api_key: str = ""
     parser_timeout: float = 120.0
 
-    # 통합 파싱 엔진 (parser_provider=engine 일 때)
-    parser_enable_docling: bool = True
-    parser_enable_vlm: bool = False
-    vlm_ocr_endpoint: str = ""         # VLM OCR 서버 (예: http://localhost:8087)
-    parser_csv_max_rows: int = 10000
-    parser_excel_max_rows: int = 10000
+    # DocForge 파싱 서비스 (parser_provider=engine 일 때)
+    docforge_url: str = "http://localhost:5001"
+    docforge_timeout_sec: float = 120.0
+    docforge_internal_key: str = ""
 
     # 청킹
     chunk_size: int = 1000
@@ -75,8 +73,10 @@ class Settings(BaseSettings):
 
     # 동시성
     max_concurrent_agents: int = 50
-    pg_pool_min: int = 5
-    pg_pool_max: int = 50
+    pg_pool_min: int = 2
+    pg_pool_max: int = 20
+    sa_pool_size: int = 5
+    sa_pool_max_overflow: int = 10
     embedding_concurrent_requests: int = 20
 
     # 작업 큐 (PostgreSQL SKIP LOCKED)

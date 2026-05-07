@@ -30,6 +30,7 @@ class ProviderCapability:
     max_context: int
     cost_per_1k_tokens: float
     stub: bool = False
+    supports_prompt_caching: bool = False
 
 
 class EmbeddingProvider(ABC):

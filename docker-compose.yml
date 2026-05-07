@@ -44,6 +44,10 @@ services:
       AIP_KMS_API_URL: http://kms-api:3000/api
       AIP_KMS_INTERNAL_KEY: ${INTERNAL_KEY:-dev_internal_key_32_chars_minimum}
       AIP_KMS_WEBHOOK_SECRET: ${KMS_WEBHOOK_SECRET:-dev_webhook_secret_32_chars_min}
+      # DocForge 파싱 서비스 (컨테이너 간 통신)
+      AIP_PARSER_PROVIDER: engine
+      AIP_DOCFORGE_URL: http://docforge:5051
+      AIP_DOCFORGE_INTERNAL_KEY: ${DOCFORGE_INTERNAL_KEY:-dev-docforge-key-change-in-production}
       # 로깅
       AIP_LOG_FORMAT: json
       AIP_LOG_LEVEL: INFO
@@ -95,6 +99,7 @@ services:
         condition: service_healthy
     networks:
       - default
+      - kms-aip-shared
 
 networks:
   kms-aip-shared:

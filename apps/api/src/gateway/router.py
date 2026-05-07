@@ -274,7 +274,7 @@ async def _prepare_chat(
         # 워크플로우 재개 처리
         if orchestrator_result and orchestrator_result.should_resume_workflow:
             paused = orchestrator_result.paused_state
-            state.workflow_engine.resume(
+            await state.workflow_engine.resume(
                 paused["workflow_id"],
                 session_id,
                 paused["step_id"],
@@ -286,7 +286,7 @@ async def _prepare_chat(
             await state.session_memory.save_orchestrator_metadata(session_id, meta)
 
         # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
-        active_wf = state.workflow_engine.get_session(session_id)
+        active_wf = await state.workflow_engine.get_session(session_id)
         if active_wf and not active_wf.completed:
             logger.info(
                 "workflow_session_active",
@@ -422,7 +422,7 @@ async def _prepare_chat_fast(
         )
 
         # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
-        active_wf = state.workflow_engine.get_session(session_id)
+        active_wf = await state.workflow_engine.get_session(session_id)
         if active_wf and not active_wf.completed:
             logger.info(
                 "workflow_session_active",
@@ -934,7 +934,7 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
     )
 
     try:
-        result = state.workflow_engine.start(req.workflow_id, session_id)
+        result = await state.workflow_engine.start(req.workflow_id, session_id)
     except Exception as e:
         logger.error("workflow_start_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
@@ -952,7 +952,7 @@ async def workflow_advance(req: WorkflowAdvanceRequest, request: Request):
     await _authenticate(request)
 
     try:
-        result = state.workflow_engine.advance(req.session_id, req.input)
+        result = await state.workflow_engine.advance(req.session_id, req.input)
     except Exception as e:
         logger.error("workflow_advance_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
