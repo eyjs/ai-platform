@@ -3,6 +3,7 @@
 domain_codes 필터를 지원하는 범용 벡터 검색.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -201,45 +202,27 @@ class VectorStore(AbstractVectorStore):
         vector_weight: float = 0.5,
         max_security_level: Optional[str] = None,
     ) -> List[dict]:
-        """벡터 + full-text + trigram RRF 하이브리드 검색."""
+        """벡터 + full-text + trigram RRF 하이브리드 검색.
+
+        vector와 text(FTS+trigram) 검색을 별도 커넥션에서 병렬 실행한다.
+        """
         if not self._pool:
             raise RuntimeError("VectorStore not connected")
 
         allowed_levels = self._allowed_security_levels(max_security_level)
         candidate_limit = limit * HYBRID_CANDIDATE_MULTIPLIER
 
-        async with self._pool.acquire() as conn:
-            # 1. 벡터 검색
-            vq, vp = self._build_vector_query(
-                embedding, candidate_limit, domain_codes, allowed_doc_ids, allowed_levels,
-            )
-            vector_rows = await conn.fetch(vq, *vp)
-
-            # 2. Full-text 검색
-            try:
-                fts_rows = await self._fulltext_search(
-                    conn, text_query, candidate_limit, domain_codes,
-                    allowed_doc_ids, allowed_levels,
-                )
-            except Exception as e:
-                logger.warning("Full-text search failed: %s", e)
-                fts_rows = []
-
-            # 3. Trigram fallback
-            if len(fts_rows) < TRIGRAM_FALLBACK_THRESHOLD:
-                try:
-                    trgm_rows = await self._trigram_search(
-                        conn, text_query, candidate_limit, domain_codes,
-                        allowed_doc_ids, allowed_levels,
-                    )
-                    if trgm_rows:
-                        seen_ids = {str(r["id"]) for r in fts_rows}
-                        for row in trgm_rows:
-                            if str(row["id"]) not in seen_ids:
-                                fts_rows.append(row)
-                                seen_ids.add(str(row["id"]))
-                except Exception as e:
-                    logger.warning("Trigram search failed: %s", e)
+        # vector와 text(FTS + trigram fallback)를 병렬 실행
+        vector_rows, fts_rows = await asyncio.gather(
+            self._vector_search_task(
+                embedding, candidate_limit, domain_codes,
+                allowed_doc_ids, allowed_levels,
+            ),
+            self._text_search_combined(
+                text_query, candidate_limit, domain_codes,
+                allowed_doc_ids, allowed_levels,
+            ),
+        )
 
         return self._rrf_merge(vector_rows, fts_rows, limit, vector_weight)
 
@@ -385,6 +368,7 @@ class VectorStore(AbstractVectorStore):
 
         hybrid_search()와 동일한 벡터+FTS+trigram RRF 로직이지만
         SELECT 절에서 content, embedding을 제외하여 I/O를 절감한다.
+        vector와 text(FTS+trigram) 검색을 별도 커넥션에서 병렬 실행한다.
         """
         if not self._pool:
             raise RuntimeError("VectorStore not connected")
@@ -392,36 +376,16 @@ class VectorStore(AbstractVectorStore):
         allowed_levels = self._allowed_security_levels(max_security_level)
         candidate_limit = limit * HYBRID_CANDIDATE_MULTIPLIER
 
-        async with self._pool.acquire() as conn:
-            vq, vp = self._build_vector_query(
+        vector_rows, fts_rows = await asyncio.gather(
+            self._vector_search_task(
                 embedding, candidate_limit, domain_codes, allowed_doc_ids,
                 allowed_levels, metadata_only=True,
-            )
-            vector_rows = await conn.fetch(vq, *vp)
-
-            try:
-                fts_rows = await self._fulltext_search(
-                    conn, text_query, candidate_limit, domain_codes,
-                    allowed_doc_ids, allowed_levels, metadata_only=True,
-                )
-            except Exception as e:
-                logger.warning("Metadata full-text search failed: %s", e)
-                fts_rows = []
-
-            if len(fts_rows) < TRIGRAM_FALLBACK_THRESHOLD:
-                try:
-                    trgm_rows = await self._trigram_search(
-                        conn, text_query, candidate_limit, domain_codes,
-                        allowed_doc_ids, allowed_levels, metadata_only=True,
-                    )
-                    if trgm_rows:
-                        seen_ids = {str(r["id"]) for r in fts_rows}
-                        for row in trgm_rows:
-                            if str(row["id"]) not in seen_ids:
-                                fts_rows.append(row)
-                                seen_ids.add(str(row["id"]))
-                except Exception as e:
-                    logger.warning("Metadata trigram search failed: %s", e)
+            ),
+            self._text_search_combined(
+                text_query, candidate_limit, domain_codes,
+                allowed_doc_ids, allowed_levels, metadata_only=True,
+            ),
+        )
 
         return self._rrf_merge(
             vector_rows, fts_rows, limit, 0.5,
@@ -503,6 +467,63 @@ class VectorStore(AbstractVectorStore):
         if not tokens:
             return ""
         return " | ".join(tokens[:TSQUERY_MAX_TOKENS])
+
+    async def _vector_search_task(
+        self,
+        embedding: List[float],
+        candidate_limit: int,
+        domain_codes: Optional[List[str]] = None,
+        allowed_doc_ids: Optional[List[str]] = None,
+        allowed_levels: Optional[List[str]] = None,
+        metadata_only: bool = False,
+    ) -> list:
+        """벡터 검색을 독립 커넥션에서 실행한다 (병렬용)."""
+        vq, vp = self._build_vector_query(
+            embedding, candidate_limit, domain_codes,
+            allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+        )
+        async with self._pool.acquire() as conn:
+            return await conn.fetch(vq, *vp)
+
+    async def _text_search_combined(
+        self,
+        text_query: str,
+        candidate_limit: int,
+        domain_codes: Optional[List[str]] = None,
+        allowed_doc_ids: Optional[List[str]] = None,
+        allowed_levels: Optional[List[str]] = None,
+        metadata_only: bool = False,
+    ) -> list:
+        """FTS + trigram fallback을 독립 커넥션에서 순차 실행한다 (병렬용).
+
+        trigram은 FTS 결과 수에 의존하므로 하나의 커넥션 내 순차 처리.
+        """
+        async with self._pool.acquire() as conn:
+            try:
+                fts_rows = await self._fulltext_search(
+                    conn, text_query, candidate_limit, domain_codes,
+                    allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+                )
+            except Exception as e:
+                logger.warning("Full-text search failed: %s", e)
+                fts_rows = []
+
+            if len(fts_rows) < TRIGRAM_FALLBACK_THRESHOLD:
+                try:
+                    trgm_rows = await self._trigram_search(
+                        conn, text_query, candidate_limit, domain_codes,
+                        allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+                    )
+                    if trgm_rows:
+                        seen_ids = {str(r["id"]) for r in fts_rows}
+                        for row in trgm_rows:
+                            if str(row["id"]) not in seen_ids:
+                                fts_rows.append(row)
+                                seen_ids.add(str(row["id"]))
+                except Exception as e:
+                    logger.warning("Trigram search failed: %s", e)
+
+            return fts_rows
 
     def _build_vector_query(
         self,

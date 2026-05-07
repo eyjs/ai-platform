@@ -4,6 +4,7 @@ Adaptive L1: probe 검색 → 고품질이면 확장 스킵
 L1 쿼리확장 -> 멀티쿼리 검색 -> L2 노이즈필터 -> L3 이웃확장 -> L4 리랭킹 -> L5 가드
 """
 
+import asyncio
 import time
 from typing import Optional
 
@@ -292,12 +293,14 @@ class RAGSearchTool:
         embeddings: list[list[float]],
         scope: SearchScope,
     ) -> list[dict]:
-        """멀티쿼리 검색 후 합산. chunk_id 기준 최고 점수 유지."""
-        domain_codes = scope.domain_codes if scope.domain_codes else None
-        all_results: dict[str, dict] = {}
+        """멀티쿼리 검색 후 합산. chunk_id 기준 최고 점수 유지.
 
-        for query, embedding in zip(queries, embeddings):
-            results = await self._store.hybrid_search(
+        각 쿼리에 대한 hybrid_search를 asyncio.gather로 병렬 실행한다.
+        """
+        domain_codes = scope.domain_codes if scope.domain_codes else None
+
+        tasks = [
+            self._store.hybrid_search(
                 embedding=embedding,
                 text_query=query,
                 limit=CANDIDATE_POOL_SIZE,
@@ -305,13 +308,20 @@ class RAGSearchTool:
                 allowed_doc_ids=scope.allowed_doc_ids,
                 max_security_level=scope.security_level_max,
             )
+            for query, embedding in zip(queries, embeddings)
+        ]
+
+        all_results_lists = await asyncio.gather(*tasks)
+
+        merged: dict[str, dict] = {}
+        for results in all_results_lists:
             for r in results:
                 cid = r["chunk_id"]
-                if cid not in all_results or r["score"] > all_results[cid]["score"]:
-                    all_results[cid] = r
+                if cid not in merged or r["score"] > merged[cid]["score"]:
+                    merged[cid] = r
 
         return sorted(
-            all_results.values(),
+            merged.values(),
             key=lambda x: x["score"],
             reverse=True,
         )

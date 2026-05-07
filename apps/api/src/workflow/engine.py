@@ -141,7 +141,6 @@ class WorkflowEngine:
             workflow_id=workflow_id,
             current_step_id=entry_id,
         )
-        await self._save_session(session_id, session)
 
         logger.info(
             "workflow_start",
@@ -371,7 +370,6 @@ class WorkflowEngine:
             current_step_id=step_id,
             collected=dict(collected),
         )
-        await self._save_session(session_id, session)
 
         logger.info(
             "workflow_resume",
