@@ -73,8 +73,10 @@ class Settings(BaseSettings):
 
     # 동시성
     max_concurrent_agents: int = 50
-    pg_pool_min: int = 5
-    pg_pool_max: int = 50
+    pg_pool_min: int = 2
+    pg_pool_max: int = 20
+    sa_pool_size: int = 5
+    sa_pool_max_overflow: int = 10
     embedding_concurrent_requests: int = 20
 
     # 작업 큐 (PostgreSQL SKIP LOCKED)

@@ -70,15 +70,33 @@ class SessionMemory:
         session_id: str,
         max_turns: int = 10,
     ) -> List[dict]:
-        """최근 N턴 조회."""
+        """최근 N턴 조회. DB에서 마지막 N개만 추출하여 전송량을 최소화한다."""
         row = await self._pool.fetchrow(
-            "SELECT turns FROM conversation_sessions WHERE id = $1",
-            session_id,
+            """
+            SELECT CASE
+                WHEN jsonb_array_length(COALESCE(turns, '[]'::jsonb)) <= $2
+                THEN COALESCE(turns, '[]'::jsonb)
+                ELSE (
+                    SELECT jsonb_agg(t.elem ORDER BY t.ord)
+                    FROM (
+                        SELECT x.elem, x.ord
+                        FROM jsonb_array_elements(turns) WITH ORDINALITY AS x(elem, ord)
+                        ORDER BY x.ord DESC
+                        LIMIT $2
+                    ) t
+                )
+            END AS recent_turns
+            FROM conversation_sessions
+            WHERE id = $1
+            """,
+            session_id, max_turns,
         )
-        if not row or not row["turns"]:
+        if not row or not row["recent_turns"]:
             return []
-        turns = json.loads(row["turns"]) if isinstance(row["turns"], str) else row["turns"]
-        return turns[-max_turns:]
+        turns = row["recent_turns"]
+        if isinstance(turns, str):
+            turns = json.loads(turns)
+        return turns if isinstance(turns, list) else []
 
     async def get_session(self, session_id: str) -> Optional[dict]:
         row = await self._pool.fetchrow(

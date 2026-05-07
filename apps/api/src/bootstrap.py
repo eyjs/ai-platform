@@ -350,9 +350,23 @@ async def create_app_state(settings: Settings) -> AppState:
     db_url = settings.database_url
     if db_url.startswith("postgresql://"):
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    _engine = create_async_engine(db_url, pool_pre_ping=True)
+    _engine = create_async_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_size=settings.sa_pool_size,
+        max_overflow=settings.sa_pool_max_overflow,
+        pool_timeout=30,
+        pool_recycle=3600,
+    )
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
+    logger.info(
+        "db_pools_configured",
+        asyncpg_min=settings.pg_pool_min,
+        asyncpg_max=settings.pg_pool_max,
+        sa_pool_size=settings.sa_pool_size,
+        sa_max_overflow=settings.sa_pool_max_overflow,
+    )
     request_log_service = RequestLogService(_session_factory)
     response_cache_service = ResponseCacheService(_session_factory)
     # Task 014: 30일 auto-purge sweeper 포함
