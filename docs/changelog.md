@@ -5,6 +5,40 @@
 
 ---
 
+## [0.11.0] — 2026-05-07
+
+### Added
+- **Workflow Action Step**: 새 `action` step type — YAML 설정만으로 외부 API 호출 가능 (`src/workflow/action_client.py`, `src/workflow/template.py`)
+- **WorkflowSessionStore**: PostgreSQL 기반 워크플로우 세션 영속화 (`src/workflow/session_store.py`) — 서버 재시작 후에도 세션 유지
+- **Agentic Graph LRU Cache**: `(profile_id, frozenset(tool_names))` 복합 키로 LangGraph 인스턴스 캐싱 — 동일 프로필 두 번째 요청부터 graph 재빌드 제거 (`src/agent/graph_executor.py`)
+- **Prompt Caching**: OpenAI/Anthropic provider에 `cache_control` 헤더 적용 — system prompt 캐싱으로 LLM 비용 절감 + 응답 지연 감소 (`src/infrastructure/providers/llm/openai.py`, `anthropic.py`)
+- **Plan-and-Execute 아키텍처**: Planner → Adaptive Retry → Guardrail Regen 3단계 Agent 실행 (`src/agent/planner.py`, `src/agent/nodes.py`)
+- Per-workflow escape keywords (`WorkflowDefinition.escape_keywords`)
+- Workflow template rendering (`src/workflow/template.py`)
+
+### Changed — 성능 최적화 (7 tasks, 4 phases)
+- **Hybrid Search 병렬화**: vector/FTS/trgm 3개 서브쿼리를 `asyncio.gather`로 동시 실행 (`src/infrastructure/vector_store.py`)
+- **RAG 병렬화**: neighbor expansion N개 개별 쿼리 → `WHERE id = ANY($1)` 단일 IN 쿼리, multi-query search `asyncio.gather` 병렬 실행 (`src/tools/internal/neighbor_expander.py`, `rag_search.py`)
+- **Session Memory SQL-level JSONB slice**: Python-level 전체 읽기 후 슬라이스 → DB에서 마지막 N개만 추출 (`src/infrastructure/memory/session.py`)
+- **DB Pool 파라미터 명시적 설정**: SQLAlchemy AsyncEngine에 `pool_size`, `max_overflow`, `pool_timeout`, `pool_recycle` 추가 (`src/bootstrap.py`)
+- `pg_pool_min` 5→2, `pg_pool_max` 50→20 (overprovisioning 제거)
+- Workflow Engine 전체 async 전환, `resume()` 경로 이중 `_save_session` 제거
+
+### Changed — 파싱
+- `ParsingEngine` DocForge 완전 위임 — PyMuPDF/로컬 PDF 분석기 제거
+- `pdf_analyzer.py` 삭제, `pdf_parser.py` 삭제 (DocForge 대체)
+
+### Removed
+- `csv_parser.py`, `excel_parser.py` (DocForge 위임 완료)
+- `pdf_analyzer.py`, `pdf_parser.py` (DocForge 위임 완료)
+- PyMuPDF 의존성
+
+### Fixed
+- 리뷰 지적사항: 깨진 유니코드 복원, 에러 아이콘 배경색 구분
+- DocForge 인증 헤더 누락 수정
+
+---
+
 ## [0.10.0] — 2026-05-04
 
 ### Added
