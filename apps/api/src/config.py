@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     # DocForge 파싱 서비스 (parser_provider=engine 일 때)
     docforge_url: str = "http://localhost:5001"
-    docforge_timeout_sec: float = 120.0
+    docforge_timeout_sec: float = 300.0
     docforge_internal_key: str = ""
 
     # 청킹

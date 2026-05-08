@@ -20,6 +20,10 @@ class ParseError(Exception):
     """DocForge 호출 실패 예외."""
 
 
+class ParseTimeoutError(ParseError):
+    """DocForge 서버 측 파싱 타임아웃 (HTTP 408)."""
+
+
 @dataclass(frozen=True)
 class DocForgeResult:
     """DocForge API 응답을 ai-platform 내부 형태로 변환한 결과."""
@@ -96,15 +100,22 @@ class DocForgeClient:
 
             if resp.status_code != 200:
                 body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                error_msg = body.get("error", {}).get("message", resp.text[:200])
+                error_info = body.get("error", {})
+                error_msg = error_info.get("message", resp.text[:200])
+                error_code = error_info.get("code", "")
                 logger.error(
                     "docforge_parse_failed",
                     status=resp.status_code,
+                    error_code=error_code,
                     file_name=file_name,
                     mime_type=mime_type,
                     error=error_msg,
                     latency_ms=round(latency_ms, 1),
                 )
+                if resp.status_code == 408 or error_code == "REQUEST_TIMEOUT":
+                    raise ParseTimeoutError(
+                        f"파일이 너무 크거나 복잡하여 파싱 시간이 초과되었습니다: {file_name}"
+                    )
                 raise ParseError(
                     f"DocForge returned {resp.status_code}: {error_msg}"
                 )

@@ -11,6 +11,7 @@ from src.pipeline.parsing.docforge_client import (
     DocForgeClient,
     DocForgeResult,
     ParseError,
+    ParseTimeoutError,
 )
 
 
@@ -125,6 +126,26 @@ class TestParseErrors:
 
             with pytest.raises(ParseError, match="500"):
                 await client.parse(b"data", "test.pdf", "application/pdf")
+
+    async def test_408_raises_parse_timeout_error(self, client):
+        mock_response = MagicMock()
+        mock_response.status_code = 408
+        mock_response.text = "Request Timeout"
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {
+            "success": False,
+            "error": {"code": "REQUEST_TIMEOUT", "message": "parsing timed out"},
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_async_client = AsyncMock()
+            mock_async_client.post.return_value = mock_response
+            mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+            mock_async_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_async_client
+
+            with pytest.raises(ParseTimeoutError):
+                await client.parse(b"data", "large.pdf", "application/pdf")
 
     async def test_network_error_raises_parse_error(self, client):
         with patch("httpx.AsyncClient") as mock_client_cls:
