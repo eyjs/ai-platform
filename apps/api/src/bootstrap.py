@@ -186,6 +186,8 @@ async def create_app_state(settings: Settings) -> AppState:
         router_llm=router_llm,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
+    from src.tools.internal import SajuLookupTool
+    tool_registry.register(SajuLookupTool(backend_url=settings.saju_backend_url))
     logger.info("tools_registered", tools=tool_registry.tool_names)
 
     # 7. AI Router

@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     planner_timeout: float = 5.0         # Planner LLM 호출 타임아웃 (초)
     planner_max_retries: int = 2         # Adaptive Retry Loop 최대 재시도
 
+    # 사주 백엔드 (saju_lookup 도구가 호출하는 사주 데이터 서비스)
+    saju_backend_url: str = "http://localhost:8002"
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000
