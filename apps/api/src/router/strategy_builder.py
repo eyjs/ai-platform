@@ -94,8 +94,12 @@ class StrategyBuilder:
                 f"{t['role']}: {t['content']}" for t in sanitized
             )
 
-        # tool_groups 배정: 기본은 모든 도구를 한 그룹 (= 전부 병렬)
-        tool_groups = self._build_tool_groups(query, tools, strategy)
+        # tool_groups 배정
+        # agentic 모드는 LLM이 자율적으로 도구를 선택하므로 needs_rag와 무관하게 항상 도구 제공
+        if mode == AgentMode.AGENTIC and tools:
+            tool_groups = [[ToolCall(tool_name=t.name, params={}) for t in tools]]
+        else:
+            tool_groups = self._build_tool_groups(query, tools, strategy)
 
         # external_context가 있으면 system_prompt에 추가하여 LLM이 참조하도록 함
         effective_system_prompt = profile.system_prompt

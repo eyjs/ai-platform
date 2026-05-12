@@ -480,8 +480,15 @@ class GraphExecutor:
 
         agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
+        effective_question = question
+        if plan.conversation_context:
+            effective_question = (
+                f"[이전 대화 기록]\n{plan.conversation_context}\n\n"
+                f"[현재 질문]\n{question}"
+            )
+
         result = await agent_app.ainvoke(
-            {"messages": [{"role": "user", "content": question}]},
+            {"messages": [{"role": "user", "content": effective_question}]},
         )
 
         # 결과 추출
@@ -553,13 +560,20 @@ class GraphExecutor:
 
         agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
+        effective_question = question
+        if plan.conversation_context:
+            effective_question = (
+                f"[이전 대화 기록]\n{plan.conversation_context}\n\n"
+                f"[현재 질문]\n{question}"
+            )
+
         yield {"type": "trace", "data": {"step": "agentic_start", "mode": "agentic"}}
 
         tools_called = []
         answer = ""
 
         async for event in agent_app.astream_events(
-            {"messages": [{"role": "user", "content": question}]},
+            {"messages": [{"role": "user", "content": effective_question}]},
             version="v2",
         ):
             kind = event.get("event", "")

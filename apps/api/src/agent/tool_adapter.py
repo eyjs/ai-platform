@@ -53,6 +53,16 @@ def _build_args_schema(name: str, input_schema: dict) -> type[BaseModel]:
             py_type = float
         elif type_str == "boolean":
             py_type = bool
+        elif type_str == "array":
+            items_type = prop_def.get("items", {}).get("type", "string")
+            if items_type == "integer":
+                py_type = list[int]
+            elif items_type == "number":
+                py_type = list[float]
+            elif items_type == "boolean":
+                py_type = list[bool]
+            else:
+                py_type = list[str]
 
         description = prop_def.get("description", "")
 
