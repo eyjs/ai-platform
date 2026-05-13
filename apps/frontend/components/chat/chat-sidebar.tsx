@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Dropdown, type DropdownOption } from '@/components/ui/dropdown';
@@ -106,6 +107,19 @@ export function ChatSidebar({
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
           />
+        </div>
+
+        {/* 아키텍처 링크 */}
+        <div className="border-t border-[var(--color-neutral-200)] p-3">
+          <Link
+            href="/architecture"
+            className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-neutral-500)] transition-colors hover:bg-[var(--color-neutral-100)] hover:text-[var(--color-neutral-700)]"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            System Architecture
+          </Link>
         </div>
       </aside>
     </>
