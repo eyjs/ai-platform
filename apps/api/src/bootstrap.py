@@ -202,18 +202,31 @@ async def create_app_state(settings: Settings) -> AppState:
             FlowSNSAccountsTool,
             FlowSNSDashboardTool,
             FlowSNSCalendarTool,
+            FlowSNSTaskActionsTool,
+            FlowSNSApprovalTool,
+            FlowSNSNotificationsTool,
+            FlowSNSReportsTool,
+            FlowSNSProfilesTool,
         )
         flowsns_client = FlowSNSClient(
             base_url=settings.flowsns_api_url,
             api_key=settings.flowsns_api_key,
             timeout=settings.flowsns_timeout,
         )
-        tool_registry.register(FlowSNSTasksTool(client=flowsns_client))
-        tool_registry.register(FlowSNSClientsTool(client=flowsns_client))
-        tool_registry.register(FlowSNSAccountsTool(client=flowsns_client))
-        tool_registry.register(FlowSNSDashboardTool(client=flowsns_client))
-        tool_registry.register(FlowSNSCalendarTool(client=flowsns_client))
-        logger.info("flowsns_tools_registered", api_url=settings.flowsns_api_url)
+        for tool_cls in (
+            FlowSNSTasksTool,
+            FlowSNSClientsTool,
+            FlowSNSAccountsTool,
+            FlowSNSDashboardTool,
+            FlowSNSCalendarTool,
+            FlowSNSTaskActionsTool,
+            FlowSNSApprovalTool,
+            FlowSNSNotificationsTool,
+            FlowSNSReportsTool,
+            FlowSNSProfilesTool,
+        ):
+            tool_registry.register(tool_cls(client=flowsns_client))
+        logger.info("flowsns_tools_registered", count=10, api_url=settings.flowsns_api_url)
     else:
         logger.info("flowsns_tools_skipped", reason="FLOWSNS_API_KEY not configured")
 
