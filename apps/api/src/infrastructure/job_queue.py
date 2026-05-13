@@ -209,7 +209,9 @@ class QueueWorker:
     async def _process_job(self, job: dict) -> None:
         job_id = job["id"]
         try:
-            result = await self._handler(job["payload"])
+            payload = job["payload"]
+            payload["job_id"] = str(job_id)
+            result = await self._handler(payload)
             await self._queue.complete(job_id, result=result)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)

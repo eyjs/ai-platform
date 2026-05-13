@@ -97,7 +97,7 @@ async def generate_report(
             "saju_data": request_data.saju_data,
             "metadata": request_data.metadata,
             "user_id": user_context.user_id,
-            "user_role": user_context.user_role.value,
+            "user_role": str(user_context.user_role),
         }
 
         # JobQueue에 작업 추가

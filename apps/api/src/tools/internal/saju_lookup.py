@@ -118,5 +118,5 @@ class SajuLookupTool:
             logger.exception("saju_lookup failed")
             return ToolResult(success=False, error=f"사주 데이터 조회 중 오류: {str(e)}")
 
-        logger.info("saju_lookup_success", saju_id=saju_id, categories=categories)
+        logger.info("saju_lookup_success saju_id=%s categories=%s", saju_id, ",".join(categories))
         return ToolResult(success=True, data=data)

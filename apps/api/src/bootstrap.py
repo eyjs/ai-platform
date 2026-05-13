@@ -86,6 +86,8 @@ class AppState:
     # Task 004: Saju 리포트 서비스 + QueueWorker
     saju_report_service: Optional[Any] = None
     saju_report_worker: Optional[Any] = None
+    # Fortune 해석 서비스
+    fortune_service: Optional[Any] = None
     # Workflow action client (외부 API 호출)
     action_client: Optional[ActionClient] = None
     workflow_session_store: Optional[WorkflowSessionStore] = None
@@ -186,8 +188,10 @@ async def create_app_state(settings: Settings) -> AppState:
         router_llm=router_llm,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
-    from src.tools.internal import SajuLookupTool
+    from src.tools.internal import SajuLookupTool, SajuReportPaperTool, SajuReportCompatibilityTool
     tool_registry.register(SajuLookupTool(backend_url=settings.saju_backend_url))
+    tool_registry.register(SajuReportPaperTool(llm_provider=main_llm))
+    tool_registry.register(SajuReportCompatibilityTool(llm_provider=main_llm))
     logger.info("tools_registered", tools=tool_registry.tool_names)
 
     # 7. AI Router
@@ -374,28 +378,22 @@ async def create_app_state(settings: Settings) -> AppState:
     # Task 014: 30일 auto-purge sweeper 포함
     feedback_service = FeedbackService(_session_factory, retention_days=30)
 
+    # Fortune 해석 서비스 (동기 — DB 불필요)
+    from src.services.fortune_service import FortuneService
+    fortune_service = FortuneService(main_llm=main_llm)
+    logger.info("fortune_service_initialized")
+
     # Task 004: Saju Report Service + QueueWorker
     from src.services.saju_report_service import SajuReportService
     from src.infrastructure.job_queue import QueueWorker
 
     saju_report_service = SajuReportService(pool=pool, main_llm=main_llm)
 
-    # Handler wrapper to inject job_id into payload
-    async def saju_report_handler_wrapper(job_data: dict) -> dict:
-        """QueueWorker에서 받은 job 데이터를 처리하고 job_id를 payload에 주입."""
-        job_id = job_data["id"]
-        payload = job_data["payload"]
-
-        # payload에 job_id 추가
-        payload["job_id"] = job_id
-
-        return await saju_report_service.process_report_job(payload)
-
     # QueueWorker for saju-report queue
     saju_report_worker = QueueWorker(
         queue=job_queue,
         queue_name="saju-report",
-        handler=saju_report_handler_wrapper,
+        handler=saju_report_service.process_report_job,
         worker_id=f"saju-report-{getattr(settings, 'server_id', None) or 'default'}",
         poll_interval=2.0,
         max_concurrent=2,
@@ -433,6 +431,7 @@ async def create_app_state(settings: Settings) -> AppState:
         request_log_service=request_log_service,
         response_cache_service=response_cache_service,
         feedback_service=feedback_service,
+        fortune_service=fortune_service,
         saju_report_service=saju_report_service,
         saju_report_worker=saju_report_worker,
         action_client=action_client,
