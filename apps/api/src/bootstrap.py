@@ -192,6 +192,31 @@ async def create_app_state(settings: Settings) -> AppState:
     tool_registry.register(SajuLookupTool(backend_url=settings.saju_backend_url))
     tool_registry.register(SajuReportPaperTool(llm_provider=main_llm))
     tool_registry.register(SajuReportCompatibilityTool(llm_provider=main_llm))
+
+    # FlowSNS 연동 도구
+    if settings.flowsns_api_key:
+        from src.tools.internal.flowsns import (
+            FlowSNSClient,
+            FlowSNSTasksTool,
+            FlowSNSClientsTool,
+            FlowSNSAccountsTool,
+            FlowSNSDashboardTool,
+            FlowSNSCalendarTool,
+        )
+        flowsns_client = FlowSNSClient(
+            base_url=settings.flowsns_api_url,
+            api_key=settings.flowsns_api_key,
+            timeout=settings.flowsns_timeout,
+        )
+        tool_registry.register(FlowSNSTasksTool(client=flowsns_client))
+        tool_registry.register(FlowSNSClientsTool(client=flowsns_client))
+        tool_registry.register(FlowSNSAccountsTool(client=flowsns_client))
+        tool_registry.register(FlowSNSDashboardTool(client=flowsns_client))
+        tool_registry.register(FlowSNSCalendarTool(client=flowsns_client))
+        logger.info("flowsns_tools_registered", api_url=settings.flowsns_api_url)
+    else:
+        logger.info("flowsns_tools_skipped", reason="FLOWSNS_API_KEY not configured")
+
     logger.info("tools_registered", tools=tool_registry.tool_names)
 
     # 7. AI Router

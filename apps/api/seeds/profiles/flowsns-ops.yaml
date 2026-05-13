@@ -1,0 +1,71 @@
+# FlowSNS 운영 어시스턴트 프로필
+# SNS 마케팅 대행사의 운영 현황을 자연어로 조회하는 챗봇
+id: "flowsns-ops"
+name: "FlowSNS 운영 어시스턴트"
+
+domain_scopes: []
+category_scopes: []
+security_level_max: "PUBLIC"
+
+mode: "agentic"
+max_tool_calls: 5
+agent_timeout_seconds: 30
+workflow_id: null
+hybrid_triggers: []
+
+tools:
+  - name: "flowsns_tasks"
+    config: {}
+  - name: "flowsns_clients"
+    config: {}
+  - name: "flowsns_accounts"
+    config: {}
+  - name: "flowsns_dashboard"
+    config: {}
+  - name: "flowsns_calendar"
+    config: {}
+
+system_prompt: |
+  당신은 SNS 마케팅 대행사의 운영 어시스턴트입니다.
+  FlowSNS 시스템의 데이터를 조회하여 운영 현황을 보고합니다.
+
+  ## 역할
+  - 태스크(작업) 현황 조회 및 요약
+  - 고객사 정보 및 통계 확인
+  - SNS 계정 관리 현황 파악
+  - 대시보드 통계 요약
+  - 캘린더 기반 일정 안내
+
+  ## 응답 원칙
+  - 조회한 데이터를 기반으로만 답변합니다
+  - 숫자/날짜는 정확하게 전달합니다
+  - 마감이 임박하거나 지연된 태스크는 우선순위로 안내합니다
+  - 한국어로 친절하게 응답합니다
+  - 데이터가 없는 경우 "해당 데이터가 없습니다"라고 안내합니다
+
+  ## 응답 포맷
+  - 목록은 번호를 붙여 정리합니다
+  - 통계는 핵심 지표를 먼저 요약하고 상세를 덧붙입니다
+  - 마감일은 "D-N" 형태로 표시합니다
+
+response_policy: "balanced"
+guardrails:
+  - "faithfulness"
+
+router_model: "haiku"
+main_model: "sonnet"
+
+memory_type: "short"
+memory_ttl_seconds: 3600
+
+intent_hints:
+  - pattern: "태스크|작업|할 일|업무"
+    description: "태스크/작업 관련 질문"
+  - pattern: "고객|클라이언트|거래처"
+    description: "고객사 관련 질문"
+  - pattern: "계정|SNS|인스타|네이버|페이스북"
+    description: "SNS 계정 관련 질문"
+  - pattern: "대시보드|통계|현황|요약"
+    description: "대시보드/통계 관련 질문"
+  - pattern: "일정|캘린더|스케줄|마감"
+    description: "일정/캘린더 관련 질문"

@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     # 사주 백엔드 (saju_lookup 도구가 호출하는 사주 데이터 서비스)
     saju_backend_url: str = "http://localhost:8002"
 
+    # FlowSNS 연동 (flowsns_* 도구가 호출하는 FlowSNS API)
+    flowsns_api_url: str = "http://localhost:3001"
+    flowsns_api_key: str = ""
+    flowsns_timeout: float = 15.0
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000

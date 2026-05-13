@@ -24,6 +24,7 @@ class ChatRequest(BaseModel):
     chatbot_id: str | None = None  # None이면 orchestrator 모드
     session_id: str | None = None
     context: str | None = None  # 외부 컨텍스트 (사주 분석 등). question과 분리하여 system prompt에 주입
+    metadata: dict = Field(default_factory=dict)  # 외부 시스템 메타데이터 (company_id 등). AgentContext.metadata로 전달
 
     @field_validator("question")
     @classmethod

@@ -211,6 +211,7 @@ async def _prepare_chat(
                     user_id=user_ctx.user_id,
                     user_role=user_ctx.user_role,
                     conversation_history=[],
+                    metadata=req.metadata or {},
                 )
                 trace = RequestTrace(request_id=request_id)
                 return _ChatSetup(
@@ -328,6 +329,7 @@ async def _prepare_chat(
             user_id=user_ctx.user_id,
             user_role=user_ctx.user_role,
             conversation_history=history,
+            metadata=req.metadata or {},
         )
         trace = RequestTrace(request_id=request_id)
 
@@ -459,6 +461,7 @@ async def _prepare_chat_fast(
             user_id=user_ctx.user_id,
             user_role=user_ctx.user_role,
             conversation_history=history,
+            metadata=req.metadata or {},
         )
         trace = RequestTrace(request_id=request_id)
 
