@@ -48,6 +48,8 @@ services:
       AIP_PARSER_PROVIDER: engine
       AIP_DOCFORGE_URL: http://docforge:5051
       AIP_DOCFORGE_INTERNAL_KEY: ${DOCFORGE_INTERNAL_KEY:-dev-docforge-key-change-in-production}
+      # 사주 백엔드 (호스트에서 실행 중인 saju-backend)
+      AIP_SAJU_BACKEND_URL: http://host.docker.internal:8002
       # 로깅
       AIP_LOG_FORMAT: json
       AIP_LOG_LEVEL: INFO

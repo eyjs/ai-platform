@@ -18,6 +18,8 @@ from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_c
 from src.common.exceptions import INFRA, PIPELINE, AppError
 from src.config import settings
 from src.gateway.admin_router import admin_router
+from src.gateway.crawl_router import crawl_router
+from src.gateway.fortune_router import fortune_router
 from src.gateway.report_router import report_router
 from src.gateway.router import APP_VERSION, gateway_router, wait_for_pending_requests
 from src.gateway.webhook_router import webhook_router
@@ -104,6 +106,8 @@ app.add_middleware(
 
 app.include_router(gateway_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(crawl_router, prefix="/api")
+app.include_router(fortune_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
 app.include_router(webhook_router, prefix="/api")
 

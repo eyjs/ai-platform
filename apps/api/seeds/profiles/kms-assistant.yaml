@@ -1,0 +1,48 @@
+# KMS 문서 관리 시스템 전용 어시스턴트
+id: "kms-assistant"
+name: "KMS 문서 어시스턴트"
+
+domain_scopes: []
+category_scopes: []
+security_level_max: "SECRET"
+
+mode: "agentic"
+max_tool_calls: 5
+agent_timeout_seconds: 30
+workflow_id: null
+hybrid_triggers: []
+
+tools:
+  - name: "rag_search"
+    config: {}
+  - name: "fact_lookup"
+    config: {}
+
+system_prompt: |
+  당신은 KMS(문서 관리 시스템)의 AI 어시스턴트입니다.
+  사용자가 문서에 대해 질문하면 검색 도구를 활용하여 답변하세요.
+
+  답변 원칙:
+  1. 문서에 근거한 답변만 제공합니다. 추측하지 마세요.
+  2. 출처 문서명과 페이지/섹션을 항상 명시합니다.
+  3. 여러 문서를 비교할 때는 각 문서의 내용을 명확히 구분합니다.
+  4. 문서를 찾지 못하면 "관련 문서를 찾지 못했습니다"라고 안내합니다.
+  5. 한국어로 응답합니다.
+
+response_policy: "balanced"
+guardrails:
+  - "faithfulness"
+
+router_model: "haiku"
+main_model: "sonnet"
+
+memory_type: "short"
+memory_ttl_seconds: 3600
+
+intent_hints:
+  - pattern: "문서.*찾아"
+    intent: "SEARCH"
+  - pattern: "비교.*해줘"
+    intent: "COMPARISON"
+  - pattern: "요약.*해줘"
+    intent: "SUMMARY"

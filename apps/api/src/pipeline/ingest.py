@@ -51,6 +51,7 @@ class IngestPipeline:
         metadata: Optional[dict] = None,
         file_bytes: Optional[bytes] = None,
         mime_type: Optional[str] = None,
+        external_id: Optional[str] = None,
     ) -> dict:
         """문서 수집. file_bytes가 있으면 파서로 마크다운 변환 후 청킹."""
 
@@ -76,6 +77,7 @@ class IngestPipeline:
             file_hash=file_hash,
             security_level=security_level,
             source_url=source_url,
+            external_id=external_id,
             metadata=metadata,
         )
 

@@ -849,6 +849,8 @@ async def ingest_document(req: IngestRequest, request: Request):
                 "security_level": req.security_level,
                 "source_url": req.source_url,
                 "metadata": req.metadata or {},
+                "source_document_id": req.source_document_id,
+                "mime_type": req.mime_type,
             },
         )
     except Exception as e:

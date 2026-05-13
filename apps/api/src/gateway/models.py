@@ -45,6 +45,8 @@ class IngestRequest(BaseModel):
     file_name: str | None = None
     security_level: str = SecurityLevel.PUBLIC
     metadata: dict = Field(default_factory=dict)
+    source_document_id: str | None = None
+    mime_type: str | None = None
 
 
 class IngestResponse(BaseModel):

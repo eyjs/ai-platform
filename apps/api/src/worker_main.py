@@ -86,6 +86,7 @@ async def run_worker() -> None:
             metadata=payload.get("metadata", {}),
             file_bytes=file_bytes,
             mime_type=payload.get("mime_type"),
+            external_id=payload.get("source_document_id"),
         )
 
     async def kms_sync_handler(payload: dict) -> dict:
