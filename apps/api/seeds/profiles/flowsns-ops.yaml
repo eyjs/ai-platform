@@ -8,8 +8,8 @@ category_scopes: []
 security_level_max: "PUBLIC"
 
 mode: "agentic"
-max_tool_calls: 10
-agent_timeout_seconds: 45
+max_tool_calls: 15
+agent_timeout_seconds: 120
 workflow_id: null
 hybrid_triggers: []
 
@@ -56,6 +56,21 @@ system_prompt: |
   4. **위험한 작업만 확인** — 삭제, 대량 변경 시에만 "정말 할까요?" 확인합니다
   5. **숫자는 정확히** — 마감일 D-N, 건수, 금액 등 정확하게 전달합니다
 
+  ## ⚠️ ID 조회 필수 규칙 (CRITICAL)
+  모든 쓰기 도구(flowsns_task_actions 등)의 clientId, assigneeId, taskId 파라미터는 반드시 UUID 형식이어야 합니다.
+  사람이 말한 이름(예: "강남미용실", "김대리")을 직접 ID로 사용하면 안 됩니다.
+
+  **작업 생성/수정 전에 반드시 이 순서를 따르세요:**
+  1. 고객사 이름이 언급되면 → flowsns_clients 도구로 목록을 조회하여 해당 고객사의 UUID를 확인
+  2. 담당자 이름이 언급되면 → flowsns_profiles 도구로 팀원 목록을 조회하여 해당 담당자의 UUID(id 필드)를 확인
+  3. 태스크 변경 시 → flowsns_tasks 도구로 해당 태스크를 검색하여 UUID를 확인
+  4. 조회한 UUID를 사용하여 쓰기 도구를 호출
+
+  예시 흐름: "강남미용실 인스타 포스팅 김대리한테 내일까지"
+  → (1) flowsns_clients로 목록 조회 → 강남미용실의 id 확인
+  → (2) flowsns_profiles로 팀원 조회 → 김대리의 id 확인
+  → (3) flowsns_task_actions로 태스크 생성 (clientId=조회된UUID, assigneeId=조회된UUID)
+
   ## 응답 스타일
   - 간결하고 핵심만 (대표가 스크롤할 시간 없음)
   - 목록은 번호 매기고 핵심 정보만 한 줄로
@@ -79,23 +94,33 @@ memory_type: "short"
 memory_ttl_seconds: 3600
 
 intent_hints:
-  - pattern: "발행|생성|만들어|등록|추가"
+  - name: "TASK_CREATE"
+    patterns: ["발행", "생성", "만들어", "등록", "추가"]
     description: "태스크 생성 요청"
-  - pattern: "완료|끝|마무리|제출|처리"
+  - name: "TASK_STATUS"
+    patterns: ["완료", "끝", "마무리", "제출", "처리"]
     description: "태스크 상태 변경 요청"
-  - pattern: "태스크|작업|할 일|업무|건"
+  - name: "TASK_QUERY"
+    patterns: ["태스크", "작업", "할 일", "업무", "건"]
     description: "태스크/작업 관련 질문"
-  - pattern: "고객|클라이언트|거래처"
+  - name: "CLIENT_QUERY"
+    patterns: ["고객", "클라이언트", "거래처"]
     description: "고객사 관련 질문"
-  - pattern: "계정|SNS|인스타|네이버|페이스북|블로그|플레이스"
+  - name: "ACCOUNT_QUERY"
+    patterns: ["계정", "SNS", "인스타", "네이버", "페이스북", "블로그", "플레이스"]
     description: "SNS 계정/플랫폼 관련"
-  - pattern: "대시보드|통계|현황|요약|수익|매출"
+  - name: "DASHBOARD"
+    patterns: ["대시보드", "통계", "현황", "요약", "수익", "매출"]
     description: "대시보드/통계/리포트"
-  - pattern: "일정|캘린더|스케줄|마감|이번주|오늘|내일"
+  - name: "CALENDAR"
+    patterns: ["일정", "캘린더", "스케줄", "마감", "이번주", "오늘", "내일"]
     description: "일정/캘린더 관련"
-  - pattern: "승인|컨펌|확인 요청"
+  - name: "APPROVAL"
+    patterns: ["승인", "컨펌", "확인 요청"]
     description: "고객사 승인 프로세스"
-  - pattern: "알림|노티|읽음"
+  - name: "NOTIFICATION"
+    patterns: ["알림", "노티", "읽음"]
     description: "알림 관련"
-  - pattern: "팀|직원|담당자|누가|생산성"
+  - name: "TEAM"
+    patterns: ["팀", "직원", "담당자", "누가", "생산성"]
     description: "팀원/프로필 관련"

@@ -50,6 +50,9 @@ services:
       AIP_DOCFORGE_INTERNAL_KEY: ${DOCFORGE_INTERNAL_KEY:-dev-docforge-key-change-in-production}
       # 사주 백엔드 (호스트에서 실행 중인 saju-backend)
       AIP_SAJU_BACKEND_URL: http://host.docker.internal:8002
+      # FlowSNS 챗봇 연동 (호스트의 flowsns-api 컨테이너)
+      AIP_FLOWSNS_API_URL: http://host.docker.internal:3021
+      AIP_FLOWSNS_API_KEY: fsk_9b50a293334c4d57bd73c42c2f6d30355caf23bb01b7276b4247e637c635de78
       # 로깅
       AIP_LOG_FORMAT: json
       AIP_LOG_LEVEL: INFO

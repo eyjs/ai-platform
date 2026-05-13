@@ -554,6 +554,7 @@ async def chat(req: ChatRequest, request: Request):
                 plan=setup.plan,
                 session_id=setup.session_id,
                 trace=setup.trace,
+                context=setup.context,
             )
 
             await state.session_memory.add_turn(setup.session_id, "user", req.question)
@@ -717,6 +718,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             async for event in state.agent.execute_stream(
                 question=req.question, plan=setup.plan,
                 session_id=setup.session_id, trace=setup.trace,
+                context=setup.context,
             ):
                 event_type = event["type"]
                 if event_type == "thinking":

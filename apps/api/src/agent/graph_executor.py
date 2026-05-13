@@ -86,6 +86,7 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str = "",
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AgentResponse:
         """ExecutionPlan 기반 실행."""
         # Orchestrator 직접 응답 (인사/잡담)
@@ -101,9 +102,9 @@ class GraphExecutor:
         if plan.mode == AgentMode.WORKFLOW:
             response = await self._execute_workflow(question, plan, session_id)
         elif plan.mode == AgentMode.AGENTIC:
-            response = await self._execute_agentic(question, plan, session_id, trace=trace)
+            response = await self._execute_agentic(question, plan, session_id, trace=trace, context=context)
         else:
-            response = await self._execute_deterministic(question, plan, session_id, trace=trace)
+            response = await self._execute_deterministic(question, plan, session_id, trace=trace, context=context)
 
         total_ms = (time.time() - start_time) * 1000
         if response.trace:
@@ -119,6 +120,7 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str = "",
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AsyncIterator[dict]:
         """SSE 스트리밍 실행."""
         # Orchestrator 직접 응답 (인사/잡담)
@@ -133,10 +135,10 @@ class GraphExecutor:
             async for event in self._stream_workflow(question, plan, session_id):
                 yield event
         elif plan.mode == AgentMode.AGENTIC:
-            async for event in self._stream_agentic(question, plan, session_id, trace=trace):
+            async for event in self._stream_agentic(question, plan, session_id, trace=trace, context=context):
                 yield event
         else:
-            async for event in self._stream_deterministic(question, plan, session_id, trace=trace):
+            async for event in self._stream_deterministic(question, plan, session_id, trace=trace, context=context):
                 yield event
 
         if trace:
@@ -277,6 +279,7 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str,
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AgentResponse:
         initial_state = create_initial_state(question, plan, session_id, trace=trace)
         result = await self._deterministic_app.ainvoke(initial_state)
@@ -302,6 +305,7 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str,
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AsyncIterator[dict]:
         """결정론적 모드 스트리밍.
 
@@ -461,12 +465,13 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str,
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AgentResponse:
         if not self._chat_model:
             logger.warning("agentic_no_chat_model, falling back to deterministic")
-            return await self._execute_deterministic(question, plan, session_id, trace=trace)
+            return await self._execute_deterministic(question, plan, session_id, trace=trace, context=context)
 
-        context = AgentContext(session_id=session_id)
+        context = context or AgentContext(session_id=session_id)
         tool_instances = [
             inst for group in plan.tool_groups
             for tc in group
@@ -476,9 +481,15 @@ class GraphExecutor:
 
         if not lc_tools:
             logger.warning("agentic_no_tools, falling back to deterministic")
-            return await self._execute_deterministic(question, plan, session_id, trace=trace)
+            return await self._execute_deterministic(question, plan, session_id, trace=trace, context=context)
 
-        agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
+        if context.metadata:
+            agent_app = build_agentic_graph(
+                chat_model=self._chat_model, tools=lc_tools,
+                system_prompt=plan.system_prompt,
+            )
+        else:
+            agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
         effective_question = question
         if plan.conversation_context:
@@ -535,17 +546,18 @@ class GraphExecutor:
         plan: ExecutionPlan,
         session_id: str,
         trace: Optional[RequestTrace] = None,
+        context: Optional[AgentContext] = None,
     ) -> AsyncIterator[dict]:
         """에이전틱 모드 스트리밍.
 
         astream_events로 도구 호출 추적 + 최종 답변 토큰 스트리밍.
         """
         if not self._chat_model:
-            async for event in self._stream_deterministic(question, plan, session_id, trace=trace):
+            async for event in self._stream_deterministic(question, plan, session_id, trace=trace, context=context):
                 yield event
             return
 
-        context = AgentContext(session_id=session_id)
+        context = context or AgentContext(session_id=session_id)
         tool_instances = [
             inst for group in plan.tool_groups
             for tc in group
@@ -554,11 +566,17 @@ class GraphExecutor:
         lc_tools = convert_tools_to_langchain(tool_instances, context, plan.scope)
 
         if not lc_tools:
-            async for event in self._stream_deterministic(question, plan, session_id, trace=trace):
+            async for event in self._stream_deterministic(question, plan, session_id, trace=trace, context=context):
                 yield event
             return
 
-        agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
+        if context.metadata:
+            agent_app = build_agentic_graph(
+                chat_model=self._chat_model, tools=lc_tools,
+                system_prompt=plan.system_prompt,
+            )
+        else:
+            agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
         effective_question = question
         if plan.conversation_context:
