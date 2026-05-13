@@ -82,6 +82,27 @@ class WorkflowAdvanceRequest(BaseModel):
     input: str = ""
 
 
+class SessionListItem(BaseModel):
+    session_id: str
+    profile_id: str
+    created_at: str
+    updated_at: str
+    turn_count: int
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionListItem]
+    total: int
+
+
+class SessionHistoryResponse(BaseModel):
+    session_id: str
+    profile_id: str
+    turns: list[dict]
+    created_at: str
+    updated_at: str
+
+
 @dataclass
 class UserContext:
     """인증 후 생성되는 사용자 맥락."""

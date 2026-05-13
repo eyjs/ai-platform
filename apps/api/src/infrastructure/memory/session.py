@@ -142,6 +142,43 @@ class SessionMemory:
             return json.loads(meta)
         return dict(meta)
 
+    async def list_sessions(
+        self,
+        user_id: str,
+        profile_id: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """사용자의 세션 목록 조회. (items, total) 튜플 반환."""
+        where = "WHERE user_id = $1 AND expires_at > NOW()"
+        params: list = [user_id]
+        idx = 2
+
+        if profile_id:
+            where += f" AND profile_id = ${idx}"
+            params.append(profile_id)
+            idx += 1
+
+        count_row = await self._pool.fetchrow(
+            f"SELECT COUNT(*) AS cnt FROM conversation_sessions {where}",
+            *params,
+        )
+        total = count_row["cnt"] if count_row else 0
+
+        rows = await self._pool.fetch(
+            f"""
+            SELECT id, profile_id, user_id,
+                   jsonb_array_length(COALESCE(turns, '[]'::jsonb)) AS turn_count,
+                   created_at, updated_at
+            FROM conversation_sessions
+            {where}
+            ORDER BY updated_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *params, limit, offset,
+        )
+        return [dict(r) for r in rows], total
+
     async def cleanup_expired(self) -> int:
         """만료된 세션 삭제."""
         result = await self._pool.execute(
