@@ -62,8 +62,8 @@ async def test_multi_query_search_uses_gather():
     assert len(results) == 3
 
 
-async def test_multi_query_search_merges_by_chunk_id():
-    """동일 chunk_id는 최고 점수만 유지한다."""
+async def test_multi_query_search_sums_corroboration():
+    """[C11] 여러 변형 쿼리가 함께 찾은 chunk는 RRF 점수를 합산(SUM)해 corroboration을 보존한다."""
     tool = _make_tool()
 
     async def mock_hybrid_search(**kwargs):
@@ -74,7 +74,7 @@ async def test_multi_query_search_merges_by_chunk_id():
             ]
         elif kwargs["text_query"] == "q2":
             return [
-                {"chunk_id": "c1", "score": 0.95, "content": "x"},  # higher score
+                {"chunk_id": "c1", "score": 0.95, "content": "x"},  # c1을 두 변형이 모두 찾음
                 {"chunk_id": "c3", "score": 0.6, "content": "z"},
             ]
         return []
@@ -88,9 +88,11 @@ async def test_multi_query_search_merges_by_chunk_id():
     # c1, c2, c3 = 3개 고유 chunk
     assert len(results) == 3
 
-    # c1은 최고 점수 0.95
+    # c1은 두 변형의 합산: 0.9 + 0.95 = 1.85 (MAX였다면 0.95) → corroboration 반영
     c1 = next(r for r in results if r["chunk_id"] == "c1")
-    assert c1["score"] == pytest.approx(0.95)
+    assert c1["score"] == pytest.approx(1.85)
+    # 합산 결과 c1이 최상위 (한 변형만 찾은 c2/c3보다 위)
+    assert results[0]["chunk_id"] == "c1"
 
     # 점수 내림차순 정렬
     scores = [r["score"] for r in results]

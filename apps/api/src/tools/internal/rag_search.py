@@ -161,21 +161,23 @@ class RAGSearchTool:
             )
 
         if not candidates:
-            return []
+            # 2-tuple 계약 유지 (빈 리스트만 반환하면 호출부 언팩이 깨진다)
+            return [], query_embedding
 
-        # L2. 노이즈 필터
-        candidates = filter_noise(candidates)
-
-        # L3. 인접 청크 확장
+        # L3. 인접 청크 확장 (cascade: 약신호 노이즈 컷을 리랭커 앞에서 하지 않는다 → 고-recall)
         candidates = await expand_neighbors(self._store, candidates)
 
-        # L4. 리랭킹
+        # L4. 리랭킹 (전체 후보 풀을 받아 정밀 판정)
         if self._reranker and len(candidates) > top_k:
             results = await rerank_3tier(
                 self._reranker, query, candidates, top_k,
             )
         else:
             results = candidates[:top_k]
+
+        # L2'. 노이즈 필터 (C12): 약신호 RRF 단계가 아니라 리랭킹 후 융합 점수 기준으로 적용.
+        #      리랭커가 살릴 수 있는 청크를 검색 점수만으로 미리 잘라내던 문제를 제거.
+        results = filter_noise(results)
 
         # L5. 결과 가드
         return guard_results(results), query_embedding
@@ -313,12 +315,18 @@ class RAGSearchTool:
 
         all_results_lists = await asyncio.gather(*tasks)
 
+        # C11 수정: 변형 쿼리 간 corroboration 보존을 위해 RRF 점수를 합산(SUM)한다.
+        # 기존 MAX는 여러 변형이 함께 찾아낸 청크(강한 관련성 신호)를 한 변형만 찾은
+        # 청크와 동일 취급해 쿼리확장 효과를 알고리즘적으로 상쇄시켰다. RRF는 본래
+        # 여러 랭킹의 기여를 합산하도록 설계된 기법이므로 SUM이 정합한다.
         merged: dict[str, dict] = {}
         for results in all_results_lists:
             for r in results:
                 cid = r["chunk_id"]
-                if cid not in merged or r["score"] > merged[cid]["score"]:
-                    merged[cid] = r
+                if cid in merged:
+                    merged[cid] = {**merged[cid], "score": merged[cid]["score"] + r["score"]}
+                else:
+                    merged[cid] = dict(r)
 
         return sorted(
             merged.values(),

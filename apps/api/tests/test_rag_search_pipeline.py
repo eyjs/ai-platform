@@ -133,6 +133,38 @@ async def test_empty_query():
 
 
 @pytest.mark.asyncio
+async def test_no_candidates_does_not_crash():
+    """[회귀] 검색 결과가 비면 _execute_full_pipeline이 2-tuple을 반환해야 한다.
+
+    구버그: 후보가 없을 때 `return []` (단일 리스트) → 호출부
+    `results, query_embedding = ...` 언팩이 'not enough values to unpack'으로 크래시.
+    """
+    from src.tools.internal.rag_search import RAGSearchTool
+
+    embedder = AsyncMock()
+    embedder.embed_batch.return_value = [[0.1] * 10]
+
+    store = AsyncMock()
+    store.hybrid_search.return_value = []  # 검색 결과 없음
+
+    tool = RAGSearchTool(
+        embedding_provider=embedder,
+        vector_store=store,
+        reranker=AsyncMock(),
+        router_llm=None,  # probe 스킵 → 단일 쿼리 경로
+    )
+
+    result = await tool.execute(
+        {"query": "결과없는질문"},
+        _make_context(),
+        _make_scope(),
+    )
+
+    assert result.success is True
+    assert result.data == []
+
+
+@pytest.mark.asyncio
 async def test_adaptive_skips_expansion_on_high_probe_score():
     """probe top-1 RRF 점수가 0.012 이상이면 쿼리 확장 스킵."""
     from src.tools.internal.rag_search import RAGSearchTool
