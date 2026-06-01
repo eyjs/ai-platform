@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Optional
 import asyncpg
 
 from src.domain.models import SecurityLevel, UserRole
+from src.domain.profile_authz import is_profile_allowed, resolve_allowed_profiles
 from src.gateway.models import UserContext
 from src.observability.logging import get_logger
 
@@ -46,11 +47,13 @@ class AuthService:
         jwt_secret: str = "",
         auth_required: bool = True,
         access_policy: AccessPolicyStore | None = None,
+        profile_auth_strict: bool = False,
     ):
         self._pool = pool
         self._jwt_secret = jwt_secret
         self._auth_required = auth_required
         self._access_policy = access_policy
+        self._profile_auth_strict = profile_auth_strict
         self._background_tasks: set[asyncio.Task] = set()
 
     async def authenticate(
@@ -159,12 +162,18 @@ class AuthService:
         user_ctx: UserContext,
         chatbot_id: str,
     ) -> None:
-        """사용자가 해당 프로필에 접근 권한이 있는지 확인한다."""
+        """사용자가 해당 프로필에 접근 권한이 있는지 확인한다.
+
+        A1: profile_auth_strict=True면 빈 allowed_profiles = 전체 거부(deny-by-default).
+        명시적 전체 허용은 와일드카드 "*"로. strict=False면 빈 목록=전체 허용(레거시).
+        """
         if not self._auth_required:
             return
 
-        # allowed_profiles가 비어있으면 모든 프로필 접근 허용
-        if user_ctx.allowed_profiles and chatbot_id not in user_ctx.allowed_profiles:
+        allowed = resolve_allowed_profiles(
+            user_ctx.allowed_profiles, strict=self._profile_auth_strict
+        )
+        if not is_profile_allowed(allowed, chatbot_id):
             raise AuthError(
                 f"이 API Key는 '{chatbot_id}' 프로필에 접근 권한이 없습니다"
             )

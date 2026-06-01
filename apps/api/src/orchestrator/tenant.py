@@ -21,9 +21,10 @@ class TenantService:
         self._pool = pool
 
     async def get_allowed_profiles(self, tenant_id: str | None) -> list[str]:
-        """테넌트에 할당된 프로필 ID 목록을 반환한다.
+        """테넌트에 할당된 프로필 ID 목록을 반환한다 (원시 데이터 접근자).
 
-        tenant_id가 None이면 빈 리스트 (전체 접근).
+        tenant_id가 None이면 빈 리스트. 빈 리스트의 인가 의미(전체 허용/거부)는
+        호출부의 fail-closed 정책(domain.profile_authz)이 strict 모드에 따라 결정한다.
         """
         if not tenant_id:
             return []

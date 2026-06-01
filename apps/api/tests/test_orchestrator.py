@@ -410,3 +410,74 @@ async def test_handle_switch_pauses_workflow(orchestrator, deps):
     assert meta["paused_workflow"]["workflow_id"] == "contract-wf"
     we.cancel.assert_called_once_with("sess-1")
     sm.save_orchestrator_metadata.assert_called_once()
+
+
+# --- A1: deny-by-default 프로필 인가 (_get_available_profiles) ---
+
+
+class _AuthCtx:
+    def __init__(self, allowed_profiles=None, tenant_id=None, user_type="", user_id="u1"):
+        self.allowed_profiles = allowed_profiles or []
+        self.tenant_id = tenant_id
+        self.user_type = user_type
+        self.user_id = user_id
+
+
+@pytest.mark.asyncio
+async def test_available_profiles_legacy_empty_allows_all(orchestrator, deps):
+    """[레거시] strict=False면 빈 테넌트 매핑 = 전체 허용 (하위호환)."""
+    _, ps, _, _, ts = deps
+    ps.list_all.return_value = [_make_profile("a"), _make_profile("b")]
+    ts.get_allowed_profiles.return_value = []
+    with patch("src.orchestrator.orchestrator.settings.profile_auth_strict", False):
+        result = await orchestrator._get_available_profiles(_AuthCtx(tenant_id="t1"))
+    assert {p["id"] for p in result} == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_available_profiles_strict_empty_tenant_denies_all(orchestrator, deps):
+    """[네거티브] strict면 테넌트 매핑이 비어있으면 전체 거부."""
+    _, ps, _, _, ts = deps
+    ps.list_all.return_value = [_make_profile("a"), _make_profile("b")]
+    ts.get_allowed_profiles.return_value = []
+    with patch("src.orchestrator.orchestrator.settings.profile_auth_strict", True):
+        result = await orchestrator._get_available_profiles(_AuthCtx(tenant_id="t1"))
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_available_profiles_strict_empty_apikey_no_tenant_denies(orchestrator, deps):
+    """[네거티브] strict + 빈 allowed_profiles + tenant_id 없음 = 전체 거부."""
+    _, ps, _, _, ts = deps
+    ps.list_all.return_value = [_make_profile("a")]
+    with patch("src.orchestrator.orchestrator.settings.profile_auth_strict", True):
+        result = await orchestrator._get_available_profiles(
+            _AuthCtx(allowed_profiles=[], tenant_id=None)
+        )
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_available_profiles_strict_tenant_scoped(orchestrator, deps):
+    """strict + 테넌트 매핑 존재 시 교집합(매핑된 프로필)만 노출."""
+    _, ps, _, _, ts = deps
+    ps.list_all.return_value = [_make_profile("a"), _make_profile("b")]
+    ts.get_allowed_profiles.return_value = ["a"]
+    with patch("src.orchestrator.orchestrator.settings.profile_auth_strict", True):
+        result = await orchestrator._get_available_profiles(
+            _AuthCtx(tenant_id="t1", allowed_profiles=["a", "b"])
+        )
+    assert {p["id"] for p in result} == {"a"}
+
+
+@pytest.mark.asyncio
+async def test_available_profiles_strict_wildcard_allows_all(orchestrator, deps):
+    """strict여도 와일드카드 키 + 와일드카드 테넌트 매핑이면 전체 허용."""
+    _, ps, _, _, ts = deps
+    ps.list_all.return_value = [_make_profile("a"), _make_profile("b")]
+    ts.get_allowed_profiles.return_value = ["*"]
+    with patch("src.orchestrator.orchestrator.settings.profile_auth_strict", True):
+        result = await orchestrator._get_available_profiles(
+            _AuthCtx(tenant_id="t1", allowed_profiles=["*"])
+        )
+    assert {p["id"] for p in result} == {"a", "b"}

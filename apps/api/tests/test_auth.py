@@ -183,9 +183,50 @@ async def test_profile_access_denied(auth_service):
 
 @pytest.mark.asyncio
 async def test_profile_access_empty_allows_all(auth_service):
-    """allowed_profiles 비어있으면 모든 프로필 허용."""
+    """[레거시 fail-open] strict=False면 allowed_profiles 비어있을 때 모든 프로필 허용."""
     ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_profiles=[])
     await auth_service.check_profile_access(ctx, "any-profile")
+
+
+# --- A1: deny-by-default (profile_auth_strict=True) ---
+
+
+@pytest.fixture
+def auth_service_strict(mock_pool):
+    return AuthService(
+        pool=mock_pool, jwt_secret="test-secret",
+        auth_required=True, profile_auth_strict=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_profile_access_strict_empty_denies_all(auth_service_strict):
+    """[네거티브] strict면 빈 allowed_profiles = 전체 거부."""
+    ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_profiles=[])
+    with pytest.raises(AuthError):
+        await auth_service_strict.check_profile_access(ctx, "any-profile")
+
+
+@pytest.mark.asyncio
+async def test_profile_access_strict_not_in_list_denies(auth_service_strict):
+    """[네거티브] strict면 허용목록 밖 프로필 거부."""
+    ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_profiles=["general-chat"])
+    with pytest.raises(AuthError):
+        await auth_service_strict.check_profile_access(ctx, "insurance-qa")
+
+
+@pytest.mark.asyncio
+async def test_profile_access_strict_in_list_passes(auth_service_strict):
+    """strict여도 명시 허용된 프로필은 통과."""
+    ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_profiles=["insurance-qa"])
+    await auth_service_strict.check_profile_access(ctx, "insurance-qa")
+
+
+@pytest.mark.asyncio
+async def test_profile_access_strict_wildcard_allows_all(auth_service_strict):
+    """strict여도 와일드카드 "*"는 명시적 전체 허용."""
+    ctx = UserContext(user_id="u1", user_role="VIEWER", allowed_profiles=["*"])
+    await auth_service_strict.check_profile_access(ctx, "any-profile")
 
 
 @pytest.mark.asyncio

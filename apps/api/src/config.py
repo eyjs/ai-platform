@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # 인증
     auth_required: bool = True
     jwt_secret: str = ""
+    # 프로필 인가 deny-by-default (A1). True면 빈 allowed_profiles/테넌트 매핑 = 전체 거부.
+    # 와일드카드 "*"로 명시적 전체 허용. 기존 fail-open 호환을 위해 기본 False.
+    profile_auth_strict: bool = False
 
     # KMS 연동 (도메인 SSOT)
     kms_api_url: str = ""              # 예: http://kms-api:3000/api

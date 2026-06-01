@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 from src.config import settings
+from src.domain.profile_authz import is_profile_allowed, resolve_allowed_profiles
 from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
 from src.orchestrator.embedding_router import EmbeddingRouter
@@ -262,25 +263,32 @@ class MasterOrchestrator:
         """테넌트 + API Key 권한 기반으로 사용 가능한 프로필 목록을 반환한다."""
         all_profiles = await self._profile_store.list_all()
 
-        # API Key의 allowed_profiles 필터
-        api_allowed = set(user_ctx.allowed_profiles) if user_ctx.allowed_profiles else None
+        strict = settings.profile_auth_strict
 
-        # 테넌트 필터
+        # API Key의 allowed_profiles 필터 (A1: strict면 빈 목록=전체 거부)
+        api_allowed = resolve_allowed_profiles(user_ctx.allowed_profiles, strict=strict)
+
+        # 테넌트 필터: tenant_id가 있으면 매핑 적용. strict면 빈 매핑=전체 거부.
+        # tenant_id가 아예 없는 키는 테넌트 필터를 적용하지 않는다(키 단위 인가가 관장).
         tenant_id = getattr(user_ctx, "tenant_id", None)
         tenant_allowed = None
         if tenant_id:
             tenant_profile_ids = await self._tenant.get_allowed_profiles(tenant_id)
-            if tenant_profile_ids:
-                tenant_allowed = set(tenant_profile_ids)
+            tenant_allowed = resolve_allowed_profiles(tenant_profile_ids, strict=strict)
+        elif strict:
+            logger.warning(
+                "orchestrator_profile_auth_no_tenant",
+                user_id=getattr(user_ctx, "user_id", ""),
+            )
 
         # segment 필터를 위한 user_type 추출
         user_type = getattr(user_ctx, "user_type", "")
 
         result = []
         for p in all_profiles:
-            if api_allowed and p.id not in api_allowed:
+            if not is_profile_allowed(api_allowed, p.id):
                 continue
-            if tenant_allowed and p.id not in tenant_allowed:
+            if not is_profile_allowed(tenant_allowed, p.id):
                 continue
             if self._access_policy and not self._access_policy.is_allowed(p.id, user_type):
                 continue

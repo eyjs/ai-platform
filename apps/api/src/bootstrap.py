@@ -143,8 +143,13 @@ async def create_app_state(settings: Settings) -> AppState:
         jwt_secret=settings.jwt_secret,
         auth_required=settings.auth_required,
         access_policy=access_policy,
+        profile_auth_strict=settings.profile_auth_strict,
     )
-    logger.info("auth_initialized", auth_required=settings.auth_required)
+    logger.info(
+        "auth_initialized",
+        auth_required=settings.auth_required,
+        profile_auth_strict=settings.profile_auth_strict,
+    )
 
     # 3. FactStore + Memory
     fact_store = FactStore(pool)
