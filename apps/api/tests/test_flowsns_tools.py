@@ -20,6 +20,11 @@ from src.tools.internal.flowsns.reports_tool import FlowSNSReportsTool
 from src.tools.internal.flowsns.profiles_tool import FlowSNSProfilesTool
 
 
+# 이름→UUID 해석을 건너뛰기 위한 유효 UUID 상수 (task_actions_tool._UUID_RE 매칭)
+CLIENT_UUID = "11111111-1111-1111-1111-111111111111"
+ASSIGNEE_UUID = "22222222-2222-2222-2222-222222222222"
+
+
 @pytest.fixture
 def mock_client():
     client = AsyncMock(spec=FlowSNSClient)
@@ -240,13 +245,14 @@ class TestFlowSNSTaskActionsTool:
 
     @pytest.mark.asyncio
     async def test_create_task(self, mock_client: AsyncMock, context_with_company: AgentContext):
+        # clientId에 UUID를 직접 전달하면 이름→UUID 해석을 건너뛴다 (task_actions_tool._resolve_client_id)
         mock_client.post.return_value = {"id": "new-1", "title": "인스타 포스팅"}
         tool = FlowSNSTaskActionsTool(client=mock_client)
         result = await tool.execute(
             {
                 "action": "create",
                 "title": "인스타 포스팅",
-                "clientId": "c1",
+                "clientId": CLIENT_UUID,
                 "platforms": ["instagram"],
                 "taskType": "post_writing",
                 "dueDate": "2026-05-20",
@@ -260,12 +266,59 @@ class TestFlowSNSTaskActionsTool:
             "/tasks",
             json={
                 "title": "인스타 포스팅",
-                "clientId": "c1",
+                "clientId": CLIENT_UUID,
                 "platforms": ["instagram"],
                 "taskType": "post_writing",
                 "dueDate": "2026-05-20",
             },
         )
+
+    @pytest.mark.asyncio
+    async def test_create_task_resolves_client_name(self, mock_client: AsyncMock, context_with_company: AgentContext):
+        # clientId가 UUID가 아니면 GET /clients로 이름을 해석해 UUID로 치환한다.
+        mock_client.get.return_value = [
+            {"id": CLIENT_UUID, "name": "스타벅스 코리아"},
+            {"id": "99999999-9999-9999-9999-999999999999", "name": "다른 고객사"},
+        ]
+        mock_client.post.return_value = {"id": "new-1"}
+        tool = FlowSNSTaskActionsTool(client=mock_client)
+        result = await tool.execute(
+            {
+                "action": "create",
+                "title": "인스타 포스팅",
+                "clientId": "스타벅스",
+                "platforms": ["instagram"],
+                "taskType": "post_writing",
+                "dueDate": "2026-05-20",
+            },
+            context_with_company,
+        )
+
+        assert result.success is True
+        mock_client.get.assert_called_once_with("/clients")
+        # 이름 "스타벅스"가 UUID로 해석되어 post 바디에 담긴다
+        assert mock_client.post.call_args[1]["json"]["clientId"] == CLIENT_UUID
+
+    @pytest.mark.asyncio
+    async def test_create_task_unknown_client_name(self, mock_client: AsyncMock, context_with_company: AgentContext):
+        # 해석 실패(404)는 사용자 친화적 에러로 반환되고 post는 호출되지 않는다.
+        mock_client.get.return_value = [{"id": CLIENT_UUID, "name": "스타벅스 코리아"}]
+        tool = FlowSNSTaskActionsTool(client=mock_client)
+        result = await tool.execute(
+            {
+                "action": "create",
+                "title": "x",
+                "clientId": "존재하지않는고객사",
+                "platforms": ["instagram"],
+                "taskType": "post_writing",
+                "dueDate": "2026-05-20",
+            },
+            context_with_company,
+        )
+
+        assert result.success is False
+        assert "찾을 수 없습니다" in (result.error or "")
+        mock_client.post.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_task_with_optional_fields(self, mock_client: AsyncMock, context_with_company: AgentContext):
@@ -275,12 +328,12 @@ class TestFlowSNSTaskActionsTool:
             {
                 "action": "create",
                 "title": "급한 블로그",
-                "clientId": "c2",
+                "clientId": CLIENT_UUID,
                 "platforms": ["naver_blog"],
                 "taskType": "post_writing",
                 "dueDate": "2026-05-14",
                 "priority": "urgent",
-                "assigneeId": "user-a",
+                "assigneeId": ASSIGNEE_UUID,
                 "description": "긴급 건",
             },
             context_with_company,
@@ -289,7 +342,7 @@ class TestFlowSNSTaskActionsTool:
         assert result.success is True
         call_json = mock_client.post.call_args[1]["json"]
         assert call_json["priority"] == "urgent"
-        assert call_json["assigneeId"] == "user-a"
+        assert call_json["assigneeId"] == ASSIGNEE_UUID
         assert call_json["description"] == "긴급 건"
 
     @pytest.mark.asyncio
@@ -364,13 +417,14 @@ class TestFlowSNSTaskActionsTool:
 
     @pytest.mark.asyncio
     async def test_api_error(self, mock_client: AsyncMock, context_with_company: AgentContext):
+        # clientId는 UUID로 전달해 해석 단계를 건너뛰고, post 단계의 API 에러 처리를 검증한다.
         mock_client.post.side_effect = FlowSNSClientError(400, "Bad Request")
         tool = FlowSNSTaskActionsTool(client=mock_client)
         result = await tool.execute(
             {
                 "action": "create",
                 "title": "t",
-                "clientId": "c",
+                "clientId": CLIENT_UUID,
                 "platforms": ["instagram"],
                 "taskType": "post_writing",
                 "dueDate": "2026-05-20",
