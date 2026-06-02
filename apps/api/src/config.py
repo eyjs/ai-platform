@@ -9,11 +9,21 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# .env 위치를 실행 디렉토리와 무관하게 고정 (config.py = apps/api/src/config.py 기준).
-# 모노레포 루트 .env 를 기본으로, apps/api/.env 가 있으면 그것이 우선(override).
-# 단, OS 환경변수(docker-compose 등)는 pydantic 우선순위상 .env 보다 항상 우선한다.
-_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"   # ai-platform/.env
-_API_ENV = Path(__file__).resolve().parents[1] / ".env"    # apps/api/.env (선택)
+# .env 위치를 실행 디렉토리와 무관하게 탐색 (config.py 기준 상위 경로들).
+# 로컬: apps/api/src/config.py → 모노레포 루트(.env) + apps/api(.env).
+# 도커: /app/src/config.py → 상위가 얕아 후보가 없을 수 있음(그땐 OS 환경변수 사용).
+# OS 환경변수(docker-compose 등)는 pydantic 우선순위상 .env 보다 항상 우선한다.
+def _candidate_env_files() -> tuple[str, ...]:
+    here = Path(__file__).resolve()
+    paths: list[str] = []
+    for up in (3, 1):  # parents[3]=모노레포 루트(로컬), parents[1]=apps/api
+        if up < len(here.parents):
+            paths.append(str(here.parents[up] / ".env"))
+    paths.append(".env")  # 실행 디렉토리 폴백
+    return tuple(paths)
+
+
+_ENV_FILES = _candidate_env_files()
 
 
 class ProviderMode(str, Enum):
@@ -25,7 +35,7 @@ class ProviderMode(str, Enum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(str(_ROOT_ENV), str(_API_ENV)),
+        env_file=_ENV_FILES,
         env_prefix="AIP_",
         case_sensitive=False,
         extra="ignore",
