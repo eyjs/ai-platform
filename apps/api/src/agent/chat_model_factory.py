@@ -15,19 +15,31 @@ def create_chat_model(
     ollama_host: str = "http://localhost:11434",
     openai_api_key: str = "",
     server_url: str = "",
+    anthropic_api_key: str = "",
 ) -> BaseChatModel:
     """설정 기반 ChatModel 생성.
 
     Args:
-        provider_mode: development/openai/production
+        provider_mode: development/openai/production/anthropic
         model_name: 모델명
         ollama_host: Ollama 서버 주소
         openai_api_key: OpenAI API 키
         server_url: GPU/MLX 서버 URL (OpenAI 호환)
+        anthropic_api_key: Anthropic API 키 (provider_mode=anthropic)
 
     Returns:
         BaseChatModel (tool calling 지원)
     """
+    # Anthropic 모드는 항상 Claude로 라우팅한다 (server_url/MLX보다 우선).
+    # 미설치 시 ImportError는 호출부(bootstrap)에서 흡수되어 agentic 모드만 비활성화된다.
+    if provider_mode == ProviderMode.ANTHROPIC:
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(
+            model=model_name or "claude-haiku-4-5",
+            api_key=anthropic_api_key,
+        )
+
     # GPU/MLX 서버가 설정되면 OpenAI 호환 API로 연결
     if server_url:
         from langchain_openai import ChatOpenAI

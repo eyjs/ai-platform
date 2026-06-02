@@ -15,7 +15,7 @@ from src.locale.bundle import LocaleBundle, set_locale
 from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
-from src.config import Settings
+from src.config import ProviderMode, Settings
 from src.gateway.access_policy import AccessPolicyStore
 from src.gateway.auth import AuthService
 from src.gateway.rate_limiter import PGRateLimiter
@@ -254,7 +254,11 @@ async def create_app_state(settings: Settings) -> AppState:
     chat_model = None
     try:
         # MLX 서버 사용 시 모델명을 서버에서 자동 감지
-        chat_model_name = settings.main_model
+        # anthropic 모드는 Claude 모델명을 사용 (main_model은 로컬 qwen 기본값)
+        if settings.provider_mode == ProviderMode.ANTHROPIC:
+            chat_model_name = settings.anthropic_main_model
+        else:
+            chat_model_name = settings.main_model
         if settings.main_llm_server_url:
             try:
                 import httpx
@@ -276,6 +280,7 @@ async def create_app_state(settings: Settings) -> AppState:
             ollama_host=settings.ollama_host,
             openai_api_key=settings.openai_api_key,
             server_url=settings.main_llm_server_url,
+            anthropic_api_key=settings.anthropic_api_key,
         )
         logger.info("chat_model_initialized", type=type(chat_model).__name__)
     except ImportError:
