@@ -63,7 +63,8 @@ class ResponseCacheService:
     async def get(
         self, profile_id: str, mode: str, normalized: str, tenant_id: str | None = None,
     ) -> Optional[CachedResponse]:
-        key = compute_cache_key(profile_id, mode, normalized, tenant_id)
+        # put과 동일한 비-NULL 키 정규화로 캐시 히트 일치 보장
+        key = compute_cache_key(profile_id, mode, normalized, tenant_id or "default")
         try:
             async with self._session_factory() as session:
                 row = (await session.execute(
@@ -110,7 +111,9 @@ class ResponseCacheService:
         ttl_seconds: Optional[int] = None,
         tenant_id: str | None = None,
     ) -> None:
-        key = compute_cache_key(profile_id, mode, normalized, tenant_id)
+        # NOT NULL(4d) 보장: 키와 컬럼 모두 같은 비-NULL 값 사용
+        effective_tenant = tenant_id or "default"
+        key = compute_cache_key(profile_id, mode, normalized, effective_tenant)
         ttl = ttl_seconds or self._default_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
@@ -134,7 +137,7 @@ class ResponseCacheService:
                     {
                         "k": key, "pid": profile_id, "mode": mode, "rt": response_text,
                         "pt": prompt_tokens, "ct": completion_tokens, "exp": expires_at,
-                        "tid": tenant_id,
+                        "tid": effective_tenant,
                     },
                 )
                 await session.commit()

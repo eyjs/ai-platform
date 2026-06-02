@@ -102,10 +102,19 @@ class WorkflowSessionStore:
         Returns:
             WorkflowSession 또는 None (존재하지 않을 때)
         """
-        row = await self._pool.fetchrow(
-            "SELECT workflow_id, current_step, state FROM workflow_states WHERE id = $1",
-            session_id,
-        )
+        # 요청 컨텍스트가 있으면 테넌트 격리(A2). 백그라운드(None)는 무필터.
+        tenant = current_tenant.get()
+        if tenant:
+            row = await self._pool.fetchrow(
+                "SELECT workflow_id, current_step, state FROM workflow_states "
+                "WHERE id = $1 AND tenant_id = $2",
+                session_id, tenant,
+            )
+        else:
+            row = await self._pool.fetchrow(
+                "SELECT workflow_id, current_step, state FROM workflow_states WHERE id = $1",
+                session_id,
+            )
 
         if not row:
             return None
