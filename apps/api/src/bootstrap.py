@@ -144,6 +144,7 @@ async def create_app_state(settings: Settings) -> AppState:
         auth_required=settings.auth_required,
         access_policy=access_policy,
         profile_auth_strict=settings.profile_auth_strict,
+        publishable_rate_limit_max=settings.publishable_rate_limit_max,
     )
     logger.info(
         "auth_initialized",

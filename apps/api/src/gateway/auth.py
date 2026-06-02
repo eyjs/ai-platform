@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING, Optional
 import asyncpg
 
 from src.domain.models import SecurityLevel, UserRole
+from src.domain.key_type_policy import (
+    SECRET,
+    VALID_KEY_TYPES,
+    clamp_security_for_publishable,
+    validate_publishable_config,
+)
 from src.domain.profile_authz import is_profile_allowed, resolve_allowed_profiles
 from src.gateway.models import UserContext
 from src.observability.logging import get_logger
@@ -48,12 +54,14 @@ class AuthService:
         auth_required: bool = True,
         access_policy: AccessPolicyStore | None = None,
         profile_auth_strict: bool = False,
+        publishable_rate_limit_max: int = 120,
     ):
         self._pool = pool
         self._jwt_secret = jwt_secret
         self._auth_required = auth_required
         self._access_policy = access_policy
         self._profile_auth_strict = profile_auth_strict
+        self._publishable_rate_limit_max = publishable_rate_limit_max
         self._background_tasks: set[asyncio.Task] = set()
 
     async def authenticate(
@@ -127,7 +135,7 @@ class AuthService:
             """
             SELECT user_id, user_role, security_level_max, user_type,
                    allowed_profiles, allowed_origins, rate_limit_per_min,
-                   expires_at, tenant_id
+                   expires_at, tenant_id, key_type
             FROM api_keys
             WHERE key_hash = $1 AND is_active = TRUE
             """,
@@ -146,15 +154,23 @@ class AuthService:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
+        # key_type 결정 (레거시/마이그레이션 전 행은 None → secret 취급)
+        key_type = row.get("key_type") or SECRET
+        security_level_max = row["security_level_max"]
+        # publishable 키는 런타임에 보안등급을 PUBLIC로 클램프 (defense-in-depth)
+        if key_type != SECRET:
+            security_level_max = clamp_security_for_publishable(security_level_max)
+
         return UserContext(
             user_id=row["user_id"] or "api-user",
             user_role=row["user_role"],
-            security_level_max=row["security_level_max"],
+            security_level_max=security_level_max,
             user_type=row["user_type"] or "",
             allowed_profiles=row["allowed_profiles"] or [],
             allowed_origins=row["allowed_origins"] or [],
             rate_limit_per_min=row["rate_limit_per_min"] or 60,
             tenant_id=row["tenant_id"],
+            key_type=key_type,
         )
 
     async def check_profile_access(
@@ -214,6 +230,7 @@ class AuthService:
         allowed_origins: list[str] | None = None,
         rate_limit_per_min: int = 60,
         user_type: str = "",
+        key_type: str = SECRET,
     ) -> tuple[str, str]:
         """새 API Key를 생성하고 DB에 저장한다.
 
@@ -231,21 +248,42 @@ class AuthService:
         if security_level_max not in valid_levels:
             raise AuthError(f"유효하지 않은 보안등급: {security_level_max} (허용: {valid_levels})")
 
+        if key_type not in VALID_KEY_TYPES:
+            raise AuthError(f"유효하지 않은 키 종류: {key_type} (허용: {set(VALID_KEY_TYPES)})")
+
+        # publishable 키는 발급 시점에 강한 제약을 강제 (오리진·보안등급·역할·쿼터)
+        if key_type != SECRET:
+            violation = validate_publishable_config(
+                security_level_max=security_level_max,
+                user_role=user_role,
+                allowed_origins=allowed_origins,
+                rate_limit_per_min=rate_limit_per_min,
+                rate_limit_cap=self._publishable_rate_limit_max,
+            )
+            if violation:
+                raise AuthError(violation)
+
         raw_key, key_hash = generate_api_key()
 
         await self._pool.execute(
             """
             INSERT INTO api_keys (key_hash, name, user_id, user_role, security_level_max,
                                   allowed_profiles, allowed_origins, rate_limit_per_min,
-                                  user_type)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                  user_type, key_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             key_hash, name, creator_user_id, user_role, security_level_max,
             allowed_profiles or [], allowed_origins or [], rate_limit_per_min,
-            user_type,
+            user_type, key_type,
         )
 
-        logger.info("api_key_created", name=name, user_role=user_role, origins=allowed_origins or [])
+        logger.info(
+            "api_key_created",
+            name=name,
+            user_role=user_role,
+            key_type=key_type,
+            origins=allowed_origins or [],
+        )
         return raw_key, key_hash
 
     async def _update_last_used(self, key_hash: str) -> None:

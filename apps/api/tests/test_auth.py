@@ -338,3 +338,149 @@ async def test_create_key_valid(auth_service, mock_pool):
     assert raw_key.startswith("aip_")
     assert len(key_hash) == 64
     assert mock_pool.execute.called
+
+
+# --- publishable/secret 키 분리 (B4) ---
+
+
+@pytest.mark.asyncio
+async def test_create_publishable_requires_origins(auth_service, mock_pool):
+    """publishable 키는 오리진 없이 발급 불가 → AuthError, INSERT 미호출."""
+    with pytest.raises(AuthError, match="오리진"):
+        await auth_service.create_key(
+            name="widget", creator_user_id="admin-1", user_role="VIEWER",
+            security_level_max="PUBLIC", allowed_origins=[], key_type="publishable",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_publishable_rejects_internal(auth_service, mock_pool):
+    """publishable 키는 PUBLIC 초과 보안등급 거부."""
+    with pytest.raises(AuthError, match="보안등급"):
+        await auth_service.create_key(
+            name="widget", creator_user_id="admin-1", user_role="VIEWER",
+            security_level_max="INTERNAL", allowed_origins=["https://shop.com"],
+            key_type="publishable",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_publishable_rejects_write_role(auth_service, mock_pool):
+    """publishable 키는 VIEWER 외 역할 거부."""
+    with pytest.raises(AuthError, match="VIEWER"):
+        await auth_service.create_key(
+            name="widget", creator_user_id="admin-1", user_role="EDITOR",
+            security_level_max="PUBLIC", allowed_origins=["https://shop.com"],
+            key_type="publishable",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_publishable_rate_cap(auth_service, mock_pool):
+    """publishable 키는 쿼터 상한 초과 거부 (기본 120)."""
+    with pytest.raises(AuthError, match="쿼터"):
+        await auth_service.create_key(
+            name="widget", creator_user_id="admin-1", user_role="VIEWER",
+            security_level_max="PUBLIC", allowed_origins=["https://shop.com"],
+            rate_limit_per_min=999, key_type="publishable",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_publishable_valid(auth_service, mock_pool):
+    """제약을 만족하는 publishable 키 → 발급 성공, INSERT 호출."""
+    raw_key, key_hash = await auth_service.create_key(
+        name="widget", creator_user_id="admin-1", user_role="VIEWER",
+        security_level_max="PUBLIC", allowed_origins=["https://shop.com"],
+        rate_limit_per_min=60, key_type="publishable",
+    )
+    assert raw_key.startswith("aip_")
+    assert mock_pool.execute.called
+    # INSERT VALUES 마지막 인자에 key_type 전달됐는지
+    assert "publishable" in str(mock_pool.execute.call_args)
+
+
+@pytest.mark.asyncio
+async def test_create_secret_unrestricted(auth_service, mock_pool):
+    """secret 키(기본)는 INTERNAL·EDITOR·오리진 없음이어도 발급 성공(기존 권한 유지)."""
+    raw_key, _ = await auth_service.create_key(
+        name="server", creator_user_id="admin-1", user_role="EDITOR",
+        security_level_max="INTERNAL", allowed_origins=[],
+    )
+    assert raw_key.startswith("aip_")
+    assert mock_pool.execute.called
+
+
+@pytest.mark.asyncio
+async def test_create_key_invalid_key_type(auth_service, mock_pool):
+    """알 수 없는 key_type → AuthError, INSERT 미호출."""
+    with pytest.raises(AuthError, match="키 종류"):
+        await auth_service.create_key(
+            name="x", creator_user_id="admin-1", user_role="VIEWER",
+            allowed_origins=["https://shop.com"], key_type="bogus",
+        )
+    mock_pool.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verify_publishable_clamps_security(auth_service, mock_pool):
+    """publishable 키 행이 INTERNAL이어도 검증 시 PUBLIC로 클램프(defense-in-depth)."""
+    mock_pool.fetchrow.return_value = {
+        "user_id": "widget-user",
+        "user_role": "VIEWER",
+        "security_level_max": "INTERNAL",
+        "user_type": "",
+        "allowed_profiles": ["shop-qa"],
+        "allowed_origins": ["https://shop.com"],
+        "rate_limit_per_min": 60,
+        "expires_at": None,
+        "tenant_id": None,
+        "key_type": "publishable",
+    }
+    ctx = await auth_service.authenticate(api_key="aip_widget")
+    assert ctx.key_type == "publishable"
+    assert ctx.security_level_max == "PUBLIC"
+
+
+@pytest.mark.asyncio
+async def test_verify_secret_keeps_security(auth_service, mock_pool):
+    """secret 키는 INTERNAL 보안등급 그대로 유지 (클램프 없음)."""
+    mock_pool.fetchrow.return_value = {
+        "user_id": "server-user",
+        "user_role": "EDITOR",
+        "security_level_max": "INTERNAL",
+        "user_type": "",
+        "allowed_profiles": [],
+        "allowed_origins": [],
+        "rate_limit_per_min": 60,
+        "expires_at": None,
+        "tenant_id": None,
+        "key_type": "secret",
+    }
+    ctx = await auth_service.authenticate(api_key="aip_server")
+    assert ctx.key_type == "secret"
+    assert ctx.security_level_max == "INTERNAL"
+
+
+@pytest.mark.asyncio
+async def test_verify_legacy_row_defaults_secret(auth_service, mock_pool):
+    """key_type 컬럼이 없는 레거시 행(마이그레이션 전) → secret 취급, 클램프 없음."""
+    mock_pool.fetchrow.return_value = {
+        "user_id": "legacy-user",
+        "user_role": "EDITOR",
+        "security_level_max": "INTERNAL",
+        "user_type": "",
+        "allowed_profiles": [],
+        "allowed_origins": [],
+        "rate_limit_per_min": 60,
+        "expires_at": None,
+        "tenant_id": None,
+        # key_type 키 없음 → row.get() None → secret
+    }
+    ctx = await auth_service.authenticate(api_key="aip_legacy")
+    assert ctx.key_type == "secret"
+    assert ctx.security_level_max == "INTERNAL"

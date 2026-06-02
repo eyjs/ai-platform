@@ -96,6 +96,8 @@ class Settings(BaseSettings):
     # 프로필 인가 deny-by-default (A1). True면 빈 allowed_profiles/테넌트 매핑 = 전체 거부.
     # 와일드카드 "*"로 명시적 전체 허용. 기존 fail-open 호환을 위해 기본 False.
     profile_auth_strict: bool = False
+    # publishable(위젯) 키 분당 쿼터 상한 (B4). 발급 시 이 값을 초과하면 거부.
+    publishable_rate_limit_max: int = 120
 
     # KMS 연동 (도메인 SSOT)
     kms_api_url: str = ""              # 예: http://kms-api:3000/api

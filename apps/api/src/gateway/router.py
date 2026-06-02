@@ -987,6 +987,7 @@ async def create_api_key(request: Request):
     allowed_origins = body.get("allowed_origins", [])
     rate_limit = body.get("rate_limit_per_min", 60)
     user_type = body.get("user_type", "")
+    key_type = body.get("key_type", "secret")
 
     try:
         raw_key, key_hash = await state.auth_service.create_key(
@@ -998,6 +999,7 @@ async def create_api_key(request: Request):
             allowed_origins=allowed_origins,
             rate_limit_per_min=rate_limit,
             user_type=user_type,
+            key_type=key_type,
         )
     except AuthError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -1005,6 +1007,7 @@ async def create_api_key(request: Request):
     return {
         "api_key": raw_key,
         "name": name,
+        "key_type": key_type,
         "user_role": user_role,
         "security_level_max": security_level_max,
         "allowed_origins": allowed_origins,

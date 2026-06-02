@@ -115,3 +115,4 @@ class UserContext:
     allowed_origins: list[str] = field(default_factory=list)
     rate_limit_per_min: int = 60
     tenant_id: str | None = None
+    key_type: str = "secret"  # publishable(위젯) | secret(서버). 기본 secret → 하위호환
