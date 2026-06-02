@@ -490,6 +490,8 @@ def start_cleanup_task(
     job_queue: JobQueue,
     interval: int,
     workflow_session_store: WorkflowSessionStore | None = None,
+    rate_limiter: PGRateLimiter | None = None,
+    rate_limit_idle_ttl: int = 3600,
 ) -> asyncio.Task:
     """만료 캐시/세션/stale 작업 주기적 정리 태스크를 시작한다."""
 
@@ -502,6 +504,8 @@ def start_cleanup_task(
                 await job_queue.cleanup_stale(stale_seconds=600)
                 if workflow_session_store:
                     await workflow_session_store.cleanup_expired()
+                if rate_limiter:
+                    await rate_limiter.cleanup_stale(idle_seconds=rate_limit_idle_ttl)
             except Exception as e:
                 logger.warning("cleanup_failed", error=str(e))
 

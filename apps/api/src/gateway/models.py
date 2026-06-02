@@ -116,3 +116,4 @@ class UserContext:
     rate_limit_per_min: int = 60
     tenant_id: str | None = None
     key_type: str = "secret"  # publishable(위젯) | secret(서버). 기본 secret → 하위호환
+    api_key_id: str | None = None  # 레이트리밋 축(B5). API 키 식별자, JWT는 None

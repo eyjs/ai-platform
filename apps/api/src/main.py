@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
         job_queue=state.job_queue,
         interval=settings.cache_cleanup_interval,
         workflow_session_store=state.workflow_session_store,
+        rate_limiter=state.rate_limiter,
+        rate_limit_idle_ttl=settings.rate_limit_idle_ttl,
     )
 
     # Task 009: 신규 서비스 기동

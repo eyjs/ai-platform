@@ -1,7 +1,8 @@
 """PostgreSQL Token Bucket Rate Limiter.
 
-Redis 없이 SELECT FOR UPDATE로 원자적 동시성 제어.
-UserContext.rate_limit_per_min 기반 per-client 제한.
+Redis 없이 단일 원자적 UPSERT로 동시성 제어 (행 락 없음, B6).
+레이트리밋 축은 API 키 + 세션(또는 visitor) 복합키 (B5) — 공유키 사용자가
+한 버킷을 공유해 서로의 쿼터를 소진시키던 문제를 제거한다.
 """
 
 import math
@@ -11,6 +12,7 @@ import asyncpg
 from fastapi import HTTPException
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 
+from src.gateway.models import UserContext
 from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,6 +20,28 @@ logger = get_logger(__name__)
 # 기본값: 분당 60회 (초당 1개 충전, 최대 60개 버스트)
 DEFAULT_CAPACITY = 60
 DEFAULT_REFILL_RATE = 1.0
+
+# 복합키의 세션/visitor 부분 최대 길이 (클라이언트 제공 session_id 남용 방지)
+MAX_SUBKEY_LEN = 128
+
+
+def build_client_id(
+    user_ctx: UserContext,
+    *,
+    sub_key: str | None = None,
+    fallback: str = "anonymous",
+) -> str:
+    """레이트리밋 버킷 키를 만든다 (B5).
+
+    축: API 키별로 분리하되, 같은 공유키 내에서는 세션(또는 미래의 visitor)별로
+    버킷을 나눈다. JWT 사용자는 서명된 user_id가 곧 정체성이므로 그대로 base가 된다.
+
+    sub_key(클라이언트 제공 session_id 등)는 길이를 제한해 PK 비대화를 막는다.
+    """
+    base = user_ctx.api_key_id or user_ctx.user_id or fallback
+    if sub_key:
+        return f"{base}:{sub_key[:MAX_SUBKEY_LEN]}"
+    return base
 
 
 class PGRateLimiter:
@@ -37,66 +61,49 @@ class PGRateLimiter:
         capacity: float = DEFAULT_CAPACITY,
         refill_rate: float = DEFAULT_REFILL_RATE,
     ) -> Tuple[bool, float]:
-        """토큰을 소비한다. FOR UPDATE로 동시성 제어.
+        """토큰을 소비한다. 단일 원자적 UPSERT — 행 락(FOR UPDATE) 없음 (B6).
+
+        ON CONFLICT ... WHERE: 충전 후 토큰이 cost 이상일 때만 차감/갱신한다.
+        부족하면 행을 갱신하지 않으므로 RETURNING이 0행 → 거부로 판정.
 
         Returns:
             (허용 여부, 남은 토큰 수)
         """
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    """
-                    SELECT tokens,
-                           EXTRACT(EPOCH FROM (NOW() - last_updated)) AS elapsed
-                    FROM api_rate_limits
-                    WHERE client_id = $1
-                    FOR UPDATE
-                    """,
-                    client_id,
-                )
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO api_rate_limits AS arl (client_id, tokens, last_updated)
+            VALUES ($1, $2::float8 - $3::float8, NOW())
+            ON CONFLICT (client_id) DO UPDATE
+            SET tokens = LEAST($2::float8, arl.tokens
+                         + EXTRACT(EPOCH FROM (NOW() - arl.last_updated))::float8 * $4::float8)
+                         - $3::float8,
+                last_updated = NOW()
+            WHERE LEAST($2::float8, arl.tokens
+                  + EXTRACT(EPOCH FROM (NOW() - arl.last_updated))::float8 * $4::float8) >= $3::float8
+            RETURNING tokens
+            """,
+            client_id,
+            capacity,
+            cost,
+            refill_rate,
+        )
 
-                if not row:
-                    remaining = capacity - cost
-                    await conn.execute(
-                        """
-                        INSERT INTO api_rate_limits (client_id, tokens, last_updated)
-                        VALUES ($1, $2, NOW())
-                        ON CONFLICT (client_id) DO UPDATE
-                        SET tokens = LEAST($3, api_rate_limits.tokens
-                                     + EXTRACT(EPOCH FROM (NOW() - api_rate_limits.last_updated)) * $4)
-                                     - $5,
-                            last_updated = NOW()
-                        """,
-                        client_id,
-                        remaining,
-                        capacity,
-                        refill_rate,
-                        cost,
-                    )
-                    return True, remaining
+        if row is not None:
+            return True, float(row["tokens"])
 
-                # 토큰 충전: 경과 시간 * 충전율, capacity 상한
-                current_tokens = min(
-                    capacity,
-                    float(row["tokens"]) + (float(row["elapsed"]) * refill_rate),
-                )
-
-                if current_tokens >= cost:
-                    remaining = current_tokens - cost
-                    await conn.execute(
-                        "UPDATE api_rate_limits SET tokens = $1, last_updated = NOW() WHERE client_id = $2",
-                        remaining,
-                        client_id,
-                    )
-                    return True, remaining
-                else:
-                    # 거부: 충전 상태만 갱신 (토큰 차감 안 함)
-                    await conn.execute(
-                        "UPDATE api_rate_limits SET tokens = $1, last_updated = NOW() WHERE client_id = $2",
-                        current_tokens,
-                        client_id,
-                    )
-                    return False, current_tokens
+        # 거부: 행을 갱신하지 않았다. Retry-After 계산을 위해 현재 충전량만 비잠금 조회.
+        current = await self._pool.fetchval(
+            """
+            SELECT LEAST($2::float8, tokens
+                   + EXTRACT(EPOCH FROM (NOW() - last_updated))::float8 * $3::float8)
+            FROM api_rate_limits
+            WHERE client_id = $1
+            """,
+            client_id,
+            capacity,
+            refill_rate,
+        )
+        return False, float(current if current is not None else 0.0)
 
     async def verify_request(
         self,
@@ -119,7 +126,7 @@ class PGRateLimiter:
 
         if not allowed:
             tokens_needed = 1 - remaining
-            retry_after = math.ceil(tokens_needed / refill_rate)
+            retry_after = max(1, math.ceil(tokens_needed / refill_rate)) if refill_rate > 0 else 1
 
             logger.warning(
                 "rate_limit_exceeded",
@@ -134,3 +141,23 @@ class PGRateLimiter:
                 detail="Too Many Requests. Please try again later.",
                 headers={"Retry-After": str(retry_after)},
             )
+
+    async def cleanup_stale(self, idle_seconds: int = 3600) -> int:
+        """유휴 버킷을 삭제한다 (B5 복합키로 늘어난 카디널리티 관리).
+
+        idle_seconds 이상 미사용 버킷만 삭제한다. 이만큼 유휴면 어떤 capacity든
+        이미 만석으로 충전됐을 것이므로, 삭제 후 재생성돼도 만석에서 시작 = 안전.
+        (충전 미완료 버킷을 지우면 throttled 클라이언트가 리셋될 수 있어 금지.)
+        """
+        result = await self._pool.execute(
+            "DELETE FROM api_rate_limits WHERE last_updated < NOW() - make_interval(secs => $1)",
+            idle_seconds,
+        )
+        # asyncpg execute는 "DELETE <n>" 문자열을 반환
+        try:
+            deleted = int(result.split()[-1])
+        except (ValueError, IndexError, AttributeError):
+            deleted = 0
+        if deleted:
+            logger.info("rate_limit_buckets_cleaned", deleted=deleted, idle_seconds=idle_seconds)
+        return deleted

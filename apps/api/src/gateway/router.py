@@ -19,6 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
 from src.gateway.auth import AuthError
+from src.gateway.rate_limiter import build_client_id
 from src.gateway.gateway_hooks import (
     latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
 )
@@ -148,10 +149,19 @@ async def _authenticate(request: Request) -> UserContext:
     return user_ctx
 
 
-async def _check_rate_limit(request: Request, user_ctx: UserContext) -> None:
-    """Token Bucket Rate Limiting. UserContext.rate_limit_per_min 기반."""
+async def _check_rate_limit(
+    request: Request,
+    user_ctx: UserContext,
+    sub_key: str | None = None,
+) -> None:
+    """Token Bucket Rate Limiting. UserContext.rate_limit_per_min 기반.
+
+    축(B5): API 키별 분리 + 같은 공유키 내 세션별 분리. sub_key로 session_id를
+    넘기면 한 세션의 폭주가 같은 키의 다른 세션을 굶기지 않는다.
+    """
     state = _get_app_state(request)
-    client_id = user_ctx.user_id or request.client.host
+    fallback = request.client.host if request.client else "anonymous"
+    client_id = build_client_id(user_ctx, sub_key=sub_key, fallback=fallback)
     await state.rate_limiter.verify_request(
         client_id=client_id,
         rate_limit_per_min=user_ctx.rate_limit_per_min,
@@ -512,7 +522,7 @@ async def list_profiles(request: Request):
 async def chat(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
-    await _check_rate_limit(request, user_ctx)
+    await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
     setup: Optional[_ChatSetup] = None
 
     increment_active()
@@ -629,7 +639,7 @@ async def chat(req: ChatRequest, request: Request):
 async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
-    await _check_rate_limit(request, user_ctx)
+    await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
 
     increment_active()
 
