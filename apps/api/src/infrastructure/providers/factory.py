@@ -69,6 +69,22 @@ class ProviderFactory:
             model=self._settings.prod_embedding_model,
         )
 
+    # === LLM 백엔드 단일 선택 규칙 (provider_mode = 마스터 스위치) ===
+    # 모든 LLM 소비자(결정론 LLMProvider / 에이전틱 ChatModel / 오케스트레이터)가
+    # 이 한 메서드로 백엔드를 결정한다. provider_mode를 바꾸면 전부 따라간다.
+    def _llm_backend(self, server_url: str) -> str:
+        """provider_mode 기준 LLM 백엔드를 고른다.
+
+        - anthropic: 항상 Claude (server_url 무시 — 모드가 최우선)
+        - development: MLX(server_url) 있으면 http, 없으면 ollama
+        - openai/production: openai
+        """
+        if self._mode == ProviderMode.ANTHROPIC:
+            return "anthropic"
+        if self._mode == ProviderMode.DEVELOPMENT:
+            return "http" if server_url else "ollama"
+        return "openai"
+
     def get_router_llm(self) -> LLMProvider:
         return self._create_llm(
             server_url=self._settings.router_llm_server_url,
@@ -89,47 +105,107 @@ class ProviderFactory:
         self, server_url: str, local_model: str, label: str,
         anthropic_model: str = "claude-haiku-4-5",
     ) -> LLMProvider:
-        """LLM 프로바이더 생성 (router/main 공통 로직)."""
+        """결정론 경로용 LLMProvider 생성. 백엔드는 _llm_backend가 단일 결정."""
         system_prefix = get_locale().prompt("llm_system_prefix")
+        backend = self._llm_backend(server_url)
+        max_tokens = self._settings.llm_max_tokens
 
-        if server_url:
+        if backend == "http":
             from .llm.http_llm import HttpLLMProvider
 
             logger.info("Using HTTP LLM server (%s): %s", label, server_url)
-            return HttpLLMProvider(
-                base_url=server_url,
-                system_prefix=system_prefix,
-                max_tokens=self._settings.llm_max_tokens,
-            )
+            return HttpLLMProvider(base_url=server_url, system_prefix=system_prefix, max_tokens=max_tokens)
 
-        if self._is_local:
+        if backend == "ollama":
             from .llm.ollama import OllamaProvider
 
             return OllamaProvider(
-                base_url=self._settings.ollama_host,
-                model=local_model,
-                num_ctx=self._settings.ollama_num_ctx,
-                system_prefix=system_prefix,
+                base_url=self._settings.ollama_host, model=local_model,
+                num_ctx=self._settings.ollama_num_ctx, system_prefix=system_prefix,
             )
 
-        if self._mode == ProviderMode.ANTHROPIC:
+        if backend == "anthropic":
             from .llm.anthropic import AnthropicLLMProvider
 
             logger.info("Using Anthropic Claude (%s): %s", label, anthropic_model)
             return AnthropicLLMProvider(
-                api_key=self._settings.anthropic_api_key,
-                model=anthropic_model,
-                system_prefix=system_prefix,
-                max_tokens=self._settings.llm_max_tokens,
+                api_key=self._settings.anthropic_api_key, model=anthropic_model,
+                system_prefix=system_prefix, max_tokens=max_tokens,
             )
 
         from .llm.openai import OpenAILLMProvider
 
         return OpenAILLMProvider(
-            api_key=self._settings.openai_api_key,
-            model=self._settings.prod_llm_model,
-            system_prefix=system_prefix,
-            max_tokens=self._settings.llm_max_tokens,
+            api_key=self._settings.openai_api_key, model=self._settings.prod_llm_model,
+            system_prefix=system_prefix, max_tokens=max_tokens,
+        )
+
+    def get_chat_model(self, model_name: str = ""):
+        """에이전틱(LangGraph)용 langchain BaseChatModel. 백엔드는 _llm_backend가 단일 결정.
+
+        model_name: MLX 자동감지 모델명 override (없으면 모드별 기본 모델).
+        ImportError(langchain extra 미설치)는 호출부(bootstrap)에서 흡수 → agentic만 비활성.
+        """
+        s = self._settings
+        backend = self._llm_backend(s.main_llm_server_url)
+
+        if backend == "http":
+            from langchain_openai import ChatOpenAI
+
+            return ChatOpenAI(
+                base_url=f"{s.main_llm_server_url.rstrip('/')}/v1",
+                api_key="not-needed", model=model_name or s.main_model or "default",
+            )
+
+        if backend == "ollama":
+            from langchain_ollama import ChatOllama
+
+            return ChatOllama(model=model_name or s.main_model, base_url=s.ollama_host)
+
+        if backend == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            return ChatAnthropic(
+                model=model_name or s.anthropic_main_model,
+                api_key=s.anthropic_api_key, max_tokens=s.llm_max_tokens,
+            )
+
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model=model_name or s.prod_llm_model, api_key=s.openai_api_key)
+
+    def get_orchestrator_llm(self):
+        """오케스트레이터(프로필 선택)용 LLM. provider_mode가 백엔드를 결정.
+
+        Returns: OrchestratorLLM 또는 None(비활성/키 없음).
+        """
+        s = self._settings
+        if not s.orchestrator_enabled:
+            return None
+
+        if self._mode == ProviderMode.ANTHROPIC:
+            provider, model, api_key, server_url = (
+                "anthropic", s.anthropic_router_model, s.anthropic_api_key, "",
+            )
+        elif self._mode == ProviderMode.DEVELOPMENT:
+            provider = s.orchestrator_provider  # mlx | ollama
+            model = s.orchestrator_model
+            api_key = ""
+            server_url = s.orchestrator_server_url or s.router_llm_server_url
+        else:  # openai / production
+            provider, model, api_key, server_url = (
+                "openai", s.orchestrator_model, s.openai_api_key, "",
+            )
+
+        if provider in ("openai", "anthropic") and not api_key:
+            logger.warning("orchestrator_disabled: %s 키 없음", provider)
+            return None
+
+        from src.orchestrator.llm_adapter import OrchestratorLLM
+
+        return OrchestratorLLM(
+            provider=provider, model=model, api_key=api_key,
+            timeout=s.orchestrator_timeout, server_url=server_url, ollama_host=s.ollama_host,
         )
 
     def get_parsing_provider(self) -> ParsingProvider:

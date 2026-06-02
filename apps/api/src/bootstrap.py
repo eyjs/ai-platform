@@ -12,7 +12,6 @@ from typing import Any, Optional
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from src.locale.bundle import LocaleBundle, set_locale
-from src.agent.chat_model_factory import create_chat_model
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
 from src.config import ProviderMode, Settings
@@ -40,7 +39,6 @@ from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
 from src.orchestrator.embedding_router import EmbeddingRouter
-from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
@@ -274,14 +272,7 @@ async def create_app_state(settings: Settings) -> AppState:
             except httpx.HTTPError as e:
                 logger.warning("chat_model_detection_failed", error=str(e))
 
-        chat_model = create_chat_model(
-            provider_mode=settings.provider_mode,
-            model_name=chat_model_name,
-            ollama_host=settings.ollama_host,
-            openai_api_key=settings.openai_api_key,
-            server_url=settings.main_llm_server_url,
-            anthropic_api_key=settings.anthropic_api_key,
-        )
+        chat_model = provider_factory.get_chat_model(model_name=chat_model_name)
         logger.info("chat_model_initialized", type=type(chat_model).__name__)
     except ImportError:
         logger.warning("chat_model_unavailable, agentic mode disabled")
@@ -337,64 +328,39 @@ async def create_app_state(settings: Settings) -> AppState:
     # 14. TenantService
     tenant_service = TenantService(pool)
 
-    # 15. MasterOrchestrator (최상위 모델)
+    # 15. MasterOrchestrator. LLM 백엔드 선택은 ProviderFactory가 단일 결정(provider_mode 기준).
     orchestrator = None
-    orchestrator_llm = None
-    if settings.orchestrator_enabled:
-        # provider별 기본 키 폴백: anthropic은 anthropic_api_key, 그 외 openai_api_key
-        _provider_default_key = (
-            settings.anthropic_api_key
-            if settings.orchestrator_provider == "anthropic"
-            else settings.openai_api_key
-        )
-        api_key = settings.orchestrator_api_key or _provider_default_key
-        # MLX/Ollama는 API Key 불필요
-        needs_key = settings.orchestrator_provider in ("openai", "anthropic")
-        if not needs_key or api_key:
-            server_url = settings.orchestrator_server_url or settings.router_llm_server_url
-            orchestrator_llm = OrchestratorLLM(
-                provider=settings.orchestrator_provider,
-                model=settings.orchestrator_model,
-                api_key=api_key,
-                timeout=settings.orchestrator_timeout,
-                server_url=server_url,
-                ollama_host=settings.ollama_host,
-            )
-            await orchestrator_llm.initialize()
-            # 임베딩 기반 프로필 라우터 초기화
-            embedding_router = EmbeddingRouter(embedding_provider)
-            profile_dicts = [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "description": getattr(p, "description", ""),
-                    "domain_scopes": p.domain_scopes,
-                    "system_prompt": p.system_prompt,
-                    "intent_hints": [
-                        {"name": h.name, "patterns": h.patterns, "description": h.description}
-                        for h in p.intent_hints
-                    ],
-                }
-                for p in profiles
-            ]
-            await embedding_router.initialize(profile_dicts)
+    orchestrator_llm = provider_factory.get_orchestrator_llm()
+    if orchestrator_llm:
+        await orchestrator_llm.initialize()
+        # 임베딩 기반 프로필 라우터 초기화
+        embedding_router = EmbeddingRouter(embedding_provider)
+        profile_dicts = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": getattr(p, "description", ""),
+                "domain_scopes": p.domain_scopes,
+                "system_prompt": p.system_prompt,
+                "intent_hints": [
+                    {"name": h.name, "patterns": h.patterns, "description": h.description}
+                    for h in p.intent_hints
+                ],
+            }
+            for p in profiles
+        ]
+        await embedding_router.initialize(profile_dicts)
 
-            orchestrator = MasterOrchestrator(
-                llm=orchestrator_llm,
-                profile_store=profile_store,
-                session_memory=session_memory,
-                workflow_engine=workflow_engine,
-                tenant_service=tenant_service,
-                embedding_router=embedding_router,
-                access_policy=access_policy,
-            )
-            logger.info(
-                "orchestrator_initialized",
-                provider=settings.orchestrator_provider,
-                model=settings.orchestrator_model,
-            )
-        else:
-            logger.info("orchestrator_skipped", reason="API key 미설정")
+        orchestrator = MasterOrchestrator(
+            llm=orchestrator_llm,
+            profile_store=profile_store,
+            session_memory=session_memory,
+            workflow_engine=workflow_engine,
+            tenant_service=tenant_service,
+            embedding_router=embedding_router,
+            access_policy=access_policy,
+        )
+        logger.info("orchestrator_initialized", provider_mode=settings.provider_mode.value)
     else:
         logger.info("orchestrator_disabled")
 

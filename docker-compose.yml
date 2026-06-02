@@ -29,16 +29,21 @@ services:
     command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
-      AIP_PROVIDER_MODE: development
-      # MLX GPU 서버 (호스트에서 실행 중) — 2026-04-30 Qwen3-14B 도입
-      # 포트 매핑: 8104=Main(14B), 8105=Router/Orchestrator(8B)
+      # ── LLM 스위치(딸깍): AIP_PROVIDER_MODE 하나로 메인/에이전틱/오케스트레이터 전부 전환 ──
+      #   anthropic   = Claude Haiku (프로덕션, 키는 루트 .env에서 주입)
+      #   development = MLX (아래 MLX 블록 주석 해제 + PROVIDER_MODE=development)
+      AIP_PROVIDER_MODE: anthropic
+      AIP_ANTHROPIC_API_KEY: ${AIP_ANTHROPIC_API_KEY}
+      AIP_ANTHROPIC_MAIN_MODEL: claude-haiku-4-5
+      AIP_ANTHROPIC_ROUTER_MODEL: claude-haiku-4-5
+      # 임베딩/리랭커는 모드와 무관하게 항상 MLX (Anthropic 임베딩 없음 + 기존 코퍼스 동일 모델)
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
-      AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105  # 8B — 경량 (Intent 분류)
-      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104    # 14B — 최종 응답 생성
-      # 오케스트레이터 (8B — 프로필 선택은 경량 작업)
-      AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-8B-4bit
-      AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
+      # ── development(MLX) 복귀 시: PROVIDER_MODE=development + 아래 4줄 주석 해제 ──
+      # AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105
+      # AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104
+      # AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-8B-4bit
+      # AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
       # 인증
       AIP_AUTH_REQUIRED: "true"
       AIP_JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
