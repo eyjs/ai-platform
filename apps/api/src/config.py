@@ -5,8 +5,15 @@ PostgreSQL only -- Redis 의존 없음.
 """
 
 from enum import Enum
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# .env 위치를 실행 디렉토리와 무관하게 고정 (config.py = apps/api/src/config.py 기준).
+# 모노레포 루트 .env 를 기본으로, apps/api/.env 가 있으면 그것이 우선(override).
+# 단, OS 환경변수(docker-compose 등)는 pydantic 우선순위상 .env 보다 항상 우선한다.
+_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"   # ai-platform/.env
+_API_ENV = Path(__file__).resolve().parents[1] / ".env"    # apps/api/.env (선택)
 
 
 class ProviderMode(str, Enum):
@@ -18,7 +25,7 @@ class ProviderMode(str, Enum):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(_ROOT_ENV), str(_API_ENV)),
         env_prefix="AIP_",
         case_sensitive=False,
         extra="ignore",
