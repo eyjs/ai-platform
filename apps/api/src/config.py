@@ -14,12 +14,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 도커: /app/src/config.py → 상위가 얕아 후보가 없을 수 있음(그땐 OS 환경변수 사용).
 # OS 환경변수(docker-compose 등)는 pydantic 우선순위상 .env 보다 항상 우선한다.
 def _candidate_env_files() -> tuple[str, ...]:
+    # 고정 절대경로만 사용한다. CWD 상대 ".env"는 의도적으로 제외 —
+    # 임의 작업디렉토리에 심어진 악성 .env가 정규 설정을 덮어쓰는 것을 막는다.
+    # 도커처럼 경로가 얕아 후보가 없을 땐 OS 환경변수(compose)가 설정을 제공한다.
     here = Path(__file__).resolve()
     paths: list[str] = []
     for up in (3, 1):  # parents[3]=모노레포 루트(로컬), parents[1]=apps/api
         if up < len(here.parents):
             paths.append(str(here.parents[up] / ".env"))
-    paths.append(".env")  # 실행 디렉토리 폴백
     return tuple(paths)
 
 
