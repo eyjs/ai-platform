@@ -87,7 +87,8 @@ async def run_worker() -> None:
             file_bytes=file_bytes,
             mime_type=payload.get("mime_type"),
             external_id=payload.get("source_document_id"),
-            tenant_id=payload.get("tenant_id"),
+            # 구(舊) 작업 등 payload에 tenant 없으면 기본 테넌트로 (NOT NULL 4d 보장)
+            tenant_id=payload.get("tenant_id") or "default",
         )
 
     async def kms_sync_handler(payload: dict) -> dict:

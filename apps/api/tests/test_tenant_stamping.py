@@ -133,3 +133,35 @@ async def test_workflow_save_stamps_tenant():
     args = pool.execute.call_args[0]
     assert "tenant_id" in args[0]
     assert args[-1] == "tenant-F"  # 마지막 위치 인자
+
+
+@pytest.mark.asyncio
+async def test_workflow_save_falls_back_to_context_tenant():
+    """명시 tenant 없으면 요청 컨텍스트(current_tenant)에서 해석 (4d NOT NULL 보장)."""
+    from src.infrastructure.db.tenant_context import current_tenant
+
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    store = WorkflowSessionStore(pool)
+    session = WorkflowSession(workflow_id="wf", current_step_id="s")
+
+    token = current_tenant.set("ctx-tenant")
+    try:
+        await store.save("sess-1", session)  # tenant_id 미지정
+    finally:
+        current_tenant.reset(token)
+
+    assert pool.execute.call_args[0][-1] == "ctx-tenant"
+
+
+@pytest.mark.asyncio
+async def test_workflow_save_falls_back_to_default():
+    """컨텍스트도 없으면 기본 테넌트로 폴백 (NULL 방지)."""
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    store = WorkflowSessionStore(pool)
+    session = WorkflowSession(workflow_id="wf", current_step_id="s")
+
+    await store.save("sess-1", session)  # tenant_id 없음 + 컨텍스트 없음
+
+    assert pool.execute.call_args[0][-1] == "default"

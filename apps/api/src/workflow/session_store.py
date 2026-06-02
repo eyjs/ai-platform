@@ -17,8 +17,12 @@ from typing import Optional
 
 import asyncpg
 
+from src.infrastructure.db.tenant_context import current_tenant
 from src.observability.logging import get_logger
 from src.workflow.state import WorkflowSession
+
+# tenant_id 미지정 시 최종 폴백 (config.default_tenant_id 및 migration 019/021 백필값과 일치)
+_DEFAULT_TENANT = "default"
 
 logger = get_logger(__name__)
 
@@ -48,8 +52,10 @@ class WorkflowSessionStore:
         Args:
             session_id: 대화 세션 ID
             session: 저장할 워크플로우 세션 상태
-            tenant_id: 테넌트 격리(A2). 신규 행에 스탬핑
+            tenant_id: 테넌트 격리(A2). 미지정 시 요청 컨텍스트(current_tenant)에서
+                해석하고, 그것도 없으면 기본 테넌트로 폴백해 NOT NULL(4d)을 보장한다.
         """
+        effective_tenant = tenant_id or current_tenant.get() or _DEFAULT_TENANT
         state_json = json.dumps(
             {
                 "collected": session.collected,
@@ -77,7 +83,7 @@ class WorkflowSessionStore:
             session.workflow_id,
             session.current_step_id,
             state_json,
-            tenant_id,
+            effective_tenant,
         )
 
         logger.debug(
