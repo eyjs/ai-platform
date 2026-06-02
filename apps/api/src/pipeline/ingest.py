@@ -52,6 +52,7 @@ class IngestPipeline:
         file_bytes: Optional[bytes] = None,
         mime_type: Optional[str] = None,
         external_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> dict:
         """문서 수집. file_bytes가 있으면 파서로 마크다운 변환 후 청킹."""
 
@@ -79,6 +80,7 @@ class IngestPipeline:
             source_url=source_url,
             external_id=external_id,
             metadata=metadata,
+            tenant_id=tenant_id,
         )
 
         # 2. 청킹
@@ -129,6 +131,7 @@ class IngestPipeline:
             doc_id, chunks, embeddings,
             domain_code=domain_code,
             security_level=security_level,
+            tenant_id=tenant_id,
         )
         store_ms = (time.time() - t_store) * 1000
 

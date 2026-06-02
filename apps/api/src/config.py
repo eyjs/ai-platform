@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     profile_auth_strict: bool = False
     # publishable(위젯) 키 분당 쿼터 상한 (B4). 발급 시 이 값을 초과하면 거부.
     publishable_rate_limit_max: int = 120
+    # 테넌트 격리 기본 테넌트 (A2/4a). tenant_id 미지정 쓰기는 이 값으로 스탬핑.
+    # 마이그레이션 019의 백필 값과 일치해야 한다.
+    default_tenant_id: str = "default"
 
     # KMS 연동 (도메인 SSOT)
     kms_api_url: str = ""              # 예: http://kms-api:3000/api

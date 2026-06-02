@@ -67,6 +67,7 @@ class VectorStore(AbstractVectorStore):
         source_url: str | None = None,
         external_id: str | None = None,
         metadata: dict | None = None,
+        tenant_id: str | None = None,
     ) -> str:
         """문서 레코드 생성, ID 반환."""
         if not self._pool:
@@ -78,8 +79,8 @@ class VectorStore(AbstractVectorStore):
                 row = await conn.fetchrow(
                     """
                     INSERT INTO documents (id, external_id, title, file_name, file_hash,
-                        domain_code, security_level, source_url, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        domain_code, security_level, source_url, metadata, tenant_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (file_hash, domain_code) DO UPDATE
                         SET title = EXCLUDED.title,
                             security_level = EXCLUDED.security_level,
@@ -89,25 +90,26 @@ class VectorStore(AbstractVectorStore):
                     """,
                     uuid.UUID(doc_id), external_id, title, file_name, file_hash,
                     domain_code, security_level, source_url,
-                    json.dumps(metadata or {}, ensure_ascii=False),
+                    json.dumps(metadata or {}, ensure_ascii=False), tenant_id,
                 )
                 return str(row["id"])
 
             await conn.execute(
                 """
                 INSERT INTO documents (id, external_id, title, file_name, file_hash,
-                    domain_code, security_level, source_url, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    domain_code, security_level, source_url, metadata, tenant_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 """,
                 uuid.UUID(doc_id), external_id, title, file_name, file_hash,
                 domain_code, security_level, source_url,
-                json.dumps(metadata or {}, ensure_ascii=False),
+                json.dumps(metadata or {}, ensure_ascii=False), tenant_id,
             )
         return doc_id
 
     async def insert_chunks(
         self, document_id: str, chunks: List[dict], embeddings: List[List[float]],
         domain_code: str = "", security_level: str = "PUBLIC",
+        tenant_id: str | None = None,
     ) -> List[str]:
         """청크 + 임베딩 + tsvector 배치 삽입."""
         if not self._pool:
@@ -116,9 +118,9 @@ class VectorStore(AbstractVectorStore):
         query = """
             INSERT INTO document_chunks
                 (id, document_id, chunk_index, content, token_count, embedding,
-                 search_vector, domain_code, security_level, metadata)
+                 search_vector, domain_code, security_level, metadata, tenant_id)
             VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('simple', $7),
-                    $8, $9, $10)
+                    $8, $9, $10, $11)
         """
         chunk_ids = []
         records = []
@@ -139,6 +141,7 @@ class VectorStore(AbstractVectorStore):
                 domain_code or chunk.get("domain_code", ""),
                 security_level or chunk.get("security_level", "PUBLIC"),
                 json.dumps(chunk.get("metadata", {}), ensure_ascii=False),
+                tenant_id,
             ))
 
         async with self._pool.acquire() as conn:

@@ -280,6 +280,7 @@ async def _prepare_chat(
                 profile_id=chatbot_id,
                 user_id=user_ctx.user_id,
                 ttl_seconds=profile.memory_ttl_seconds,
+                tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
             )
             await state.session_memory.update_current_profile(session_id, chatbot_id)
 
@@ -319,6 +320,7 @@ async def _prepare_chat(
                     profile_id=profile.id,
                     user_id=user_ctx.user_id,
                     ttl_seconds=profile.memory_ttl_seconds,
+                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
                 )
             history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
 
@@ -432,6 +434,7 @@ async def _prepare_chat_fast(
             profile_id=chatbot_id,
             user_id=user_ctx.user_id,
             ttl_seconds=profile.memory_ttl_seconds,
+            tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
 
         # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
@@ -595,6 +598,7 @@ async def chat(req: ChatRequest, request: Request):
             if cacheable and response.answer:
                 await try_cache_put(
                     cache_svc, setup.profile_id, mode_str, req.question, response.answer,
+                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
                 )
 
             # Task 014: 응답에 response_id 주입 (JSON body)
@@ -867,6 +871,8 @@ async def ingest_document(req: IngestRequest, request: Request):
                 "metadata": req.metadata or {},
                 "source_document_id": req.source_document_id,
                 "mime_type": req.mime_type,
+                # 테넌트 격리(A2): 키에 테넌트 없으면 기본 테넌트로 스탬핑
+                "tenant_id": user_ctx.tenant_id or state.settings.default_tenant_id,
             },
         )
     except Exception as e:

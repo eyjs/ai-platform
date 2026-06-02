@@ -37,12 +37,18 @@ class WorkflowSessionStore:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def save(self, session_id: str, session: WorkflowSession) -> None:
+    async def save(
+        self,
+        session_id: str,
+        session: WorkflowSession,
+        tenant_id: str | None = None,
+    ) -> None:
         """워크플로우 세션을 저장한다 (UPSERT).
 
         Args:
             session_id: 대화 세션 ID
             session: 저장할 워크플로우 세션 상태
+            tenant_id: 테넌트 격리(A2). 신규 행에 스탬핑
         """
         state_json = json.dumps(
             {
@@ -59,8 +65,8 @@ class WorkflowSessionStore:
 
         await self._pool.execute(
             """
-            INSERT INTO workflow_states (id, workflow_id, current_step, state)
-            VALUES ($1, $2, $3, $4::jsonb)
+            INSERT INTO workflow_states (id, workflow_id, current_step, state, tenant_id)
+            VALUES ($1, $2, $3, $4::jsonb, $5)
             ON CONFLICT (id) DO UPDATE SET
                 workflow_id = EXCLUDED.workflow_id,
                 current_step = EXCLUDED.current_step,
@@ -71,6 +77,7 @@ class WorkflowSessionStore:
             session.workflow_id,
             session.current_step_id,
             state_json,
+            tenant_id,
         )
 
         logger.debug(

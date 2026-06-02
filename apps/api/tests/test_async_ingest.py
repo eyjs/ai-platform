@@ -5,6 +5,7 @@ GET /documents/ingest/{job_id} → 작업 상태 폴링
 """
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -44,6 +45,7 @@ def _create_test_app(*, enqueue_result: str = None, get_job_result: dict = None)
     app.state.auth_service = mock_auth
     app.state.job_queue = mock_job_queue
     app.state.rate_limiter = mock_rate_limiter
+    app.state.settings = SimpleNamespace(default_tenant_id="default")
 
     return app
 

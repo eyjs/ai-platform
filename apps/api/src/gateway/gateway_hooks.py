@@ -77,12 +77,16 @@ async def try_cache_put(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     ttl_seconds: Optional[int] = None,
+    tenant_id: Optional[str] = None,
 ) -> None:
     if svc is None:
         return
     try:
         norm = normalize_input(prompt)
-        await svc.put(profile_id, mode, norm, response, prompt_tokens, completion_tokens, ttl_seconds)
+        await svc.put(
+            profile_id, mode, norm, response,
+            prompt_tokens, completion_tokens, ttl_seconds, tenant_id=tenant_id,
+        )
     except Exception as e:
         logger.warning("cache.put.hook_error error=%s", e)
 

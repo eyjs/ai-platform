@@ -26,16 +26,17 @@ class SessionMemory:
         profile_id: str,
         user_id: str = "",
         ttl_seconds: Optional[int] = None,
+        tenant_id: str | None = None,
     ) -> None:
         ttl = ttl_seconds or self._default_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
         await self._pool.execute(
             """
-            INSERT INTO conversation_sessions (id, profile_id, user_id, expires_at)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO conversation_sessions (id, profile_id, user_id, expires_at, tenant_id)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), expires_at = $4
             """,
-            session_id, profile_id, user_id, expires_at,
+            session_id, profile_id, user_id, expires_at, tenant_id,
         )
 
     async def add_turn(

@@ -108,6 +108,7 @@ class ResponseCacheService:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         ttl_seconds: Optional[int] = None,
+        tenant_id: str | None = None,
     ) -> None:
         key = compute_cache_key(profile_id, mode, normalized)
         ttl = ttl_seconds or self._default_ttl
@@ -120,8 +121,8 @@ class ResponseCacheService:
                         """
                         INSERT INTO response_cache
                           (cache_key, profile_id, mode, response_text,
-                           prompt_tokens, completion_tokens, expires_at)
-                        VALUES (:k, :pid, :mode, :rt, :pt, :ct, :exp)
+                           prompt_tokens, completion_tokens, expires_at, tenant_id)
+                        VALUES (:k, :pid, :mode, :rt, :pt, :ct, :exp, :tid)
                         ON CONFLICT (cache_key) DO UPDATE
                           SET response_text = EXCLUDED.response_text,
                               prompt_tokens = EXCLUDED.prompt_tokens,
@@ -133,6 +134,7 @@ class ResponseCacheService:
                     {
                         "k": key, "pid": profile_id, "mode": mode, "rt": response_text,
                         "pt": prompt_tokens, "ct": completion_tokens, "exp": expires_at,
+                        "tid": tenant_id,
                     },
                 )
                 await session.commit()

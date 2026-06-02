@@ -87,6 +87,7 @@ async def run_worker() -> None:
             file_bytes=file_bytes,
             mime_type=payload.get("mime_type"),
             external_id=payload.get("source_document_id"),
+            tenant_id=payload.get("tenant_id"),
         )
 
     async def kms_sync_handler(payload: dict) -> dict:

@@ -29,17 +29,18 @@ class FactStore:
         heading_path: Optional[List[str]] = None,
         table_context: str = "",
         confidence: float = 1.0,
+        tenant_id: str | None = None,
     ) -> str:
         fact_id = str(uuid.uuid4())
         await self._pool.execute(
             """
             INSERT INTO facts (id, document_id, domain_code, subject, predicate, object,
-                heading_path, table_context, confidence)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                heading_path, table_context, confidence, tenant_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             uuid.UUID(fact_id), uuid.UUID(document_id), domain_code,
             subject, predicate, obj,
-            heading_path or [], table_context, confidence,
+            heading_path or [], table_context, confidence, tenant_id,
         )
         return fact_id
 
