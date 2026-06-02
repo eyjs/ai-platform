@@ -1,6 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: aip
       POSTGRES_PASSWORD: aip_dev
@@ -20,6 +21,7 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: aip-api
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -77,20 +79,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
     networks:
       - default
       - kms-aip-shared
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 10
 
   bff:
     build:
       context: .
       dockerfile: apps/bff/Dockerfile
     container_name: aip-bff
+    restart: unless-stopped
     ports:
       - "3011:3001"
     environment:
