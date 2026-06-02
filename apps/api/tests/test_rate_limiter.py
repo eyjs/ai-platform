@@ -76,6 +76,18 @@ class TestTokenBucketAcquire:
         assert allowed is False
         assert remaining == 0.0
 
+    @pytest.mark.asyncio
+    async def test_cost_exceeds_capacity_denied_without_db(self, limiter, mock_pool):
+        """cost > capacity면 DB 접근 없이 즉시 거부 (신규 client 첫 요청 누수 방지)."""
+        mock_pool.fetchrow = AsyncMock(return_value={"tokens": 5.0})
+
+        # capacity=0 (rate_limit_per_min=0 전면차단), cost=1
+        allowed, remaining = await limiter.acquire("c1", cost=1, capacity=0, refill_rate=0.0)
+
+        assert allowed is False
+        assert remaining == 0.0
+        mock_pool.fetchrow.assert_not_called()  # UPSERT 자체를 타지 않음
+
 
 class TestVerifyRequest:
 

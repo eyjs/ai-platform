@@ -69,6 +69,12 @@ class PGRateLimiter:
         Returns:
             (허용 여부, 남은 토큰 수)
         """
+        # 경계 방어: capacity가 cost보다 작으면 어떤 요청도 만족 불가.
+        # 가드를 두지 않으면 "신규 client_id 첫 요청"은 ON CONFLICT WHERE를 타지 않고
+        # 무조건 INSERT/허용되며 음수 토큰이 저장된다(rate_limit_per_min=0 등 전면차단 우회).
+        if cost > capacity:
+            return False, 0.0
+
         row = await self._pool.fetchrow(
             """
             INSERT INTO api_rate_limits AS arl (client_id, tokens, last_updated)
