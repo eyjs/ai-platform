@@ -35,7 +35,13 @@ def normalize_input(prompt: str) -> str:
     return normalized.lower()
 
 
-def compute_cache_key(profile_id: str, mode: str, normalized_input: str) -> str:
-    """SHA-256 hex 64자."""
-    payload = f"{profile_id}|{mode}|{normalized_input}".encode("utf-8")
+def compute_cache_key(
+    profile_id: str, mode: str, normalized_input: str, tenant_id: str | None = None,
+) -> str:
+    """SHA-256 hex 64자.
+
+    tenant_id를 키에 포함해 테넌트 간 캐시 격리(A2/4b). 미포함 시 같은 profile+prompt를
+    공유키 ON CONFLICT가 덮어써 타 테넌트 응답이 누설될 수 있다.
+    """
+    payload = f"{tenant_id or ''}|{profile_id}|{mode}|{normalized_input}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()

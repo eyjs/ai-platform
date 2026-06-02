@@ -59,6 +59,7 @@ class StrategyBuilder:
         workflow_id: Optional[str] = None,
         workflow_step: Optional[str] = None,
         external_context: str = "",
+        tenant_id: Optional[str] = None,
     ) -> ExecutionPlan:
         # SearchScope 생성
         effective_security = min(
@@ -78,6 +79,7 @@ class StrategyBuilder:
             category_ids=profile.category_scopes if profile.category_scopes else None,
             security_level_max=security_level,
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,
+            tenant_id=tenant_id,
         )
 
         # external_context가 있으면 history_turns를 최소 3으로 보장

@@ -55,13 +55,14 @@ async def try_cache_get(
     profile_id: str,
     mode: str,
     prompt: str,
+    tenant_id: Optional[str] = None,
 ) -> Optional[str]:
     """Cache lookup. 실패 시 None 반환, 요청 플로우는 계속."""
     if svc is None:
         return None
     try:
         norm = normalize_input(prompt)
-        cached = await svc.get(profile_id, mode, norm)
+        cached = await svc.get(profile_id, mode, norm, tenant_id=tenant_id)
         return cached.response_text if cached else None
     except Exception as e:
         logger.warning("cache.get.hook_error error=%s", e)

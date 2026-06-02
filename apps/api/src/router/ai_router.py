@@ -59,6 +59,7 @@ class AIRouter:
         prior_doc_ids: Optional[List[str]] = None,
         skip_context_resolve: bool = False,
         external_context: str = "",
+        tenant_id: Optional[str] = None,
     ) -> ExecutionPlan:
         """4-Layer 라우팅 실행."""
         t_start = time.time()
@@ -121,6 +122,7 @@ class AIRouter:
             workflow_id=workflow_id,
             workflow_step=None,
             external_context=external_context,
+            tenant_id=tenant_id,
         )
         l3_ms = (time.time() - t3) * 1000
         logger.info(

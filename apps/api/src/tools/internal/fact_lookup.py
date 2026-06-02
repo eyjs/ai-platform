@@ -46,12 +46,14 @@ class FactLookupTool:
                 subject=subject,
                 domain_codes=domain_codes,
                 max_depth=3,
+                tenant_id=scope.tenant_id,
             )
         else:
             facts = await self._fact_store.search(
                 query=subject,
                 domain_codes=domain_codes,
                 limit=10,
+                tenant_id=scope.tenant_id,
             )
 
         return ToolResult.ok(

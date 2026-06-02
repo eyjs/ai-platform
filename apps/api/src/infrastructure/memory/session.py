@@ -99,11 +99,20 @@ class SessionMemory:
             turns = json.loads(turns)
         return turns if isinstance(turns, list) else []
 
-    async def get_session(self, session_id: str) -> Optional[dict]:
-        row = await self._pool.fetchrow(
-            "SELECT * FROM conversation_sessions WHERE id = $1",
-            session_id,
-        )
+    async def get_session(
+        self, session_id: str, tenant_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        # tenant_id가 주어지면 테넌트 격리 필터(A2/4b). 내부 호출은 미지정 → 무필터(기존 동작).
+        if tenant_id:
+            row = await self._pool.fetchrow(
+                "SELECT * FROM conversation_sessions WHERE id = $1 AND tenant_id = $2",
+                session_id, tenant_id,
+            )
+        else:
+            row = await self._pool.fetchrow(
+                "SELECT * FROM conversation_sessions WHERE id = $1",
+                session_id,
+            )
         if not row:
             return None
         return dict(row)
@@ -149,6 +158,7 @@ class SessionMemory:
         profile_id: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
+        tenant_id: Optional[str] = None,
     ) -> tuple[list[dict], int]:
         """사용자의 세션 목록 조회. (items, total) 튜플 반환."""
         where = "WHERE user_id = $1 AND expires_at > NOW()"
@@ -158,6 +168,11 @@ class SessionMemory:
         if profile_id:
             where += f" AND profile_id = ${idx}"
             params.append(profile_id)
+            idx += 1
+
+        if tenant_id:
+            where += f" AND tenant_id = ${idx}"
+            params.append(tenant_id)
             idx += 1
 
         count_row = await self._pool.fetchrow(

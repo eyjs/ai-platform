@@ -335,6 +335,7 @@ async def _prepare_chat(
                 user_security_level=user_ctx.security_level_max,
                 skip_context_resolve=skip_context_resolve,
                 external_context=req.context or "",
+                tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
             )
 
         agent_context = AgentContext(
@@ -343,6 +344,7 @@ async def _prepare_chat(
             user_role=user_ctx.user_role,
             conversation_history=history,
             metadata=req.metadata or {},
+            tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
         trace = RequestTrace(request_id=request_id)
 
@@ -468,6 +470,7 @@ async def _prepare_chat_fast(
                 user_security_level=user_ctx.security_level_max,
                 skip_context_resolve=skip_context_resolve,
                 external_context=req.context or "",
+                tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
             )
 
         agent_context = AgentContext(
@@ -476,6 +479,7 @@ async def _prepare_chat_fast(
             user_role=user_ctx.user_role,
             conversation_history=history,
             metadata=req.metadata or {},
+            tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
         trace = RequestTrace(request_id=request_id)
 
@@ -554,7 +558,10 @@ async def chat(req: ChatRequest, request: Request):
             cacheable = bool(profile) and should_use_cache(profile, mode_str, cache_svc)
 
             if cacheable:
-                cached_text = await try_cache_get(cache_svc, setup.profile_id, mode_str, req.question)
+                cached_text = await try_cache_get(
+                    cache_svc, setup.profile_id, mode_str, req.question,
+                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+                )
                 if cached_text is not None:
                     cache_hit = True
                     response_preview = RequestLogEntry.truncate_preview(cached_text)
@@ -1132,6 +1139,7 @@ async def list_sessions(
         profile_id=profile_id,
         limit=limit,
         offset=offset,
+        tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
     )
 
     return SessionListResponse(
@@ -1158,7 +1166,9 @@ async def get_session_history(
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
 
-    session = await state.session_memory.get_session(session_id)
+    session = await state.session_memory.get_session(
+        session_id, tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+    )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 

@@ -61,9 +61,9 @@ class ResponseCacheService:
         return False
 
     async def get(
-        self, profile_id: str, mode: str, normalized: str
+        self, profile_id: str, mode: str, normalized: str, tenant_id: str | None = None,
     ) -> Optional[CachedResponse]:
-        key = compute_cache_key(profile_id, mode, normalized)
+        key = compute_cache_key(profile_id, mode, normalized, tenant_id)
         try:
             async with self._session_factory() as session:
                 row = (await session.execute(
@@ -110,7 +110,7 @@ class ResponseCacheService:
         ttl_seconds: Optional[int] = None,
         tenant_id: str | None = None,
     ) -> None:
-        key = compute_cache_key(profile_id, mode, normalized)
+        key = compute_cache_key(profile_id, mode, normalized, tenant_id)
         ttl = ttl_seconds or self._default_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 

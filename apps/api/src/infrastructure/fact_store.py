@@ -50,6 +50,7 @@ class FactStore:
         domain_codes: Optional[List[str]] = None,
         limit: int = 10,
         min_similarity: float = 0.3,
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """subject 기반 fuzzy 검색 (pg_trgm)."""
         conditions = ["similarity(f.subject, $1) > $2"]
@@ -59,6 +60,11 @@ class FactStore:
         if domain_codes:
             conditions.append(f"f.domain_code = ANY(${param_idx}::text[])")
             params.append(domain_codes)
+            param_idx += 1
+
+        if tenant_id:
+            conditions.append(f"f.tenant_id = ${param_idx}::text")
+            params.append(tenant_id)
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
@@ -98,6 +104,7 @@ class FactStore:
         max_depth: int = 3,
         max_total: int = 30,
         fan_out: int = 3,
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """subject -> predicate -> object 체인 탐색.
 
@@ -118,7 +125,7 @@ class FactStore:
                     continue
                 visited.add(subj)
 
-                facts = await self.search(subj, domain_codes=domain_codes, limit=5)
+                facts = await self.search(subj, domain_codes=domain_codes, limit=5, tenant_id=tenant_id)
                 for fact in facts:
                     chain.append(fact)
                     if len(chain) >= max_total:

@@ -183,6 +183,7 @@ class VectorStore(AbstractVectorStore):
         domain_codes: Optional[List[str]] = None,
         allowed_doc_ids: Optional[List[str]] = None,
         max_security_level: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """벡터 전용 검색."""
         if not self._pool:
@@ -190,6 +191,7 @@ class VectorStore(AbstractVectorStore):
         allowed_levels = self._allowed_security_levels(max_security_level)
         query, params = self._build_vector_query(
             embedding, limit, domain_codes, allowed_doc_ids, allowed_levels,
+            tenant_id=tenant_id,
         )
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
@@ -204,6 +206,7 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         vector_weight: float = 0.5,
         max_security_level: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """벡터 + full-text + trigram RRF 하이브리드 검색.
 
@@ -219,11 +222,11 @@ class VectorStore(AbstractVectorStore):
         vector_rows, fts_rows = await asyncio.gather(
             self._vector_search_task(
                 embedding, candidate_limit, domain_codes,
-                allowed_doc_ids, allowed_levels,
+                allowed_doc_ids, allowed_levels, tenant_id=tenant_id,
             ),
             self._text_search_combined(
                 text_query, candidate_limit, domain_codes,
-                allowed_doc_ids, allowed_levels,
+                allowed_doc_ids, allowed_levels, tenant_id=tenant_id,
             ),
         )
 
@@ -366,6 +369,7 @@ class VectorStore(AbstractVectorStore):
         domain_codes: Optional[List[str]] = None,
         allowed_doc_ids: Optional[List[str]] = None,
         max_security_level: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> List[dict]:
         """메타데이터 전용 검색 (content 제외). Progressive Disclosure Level 1.
 
@@ -382,11 +386,11 @@ class VectorStore(AbstractVectorStore):
         vector_rows, fts_rows = await asyncio.gather(
             self._vector_search_task(
                 embedding, candidate_limit, domain_codes, allowed_doc_ids,
-                allowed_levels, metadata_only=True,
+                allowed_levels, metadata_only=True, tenant_id=tenant_id,
             ),
             self._text_search_combined(
                 text_query, candidate_limit, domain_codes,
-                allowed_doc_ids, allowed_levels, metadata_only=True,
+                allowed_doc_ids, allowed_levels, metadata_only=True, tenant_id=tenant_id,
             ),
         )
 
@@ -479,11 +483,13 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
         metadata_only: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> list:
         """벡터 검색을 독립 커넥션에서 실행한다 (병렬용)."""
         vq, vp = self._build_vector_query(
             embedding, candidate_limit, domain_codes,
             allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+            tenant_id=tenant_id,
         )
         async with self._pool.acquire() as conn:
             return await conn.fetch(vq, *vp)
@@ -496,6 +502,7 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
         metadata_only: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> list:
         """FTS + trigram fallback을 독립 커넥션에서 순차 실행한다 (병렬용).
 
@@ -506,6 +513,7 @@ class VectorStore(AbstractVectorStore):
                 fts_rows = await self._fulltext_search(
                     conn, text_query, candidate_limit, domain_codes,
                     allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+                    tenant_id=tenant_id,
                 )
             except Exception as e:
                 logger.warning("Full-text search failed: %s", e)
@@ -516,6 +524,7 @@ class VectorStore(AbstractVectorStore):
                     trgm_rows = await self._trigram_search(
                         conn, text_query, candidate_limit, domain_codes,
                         allowed_doc_ids, allowed_levels, metadata_only=metadata_only,
+                        tenant_id=tenant_id,
                     )
                     if trgm_rows:
                         seen_ids = {str(r["id"]) for r in fts_rows}
@@ -536,6 +545,7 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
         metadata_only: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> Tuple[str, list]:
         conditions = ["c.embedding IS NOT NULL"]
         params: list = [np.array(embedding, dtype=np.float32), limit]
@@ -556,6 +566,11 @@ class VectorStore(AbstractVectorStore):
             params.append(allowed_levels)
             param_idx += 1
 
+        if tenant_id:
+            conditions.append(f"c.tenant_id = ${param_idx}::text")
+            params.append(tenant_id)
+            param_idx += 1
+
         where_clause = " AND ".join(conditions)
         columns = self._select_columns(metadata_only, "1 - (c.embedding <=> $1::vector)")
         query = f"""
@@ -574,6 +589,7 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
         metadata_only: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> list:
         tsquery = self._sanitize_tsquery(text_query)
         if not tsquery:
@@ -598,6 +614,11 @@ class VectorStore(AbstractVectorStore):
             params.append(allowed_levels)
             param_idx += 1
 
+        if tenant_id:
+            conditions.append(f"c.tenant_id = ${param_idx}::text")
+            params.append(tenant_id)
+            param_idx += 1
+
         where_clause = " AND ".join(conditions)
         score_expr = "ts_rank(c.search_vector, to_tsquery('simple', $1))"
         columns = self._select_columns(metadata_only, score_expr)
@@ -617,6 +638,7 @@ class VectorStore(AbstractVectorStore):
         allowed_doc_ids: Optional[List[str]] = None,
         allowed_levels: Optional[List[str]] = None,
         metadata_only: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> list:
         terms = [t for t in text_query.split() if len(t) >= TRIGRAM_MIN_TERM_LEN]
         if not terms:
@@ -640,6 +662,11 @@ class VectorStore(AbstractVectorStore):
         if allowed_levels:
             conditions.append(f"c.security_level = ANY(${param_idx}::text[])")
             params.append(allowed_levels)
+            param_idx += 1
+
+        if tenant_id:
+            conditions.append(f"c.tenant_id = ${param_idx}::text")
+            params.append(tenant_id)
             param_idx += 1
 
         where_clause = " AND ".join(conditions)
