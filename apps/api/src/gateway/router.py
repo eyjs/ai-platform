@@ -20,6 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
 from src.gateway.auth import AuthError
 from src.gateway.rate_limiter import build_client_id
+from src.infrastructure.db.tenant_context import current_tenant
 from src.gateway.gateway_hooks import (
     latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
 )
@@ -145,6 +146,12 @@ async def _authenticate(request: Request) -> UserContext:
         )
     except AuthError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+    # RLS(4c): 이 요청의 DB 접근이 테넌트로 강제되도록 컨텍스트변수 설정.
+    # 풀 setup 훅이 매 acquire마다 이 값으로 SET ROLE + GUC를 건다.
+    settings = getattr(state, "settings", None)
+    default_tenant = getattr(settings, "default_tenant_id", "default") if settings else "default"
+    current_tenant.set(user_ctx.tenant_id or default_tenant)
 
     return user_ctx
 

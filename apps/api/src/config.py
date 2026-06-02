@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # 테넌트 격리 기본 테넌트 (A2/4a). tenant_id 미지정 쓰기는 이 값으로 스탬핑.
     # 마이그레이션 019의 백필 값과 일치해야 한다.
     default_tenant_id: str = "default"
+    # RLS 심층방어 (A2/4c). true면 요청마다 SET ROLE rls_role + GUC로 DB가 테넌트 강제.
+    # 기본 false(superuser 접속 = RLS 우회). 운영 전환 전 마이그레이션 020 적용 필요.
+    rls_enabled: bool = False
+    rls_role: str = "aip_app"
 
     # KMS 연동 (도메인 SSOT)
     kms_api_url: str = ""              # 예: http://kms-api:3000/api

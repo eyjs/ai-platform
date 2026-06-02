@@ -40,15 +40,28 @@ class VectorStore(AbstractVectorStore):
     def pool(self) -> Optional[asyncpg.Pool]:
         return self._pool
 
-    async def connect(self, min_size: int = 5, max_size: int = 50) -> None:
+    async def connect(
+        self, min_size: int = 5, max_size: int = 50,
+        rls_enabled: bool = False, rls_role: str = "aip_app",
+    ) -> None:
+        # RLS(4c): 활성 시 매 acquire마다 요청 테넌트로 SET ROLE + GUC 주입.
+        # 비활성 시 setup 미설치 → 기존 동작 그대로(오버헤드 0).
+        setup = None
+        if rls_enabled:
+            from src.infrastructure.db.tenant_context import make_rls_setup
+            setup = make_rls_setup(rls_role)
         self._pool = await asyncpg.create_pool(
             self._database_url,
             min_size=min_size,
             max_size=max_size,
             command_timeout=10,
             init=register_vector,
+            setup=setup,
         )
-        logger.info("VectorStore connected (hybrid: vector + full-text + trigram)")
+        logger.info(
+            "VectorStore connected (hybrid: vector + full-text + trigram)",
+            extra={"rls_enabled": rls_enabled},
+        )
 
     async def close(self) -> None:
         if self._pool:

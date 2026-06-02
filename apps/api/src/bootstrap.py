@@ -123,6 +123,8 @@ async def create_app_state(settings: Settings) -> AppState:
     await vector_store.connect(
         min_size=settings.pg_pool_min,
         max_size=settings.pg_pool_max,
+        rls_enabled=settings.rls_enabled,
+        rls_role=settings.rls_role,
     )
     pool = vector_store.pool
     logger.info("vectorstore_connected", pool_min=settings.pg_pool_min, pool_max=settings.pg_pool_max)
