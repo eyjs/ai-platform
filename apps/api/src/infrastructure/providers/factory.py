@@ -28,6 +28,20 @@ class ProviderFactory:
     def _is_local(self) -> bool:
         return self._mode == ProviderMode.DEVELOPMENT
 
+    @property
+    def _aux_prefers_local(self) -> bool:
+        """임베딩/리랭커 등 보조 모델을 로컬로 둘지.
+
+        Anthropic은 자체 임베딩이 없으므로, anthropic 모드에서 OpenAI 키도
+        임베딩 서버도 없으면 로컬(sentence-transformers/cross-encoder)로 폴백한다.
+        """
+        if self._is_local:
+            return True
+        return (
+            self._mode == ProviderMode.ANTHROPIC
+            and not self._settings.openai_api_key
+        )
+
     def get_embedding_provider(self) -> EmbeddingProvider:
         if self._settings.embedding_server_url:
             from .embedding.http_embedding import HttpEmbeddingProvider
@@ -40,7 +54,7 @@ class ProviderFactory:
                 connect_timeout=self._settings.embedding_connect_timeout,
             )
 
-        if self._is_local:
+        if self._aux_prefers_local:
             from .embedding.sentence_transformers import SentenceTransformersProvider
 
             logger.info("Using local embedding model (CPU)")
@@ -59,6 +73,7 @@ class ProviderFactory:
         return self._create_llm(
             server_url=self._settings.router_llm_server_url,
             local_model=self._settings.router_model,
+            anthropic_model=self._settings.anthropic_router_model,
             label="router",
         )
 
@@ -66,10 +81,14 @@ class ProviderFactory:
         return self._create_llm(
             server_url=self._settings.main_llm_server_url,
             local_model=self._settings.main_model,
+            anthropic_model=self._settings.anthropic_main_model,
             label="main",
         )
 
-    def _create_llm(self, server_url: str, local_model: str, label: str) -> LLMProvider:
+    def _create_llm(
+        self, server_url: str, local_model: str, label: str,
+        anthropic_model: str = "claude-haiku-4-5",
+    ) -> LLMProvider:
         """LLM 프로바이더 생성 (router/main 공통 로직)."""
         system_prefix = get_locale().prompt("llm_system_prefix")
 
@@ -91,6 +110,17 @@ class ProviderFactory:
                 model=local_model,
                 num_ctx=self._settings.ollama_num_ctx,
                 system_prefix=system_prefix,
+            )
+
+        if self._mode == ProviderMode.ANTHROPIC:
+            from .llm.anthropic import AnthropicLLMProvider
+
+            logger.info("Using Anthropic Claude (%s): %s", label, anthropic_model)
+            return AnthropicLLMProvider(
+                api_key=self._settings.anthropic_api_key,
+                model=anthropic_model,
+                system_prefix=system_prefix,
+                max_tokens=self._settings.llm_max_tokens,
             )
 
         from .llm.openai import OpenAILLMProvider
@@ -141,7 +171,7 @@ class ProviderFactory:
             from .reranking.http_reranker import HttpRerankerProvider
 
             reachable = self._check_server_health(self._settings.reranker_server_url)
-            fallback_model = self._settings.reranker_model if self._is_local else None
+            fallback_model = self._settings.reranker_model if self._aux_prefers_local else None
             if reachable:
                 logger.info("Using HTTP reranker server: %s", self._settings.reranker_server_url)
             else:
@@ -154,7 +184,7 @@ class ProviderFactory:
                 fallback_model=fallback_model,
             )
 
-        if self._is_local:
+        if self._aux_prefers_local:
             try:
                 from .reranking.cross_encoder import CrossEncoderReranker
 

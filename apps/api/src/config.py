@@ -13,6 +13,7 @@ class ProviderMode(str, Enum):
     DEVELOPMENT = "development"  # Ollama + sentence-transformers (로컬)
     OPENAI = "openai"            # OpenAI API (GPT + text-embedding)
     PRODUCTION = "production"    # OpenAI (하위 호환)
+    ANTHROPIC = "anthropic"      # Anthropic Claude (메인/라우터 LLM) + 로컬/OpenAI 임베딩
 
 
 class Settings(BaseSettings):
@@ -48,6 +49,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"
+    # Anthropic Claude (provider_mode=anthropic). 기본은 비용 최적 Haiku.
+    anthropic_api_key: str = ""
+    anthropic_main_model: str = "claude-haiku-4-5"
+    anthropic_router_model: str = "claude-haiku-4-5"
 
     # 파서 (Vision Parser)
     parser_provider: str = "text"      # text | llamaparse | engine

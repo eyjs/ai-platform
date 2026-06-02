@@ -336,7 +336,13 @@ async def create_app_state(settings: Settings) -> AppState:
     orchestrator = None
     orchestrator_llm = None
     if settings.orchestrator_enabled:
-        api_key = settings.orchestrator_api_key or settings.openai_api_key
+        # provider별 기본 키 폴백: anthropic은 anthropic_api_key, 그 외 openai_api_key
+        _provider_default_key = (
+            settings.anthropic_api_key
+            if settings.orchestrator_provider == "anthropic"
+            else settings.openai_api_key
+        )
+        api_key = settings.orchestrator_api_key or _provider_default_key
         # MLX/Ollama는 API Key 불필요
         needs_key = settings.orchestrator_provider in ("openai", "anthropic")
         if not needs_key or api_key:

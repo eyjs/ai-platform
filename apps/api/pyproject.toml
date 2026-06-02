@@ -40,6 +40,9 @@ openai = [
     "openai>=1.50.0",
     "langchain-openai>=0.3.0",
 ]
+anthropic = [
+    "anthropic>=0.40.0",
+]
 
 [build-system]
 requires = ["hatchling"]
