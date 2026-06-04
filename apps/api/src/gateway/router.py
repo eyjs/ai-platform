@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from src.domain.models import AgentMode, AgentResponse, SearchScope, UserRole
@@ -858,17 +858,107 @@ async def ingest_document(req: IngestRequest, request: Request):
             detail="문서 수집은 EDITOR 이상 권한이 필요합니다",
         )
 
-    if not req.content and not req.source_url:
-        raise HTTPException(status_code=400, detail="content or source_url required")
+    # 통일된 인제스천 계약 — 바이트 획득 방식 두 가지를 한 진입점에서 분기한다:
+    #   (1) 인라인: content 또는 file_base64 가 있으면 'ingest' 큐로 (HTTP·챗봇 업로드)
+    #   (2) 참조-fetch: source_document_id 만 있으면 'kms_sync' 큐로 (KMS, 파일은 워커가 fetch)
+    tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+    has_inline = bool(req.content or req.file_base64)
 
-    if req.source_url and not req.content:
-        raise HTTPException(status_code=501, detail="URL ingest not yet implemented")
+    try:
+        if has_inline:
+            logger.info(
+                "ingest_enqueue",
+                title=req.title,
+                domain_code=req.domain_code,
+                content_len=len(req.content) if req.content else 0,
+                has_file=bool(req.file_base64),
+                user_id=user_ctx.user_id,
+            )
+            job_id = await state.job_queue.enqueue(
+                queue_name="ingest",
+                payload={
+                    "title": req.title,
+                    "content": req.content,
+                    "file_base64": req.file_base64,
+                    "domain_code": req.domain_code,
+                    "file_name": req.file_name,
+                    "security_level": req.security_level,
+                    "source_url": req.source_url,
+                    "metadata": req.metadata or {},
+                    "source_document_id": req.source_document_id,
+                    "mime_type": req.mime_type,
+                    # 테넌트 격리(A2): 키에 테넌트 없으면 기본 테넌트로 스탬핑
+                    "tenant_id": tenant_id,
+                },
+            )
+        elif req.source_document_id:
+            # 참조-fetch: 동작하는 KMS sync 경로 재사용 (워커가 KMS에서 파일을 받아 파싱)
+            logger.info(
+                "ingest_enqueue_source_ref",
+                title=req.title,
+                domain_code=req.domain_code,
+                source_document_id=req.source_document_id,
+                source_system=req.source_system or "kms",
+                user_id=user_ctx.user_id,
+            )
+            job_id = await state.job_queue.enqueue(
+                queue_name="kms_sync",
+                payload={
+                    "action": "sync",
+                    "document_id": req.source_document_id,
+                    "event": "ingest.source_ref",
+                    "data": {"domainCodes": [req.domain_code] if req.domain_code else []},
+                },
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="content, file_base64, or source_document_id required",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("ingest_enqueue_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    return IngestResponse(job_id=job_id, status="queued")
+
+
+@gateway_router.post("/chat/sessions/{session_id}/files", status_code=202)
+async def upload_session_file(
+    session_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """챗봇 세션에 파일을 업로드해 적재한다.
+
+    새 진입점이지만 코어(IngestPipeline)·워커 변경 0 — 기존 'ingest' 큐를 그대로
+    재사용한다. 업로드 문서는 `metadata.session_id`와 `external_id=session:{id}:{uuid}`
+    로 태깅되어, 세션 스코프 검색/만료 정리의 연결점이 된다.
+    """
+    import base64
+
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx)
+
+    try:
+        uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id: {session_id}")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="빈 파일입니다")
+
+    tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+    external_id = f"session:{session_id}:{uuid.uuid4().hex}"
 
     logger.info(
-        "ingest_enqueue",
-        title=req.title,
-        domain_code=req.domain_code,
-        content_len=len(req.content) if req.content else 0,
+        "session_file_upload",
+        session_id=session_id,
+        file_name=file.filename,
+        size=len(file_bytes),
         user_id=user_ctx.user_id,
     )
 
@@ -876,24 +966,32 @@ async def ingest_document(req: IngestRequest, request: Request):
         job_id = await state.job_queue.enqueue(
             queue_name="ingest",
             payload={
-                "title": req.title,
-                "content": req.content,
-                "domain_code": req.domain_code,
-                "file_name": req.file_name,
-                "security_level": req.security_level,
-                "source_url": req.source_url,
-                "metadata": req.metadata or {},
-                "source_document_id": req.source_document_id,
-                "mime_type": req.mime_type,
-                # 테넌트 격리(A2): 키에 테넌트 없으면 기본 테넌트로 스탬핑
-                "tenant_id": user_ctx.tenant_id or state.settings.default_tenant_id,
+                "title": file.filename or "uploaded-file",
+                "file_base64": base64.b64encode(file_bytes).decode(),
+                "domain_code": "",
+                "file_name": file.filename,
+                "security_level": "PUBLIC",
+                "metadata": {"session_id": session_id, "source": "chat_upload"},
+                "source_document_id": external_id,
+                "mime_type": file.content_type,
+                "tenant_id": tenant_id,
             },
         )
     except Exception as e:
-        logger.error("ingest_enqueue_error", error=str(e), exc_info=True)
+        logger.error("session_upload_enqueue_error", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return IngestResponse(job_id=job_id, status="queued")
+    # 세션 메타에 업로드 external_id 추적 — 검색 스코핑/만료 정리의 연결점.
+    try:
+        meta = await state.session_memory.get_orchestrator_metadata(session_id) or {}
+        uploads = list(meta.get("uploaded_external_ids", []))
+        uploads.append(external_id)
+        meta["uploaded_external_ids"] = uploads
+        await state.session_memory.save_orchestrator_metadata(session_id, meta)
+    except Exception as e:
+        logger.warning("session_upload_meta_link_failed", session_id=session_id, error=str(e))
+
+    return {"job_id": job_id, "status": "queued", "external_id": external_id}
 
 
 @gateway_router.get("/documents/ingest/{job_id}", response_model=IngestJobStatus)

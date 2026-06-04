@@ -108,6 +108,85 @@ class TestIngestEnqueue:
 
         assert resp.status_code == 400
 
+    def test_file_base64_routes_to_ingest_queue(self, job_id):
+        """인라인 파일(base64)은 'ingest' 큐로 라우팅된다."""
+        import base64
+        app = _create_test_app(enqueue_result=job_id)
+        client = TestClient(app)
+
+        resp = client.post("/api/documents/ingest", json={
+            "title": "업로드 PDF",
+            "file_base64": base64.b64encode(b"%PDF-1.5 ...").decode(),
+            "mime_type": "application/pdf",
+            "domain_code": "DB-DAMAGE",
+        }, headers={"X-API-Key": "test"})
+
+        assert resp.status_code == 202
+        call = app.state.job_queue.enqueue.call_args
+        assert call.kwargs["queue_name"] == "ingest"
+        assert call.kwargs["payload"]["file_base64"]
+        assert call.kwargs["payload"]["mime_type"] == "application/pdf"
+
+    def test_session_file_upload_reuses_ingest_queue(self, job_id):
+        """챗봇 세션 파일 업로드는 코어 변경 없이 'ingest' 큐를 재사용한다."""
+        app = _create_test_app(enqueue_result=job_id)
+        # session_memory 모킹 (메타 링크용)
+        app.state.session_memory = AsyncMock()
+        app.state.session_memory.get_orchestrator_metadata = AsyncMock(return_value={})
+        app.state.session_memory.save_orchestrator_metadata = AsyncMock()
+        client = TestClient(app)
+
+        sid = str(uuid.uuid4())
+        resp = client.post(
+            f"/api/chat/sessions/{sid}/files",
+            files={"file": ("note.pdf", b"%PDF-1.5 ...", "application/pdf")},
+            headers={"X-API-Key": "test"},
+        )
+
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "queued"
+        assert body["external_id"].startswith(f"session:{sid}:")
+
+        call = app.state.job_queue.enqueue.call_args
+        assert call.kwargs["queue_name"] == "ingest"
+        payload = call.kwargs["payload"]
+        assert payload["file_base64"]
+        assert payload["metadata"]["session_id"] == sid
+        assert payload["metadata"]["source"] == "chat_upload"
+        assert payload["source_document_id"].startswith(f"session:{sid}:")
+        # 세션 메타에 업로드 추적 링크
+        app.state.session_memory.save_orchestrator_metadata.assert_called_once()
+
+    def test_session_file_upload_invalid_session_id_400(self):
+        app = _create_test_app()
+        client = TestClient(app)
+        resp = client.post(
+            "/api/chat/sessions/not-a-uuid/files",
+            files={"file": ("x.pdf", b"%PDF", "application/pdf")},
+            headers={"X-API-Key": "test"},
+        )
+        assert resp.status_code == 400
+
+    def test_source_document_id_routes_to_kms_sync_queue(self, job_id):
+        """참조-fetch(source_document_id)는 'kms_sync' 큐로 라우팅된다."""
+        app = _create_test_app(enqueue_result=job_id)
+        client = TestClient(app)
+
+        resp = client.post("/api/documents/ingest", json={
+            "title": "KMS 문서",
+            "source_document_id": "kms-doc-123",
+            "domain_code": "DB-DAMAGE",
+        }, headers={"X-API-Key": "test"})
+
+        assert resp.status_code == 202
+        call = app.state.job_queue.enqueue.call_args
+        assert call.kwargs["queue_name"] == "kms_sync"
+        payload = call.kwargs["payload"]
+        assert payload["action"] == "sync"
+        assert payload["document_id"] == "kms-doc-123"
+        assert payload["data"]["domainCodes"] == ["DB-DAMAGE"]
+
     def test_viewer_forbidden(self):
         app = _create_test_app()
         app.state.auth_service.authenticate = AsyncMock(return_value=UserContext(

@@ -39,6 +39,10 @@ class KmsSyncService:
         self._internal_key = settings.kms_internal_key
         self._store = vector_store
         self._pipeline = ingest_pipeline
+        # 테넌트 격리(A2): tenant_id 는 NOT NULL. webhook 페이로드엔 테넌트가 없으므로
+        # 기본 테넌트로 스탬핑한다 (KMS 가 단일 테넌트 운영). KMS 가 향후 테넌트를
+        # webhook data 로 전달하면 data 우선으로 확장.
+        self._default_tenant_id = settings.default_tenant_id or "default"
 
     async def sync_document(self, document_id: str, data: dict) -> dict:
         """KMS에서 문서를 가져와 벡터 DB에 동기화한다."""
@@ -60,6 +64,15 @@ class KmsSyncService:
         # 도메인 코드: webhook data에서 가져오거나 빈 문자열
         domain_codes = data.get("domainCodes", [])
         domain_code = domain_codes[0] if domain_codes else ""
+
+        # 배치(placement) 전이면 도메인이 없다 — 검색 스코프가 정해지지 않았으므로
+        # 적재를 보류한다. PlacementsService 가 배치 후 dispatch 하는
+        # document.updated(domainCodes 포함)가 실제 적재를 트리거한다.
+        # 이로써 생성 시점의 빈-도메인 document.created 가 스푸리어스 문서를 만드는
+        # 이중 적재를 방지한다 (create+placement 경쟁 제거).
+        if not domain_code:
+            logger.info("kms_sync_awaiting_placement", document_id=document_id)
+            return {"status": "skipped", "reason": "awaiting placement (no domain)"}
 
         # 파일 다운로드
         file_bytes = await self._download_file(document_id)
@@ -85,6 +98,8 @@ class KmsSyncService:
             metadata=metadata,
             file_bytes=file_bytes,
             mime_type=mime_type,
+            external_id=document_id,
+            tenant_id=data.get("tenantId") or self._default_tenant_id,
         )
 
         # external_id 설정 (insert_document에서 이미 처리되지만 명시적 업데이트)

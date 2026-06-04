@@ -41,12 +41,14 @@ class IngestRequest(BaseModel):
 
     title: str
     content: str | None = None
+    file_base64: str | None = None       # 인라인 파일 바이트(base64). content 없이 직접 파싱.
     source_url: str | None = None
     domain_code: str
     file_name: str | None = None
     security_level: str = SecurityLevel.PUBLIC
     metadata: dict = Field(default_factory=dict)
     source_document_id: str | None = None
+    source_system: str | None = None     # 참조-fetch 출처 (예: "kms"). source_document_id와 함께 사용.
     mime_type: str | None = None
 
 

@@ -56,65 +56,37 @@ async def _authenticate_crawl(request: Request) -> UserContext:
         raise HTTPException(status_code=401, detail=str(e))
 
 
+# NOTE: 크롤 워커(`crawl`/`crawl_cancel` 큐 핸들러)가 아직 구현되지 않았다.
+# 과거에는 여기서 큐에 enqueue 했으나 처리 워커가 없어 잡이 영구 적체됐다.
+# 워커가 생기기 전까지는 정직하게 501을 반환하여 죽은 잡 적체를 막는다
+# (KMS 등 호출자에게 명확한 "미구현" 신호 — API 컨트랙트는 보존).
 @crawl_router.post("")
 async def start_crawl(req: CrawlRequest, request: Request):
-    """크롤링 작업을 큐에 등록한다."""
+    """크롤링 작업 등록 — 크롤 워커 미구현으로 현재 비활성."""
     user_ctx = await _authenticate_crawl(request)
-
     if ROLE_LEVELS.get(user_ctx.user_role, 0) < 1:
         raise HTTPException(status_code=403, detail="크롤링은 EDITOR 이상 권한이 필요합니다")
 
-    state = request.app.state
-
-    logger.info(
-        "crawl_enqueue",
-        request_id=req.request_id,
-        url=req.url,
-        spider_mode=req.spider_mode,
+    logger.warning("crawl_not_implemented", request_id=req.request_id, url=req.url)
+    raise HTTPException(
+        status_code=501,
+        detail="크롤 워커가 아직 구현되지 않았습니다. 문서는 업로드(/documents/ingest)로 적재하세요.",
     )
-
-    try:
-        job_id = await state.job_queue.enqueue(
-            queue_name="crawl",
-            payload={
-                "request_id": req.request_id,
-                "url": req.url,
-                "instructions": req.instructions,
-                "target_domain": req.target_domain,
-                "spider_mode": req.spider_mode,
-            },
-        )
-    except Exception as e:
-        logger.error("crawl_enqueue_error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-    return {"job_id": job_id, "status": "queued"}
 
 
 @crawl_router.post("/{request_id}/cancel")
 async def cancel_crawl(request_id: str, request: Request):
-    """크롤링 작업을 취소한다."""
+    """크롤링 취소 — 크롤 워커 미구현으로 현재 비활성."""
     await _authenticate_crawl(request)
-
     try:
         uuid.UUID(request_id)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid request_id: {request_id}")
 
-    state = request.app.state
-
-    logger.info("crawl_cancel", request_id=request_id)
-
-    try:
-        await state.job_queue.enqueue(
-            queue_name="crawl_cancel",
-            payload={"request_id": request_id},
-        )
-    except Exception as e:
-        logger.error("crawl_cancel_error", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-    return {"status": "cancel_requested"}
+    raise HTTPException(
+        status_code=501,
+        detail="크롤 워커가 아직 구현되지 않았습니다.",
+    )
 
 
 @crawl_router.post("/generate-instructions")
