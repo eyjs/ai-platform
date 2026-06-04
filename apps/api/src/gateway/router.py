@@ -942,16 +942,28 @@ async def upload_session_file(
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx)
 
+    # 업로드 문서는 RAG 스토어에 적재된다(세션 스코프 검색은 추후) — 지식베이스
+    # 오염을 막기 위해 ingest_document 와 동일하게 EDITOR 이상으로 제한한다.
+    if ROLE_LEVELS.get(user_ctx.user_role, 0) < 1:
+        raise HTTPException(status_code=403, detail="세션 파일 업로드는 EDITOR 이상 권한이 필요합니다")
+
     try:
         uuid.UUID(session_id)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid session_id: {session_id}")
 
+    tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+
+    # 세션 소유권 검증 (IDOR 방지): 세션이 호출자(테넌트+유저)의 것인지 확인한다.
+    # 타 세션 주입을 막고, 열거(enumeration) 방지를 위해 미존재/미소유 모두 404.
+    session = await state.session_memory.get_session(session_id, tenant_id=tenant_id)
+    if not session or (session.get("user_id") and session["user_id"] != user_ctx.user_id):
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="빈 파일입니다")
 
-    tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
     external_id = f"session:{session_id}:{uuid.uuid4().hex}"
 
     logger.info(

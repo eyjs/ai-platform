@@ -130,8 +130,10 @@ class TestIngestEnqueue:
     def test_session_file_upload_reuses_ingest_queue(self, job_id):
         """챗봇 세션 파일 업로드는 코어 변경 없이 'ingest' 큐를 재사용한다."""
         app = _create_test_app(enqueue_result=job_id)
-        # session_memory 모킹 (메타 링크용)
+        # session_memory 모킹 — 세션은 호출자(test-editor) 소유
         app.state.session_memory = AsyncMock()
+        app.state.session_memory.get_session = AsyncMock(
+            return_value={"user_id": "test-editor", "tenant_id": "default"})
         app.state.session_memory.get_orchestrator_metadata = AsyncMock(return_value={})
         app.state.session_memory.save_orchestrator_metadata = AsyncMock()
         client = TestClient(app)
@@ -167,6 +169,33 @@ class TestIngestEnqueue:
             headers={"X-API-Key": "test"},
         )
         assert resp.status_code == 400
+
+    def test_session_file_upload_foreign_session_404(self):
+        """타 사용자 소유 세션에 업로드 시도 → 404 (IDOR 방지)."""
+        app = _create_test_app()
+        app.state.session_memory = AsyncMock()
+        app.state.session_memory.get_session = AsyncMock(
+            return_value={"user_id": "other-user", "tenant_id": "default"})
+        client = TestClient(app)
+        resp = client.post(
+            f"/api/chat/sessions/{uuid.uuid4()}/files",
+            files={"file": ("x.pdf", b"%PDF", "application/pdf")},
+            headers={"X-API-Key": "test"},
+        )
+        assert resp.status_code == 404
+
+    def test_session_file_upload_unknown_session_404(self):
+        """존재하지 않는 세션 → 404 (열거 방지)."""
+        app = _create_test_app()
+        app.state.session_memory = AsyncMock()
+        app.state.session_memory.get_session = AsyncMock(return_value=None)
+        client = TestClient(app)
+        resp = client.post(
+            f"/api/chat/sessions/{uuid.uuid4()}/files",
+            files={"file": ("x.pdf", b"%PDF", "application/pdf")},
+            headers={"X-API-Key": "test"},
+        )
+        assert resp.status_code == 404
 
     def test_source_document_id_routes_to_kms_sync_queue(self, job_id):
         """참조-fetch(source_document_id)는 'kms_sync' 큐로 라우팅된다."""
