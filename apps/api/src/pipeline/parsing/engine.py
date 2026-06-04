@@ -71,11 +71,13 @@ class ParsingEngine:
         docforge_url: str = "http://localhost:5001",
         docforge_timeout_sec: float = 120.0,
         docforge_internal_key: str = "",
+        docforge_max_wait_sec: float = 5400.0,
     ):
         self._docforge_client = DocForgeClient(
             base_url=docforge_url,
             timeout_sec=docforge_timeout_sec,
             internal_key=docforge_internal_key,
+            max_wait_sec=docforge_max_wait_sec,
         )
 
     async def parse(self, file_bytes: bytes, file_name: str) -> ParseResult:

@@ -6,6 +6,7 @@ httpx.AsyncClient로 multipart/form-data 전송.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 
@@ -49,10 +50,17 @@ class DocForgeClient:
         base_url: str = "http://localhost:5001",
         timeout_sec: float = 120.0,
         internal_key: str = "",
+        max_wait_sec: float = 3600.0,
+        poll_interval_sec: float = 2.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # Per-HTTP-request timeout. With the async queue each request (submit /
+        # poll) returns quickly, so this no longer bounds the whole parse.
         self._timeout = timeout_sec
         self._internal_key = internal_key
+        # Total time to wait for an async parse job to finish before giving up.
+        self._max_wait = max_wait_sec
+        self._poll_interval = poll_interval_sec
 
     async def parse(
         self,
@@ -81,7 +89,7 @@ class DocForgeClient:
         ParseError:
             DocForge 호출 실패 (타임아웃, 네트워크, 서버 에러).
         """
-        url = f"{self._base_url}/v1/parse/sync"
+        submit_url = f"{self._base_url}/v1/parse/async"
         t0 = time.time()
 
         try:
@@ -90,47 +98,68 @@ class DocForgeClient:
                 headers["X-Internal-Key"] = self._internal_key
 
             async with httpx.AsyncClient(timeout=self._timeout) as client:
+                # 1) 제출 — job_id 즉시 수신 (연결 유지 없음)
                 resp = await client.post(
-                    url,
+                    submit_url,
                     files={"file": (file_name, file_bytes, mime_type)},
                     headers=headers,
                 )
+                if resp.status_code not in (200, 202):
+                    body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                    error_info = body.get("error", {})
+                    error_msg = error_info.get("message", resp.text[:200])
+                    error_code = error_info.get("code", "")
+                    logger.error(
+                        "docforge_submit_failed",
+                        status=resp.status_code,
+                        error_code=error_code,
+                        file_name=file_name,
+                        mime_type=mime_type,
+                        error=error_msg,
+                    )
+                    raise ParseError(f"DocForge submit returned {resp.status_code}: {error_msg}")
+
+                body = resp.json()
+                if not body.get("success"):
+                    error_msg = body.get("error", {}).get("message", "unknown error")
+                    raise ParseError(f"DocForge submit failed: {error_msg}")
+                job_id = body["data"]["job_id"]
+
+                # 2) 폴링 — 짧은 요청 반복, 완료/실패까지
+                poll_url = f"{self._base_url}/v1/parse/async/{job_id}"
+                while True:
+                    if time.time() - t0 > self._max_wait:
+                        raise ParseTimeoutError(
+                            f"파일이 너무 크거나 복잡하여 파싱 시간이 초과되었습니다 "
+                            f"({self._max_wait:.0f}s): {file_name}"
+                        )
+                    await asyncio.sleep(self._poll_interval)
+                    presp = await client.get(poll_url, headers=headers)
+                    if presp.status_code == 404:
+                        raise ParseError(f"DocForge 작업이 만료/소실되었습니다: {job_id}")
+                    if presp.status_code != 200:
+                        raise ParseError(f"DocForge poll returned {presp.status_code}")
+                    pbody = presp.json()
+                    data = pbody.get("data", {})
+                    status = data.get("status")
+                    if status in ("queued", "processing"):
+                        continue
+                    if status == "failed":
+                        emsg = pbody.get("error", {}).get("message", "파싱 실패")
+                        logger.error(
+                            "docforge_parse_failed",
+                            file_name=file_name, mime_type=mime_type, error=emsg,
+                        )
+                        raise ParseError(f"DocForge parse failed: {emsg}")
+                    if status != "done":
+                        raise ParseError(f"DocForge 알 수 없는 상태: {status}")
+                    break
 
             latency_ms = (time.time() - t0) * 1000
-
-            if resp.status_code != 200:
-                body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                error_info = body.get("error", {})
-                error_msg = error_info.get("message", resp.text[:200])
-                error_code = error_info.get("code", "")
-                logger.error(
-                    "docforge_parse_failed",
-                    status=resp.status_code,
-                    error_code=error_code,
-                    file_name=file_name,
-                    mime_type=mime_type,
-                    error=error_msg,
-                    latency_ms=round(latency_ms, 1),
-                )
-                if resp.status_code == 408 or error_code == "REQUEST_TIMEOUT":
-                    raise ParseTimeoutError(
-                        f"파일이 너무 크거나 복잡하여 파싱 시간이 초과되었습니다: {file_name}"
-                    )
-                raise ParseError(
-                    f"DocForge returned {resp.status_code}: {error_msg}"
-                )
-
-            body = resp.json()
-            if not body.get("success"):
-                error_msg = body.get("error", {}).get("message", "unknown error")
-                raise ParseError(f"DocForge parse failed: {error_msg}")
-
-            data = body["data"]
             markdown = data.get("markdown", "")
             metadata = data.get("metadata", {})
             stats = data.get("stats", {})
 
-            # confidence 경고
             confidence = metadata.get("confidence")
             if confidence is not None and confidence < 0.6:
                 logger.warning(

@@ -80,7 +80,10 @@ class Settings(BaseSettings):
 
     # DocForge 파싱 서비스 (parser_provider=engine 일 때)
     docforge_url: str = "http://localhost:5001"
-    docforge_timeout_sec: float = 300.0
+    docforge_timeout_sec: float = 300.0       # 개별 HTTP 요청(제출/폴링) 타임아웃
+    # 비동기 파싱 잡 완료까지 총 대기 한도 (대형 약관 ~1500p 대응). docforge가
+    # 큐에서 하나씩 처리하므로 이 시간 동안 짧은 폴링으로 대기한다.
+    docforge_max_wait_sec: float = 5400.0
     docforge_internal_key: str = ""
 
     # 청킹
@@ -89,10 +92,13 @@ class Settings(BaseSettings):
 
     # 임베딩 배치
     embed_batch_size: int = 64
-    embed_max_batch_size: int = 128
+    embed_max_batch_size: int = 64            # 대형 문서도 배치당 최대 64 (서버 부하 완화)
+    # 임베딩 서버로의 동시 배치 요청 상한. 대형 문서(수천 청크)에서 모든 배치를
+    # 동시에 발사하면 단일 임베딩 서버가 교착(CLOSE_WAIT)되므로 제한한다.
+    embed_concurrency: int = 3
 
     # 임베딩 프로바이더
-    embedding_timeout: float = 15.0           # HTTP 타임아웃 (초)
+    embedding_timeout: float = 30.0           # HTTP 타임아웃 (초)
     embedding_connect_timeout: float = 5.0    # 커넥션 타임아웃 (초)
 
     # 동시성

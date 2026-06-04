@@ -110,8 +110,8 @@ class IngestPipeline:
         t_embed = time.time()
         try:
             embeddings = await self._embed_in_batches(texts)
-        except Exception:
-            logger.error("embedding_failed", title=title, doc_id=doc_id)
+        except Exception as e:
+            logger.error("embedding_failed", title=title, doc_id=doc_id, error=repr(e))
             raise
         embed_ms = (time.time() - t_embed) * 1000
         logger.info("embedded", title=title, chunks=len(chunks), latency_ms=round(embed_ms, 1))
@@ -174,10 +174,24 @@ class IngestPipeline:
         if len(batches) > 5:
             logger.info("embedding_batches", batches=len(batches), total_texts=len(texts))
 
-        async def _embed_one(batch: List[str]) -> List[List[float]]:
-            return await self._embedder.embed_batch(batch)
+        # 동시 배치 요청을 제한한다. 모든 배치를 한꺼번에 gather하면 단일 임베딩
+        # 서버가 과부하로 교착(CLOSE_WAIT)된다. 작은 세마포어로 건강하게 유지.
+        sem = asyncio.Semaphore(max(1, self._settings.embed_concurrency))
 
-        results = await asyncio.gather(*[_embed_one(b) for b in batches])
+        async def _embed_one(idx: int, batch: List[str]) -> List[List[float]]:
+            async with sem:
+                try:
+                    return await self._embedder.embed_batch(batch)
+                except Exception as e:
+                    # 실패 원인을 배치 컨텍스트와 함께 표면화 (last_error 공백 방지)
+                    raise RuntimeError(
+                        f"embed_batch 실패 (배치 {idx + 1}/{len(batches)}, "
+                        f"{len(batch)}개 텍스트): {type(e).__name__}: {e}"
+                    ) from e
+
+        results = await asyncio.gather(
+            *[_embed_one(i, b) for i, b in enumerate(batches)]
+        )
         all_embeddings: List[List[float]] = []
         for r in results:
             all_embeddings.extend(r)

@@ -219,6 +219,7 @@ class ProviderFactory:
                 docforge_url=self._settings.docforge_url,
                 docforge_timeout_sec=self._settings.docforge_timeout_sec,
                 docforge_internal_key=self._settings.docforge_internal_key,
+                docforge_max_wait_sec=self._settings.docforge_max_wait_sec,
             )
             logger.info(
                 "Using DocForge parsing service: %s",
