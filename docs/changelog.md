@@ -5,6 +5,26 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed — Step 18: KMS→ai-platform 동기화 발행 내구화 (G20, Seam①)
+
+- **Transactional Outbox (KMS)**: fire-and-forget webhook 발행을 비즈니스 트랜잭션 내부 `outbox_events` 적재 + 폴링 디스패처 재시도로 봉합. 커밋成·발행失(웹훅 5xx / 네트워크 단절 / 프로세스 강제종료)로 인한 RAG 미동기를 제거. PostgreSQL 단일스택(테이블 + `FOR UPDATE SKIP LOCKED` 폴링, Redis/Kafka 0). 외부 webhook 페이로드 무변. — KMS `feature/step18-kms-outbox` (merge 5684dd7a)
+- **수신측 멱등 갭 봉합 (ai-platform)**: `insert_document`의 `external_id` 경로 `ON CONFLICT (external_id, domain_code)`가 부분 유니크 인덱스(`uq_documents_external_id_domain WHERE external_id IS NOT NULL`, 마이그레이션 022)를 arbiter로 추론하려면 동일 술어 명시가 필요한데 누락되어 실 DB에서 "no unique or exclusion constraint matching..."로 실패(=at-least-once 중복 수신이 멱등 아님). `WHERE external_id IS NOT NULL` 술어 추가로 봉합 (`src/infrastructure/vector_store.py`). — ai-platform `feature/step18-recv-idempotency` (merge bae3853)
+
+### Added — 테스트
+
+- KMS: `outbox.service.spec.ts` — 단위 7(enqueue PENDING, SENT/재시도/FAILED 상태전이, 화이트리스트, 빈 구독자 SENT) + 실 DB 통합 3(내구성: 디스패처 미기동 enqueue → 새 인스턴스가 집어 SENT / 재시도 수렴 / 트랜잭션 원자성)
+- ai-platform: `test_insert_document_idempotency_db.py` — 실 DB 회귀: `(external_id, domain)` / `(file_hash, domain)` 중복 2회 → 행 1개·동일 id·UPDATE 수렴, 식별자 없음 → 신규 2행(계약). DB 미가용 시 명시적 skip.
+
+### Decision
+
+- [ADR-006](adr/adr-006-transactional-outbox-webhook-durability.md): Transactional Outbox로 webhook 발행 내구화 (Kafka/Redis 대신 PostgreSQL 테이블 + 폴링)
+
+> G20 라이브 green 전환(`test_g20_webhook_fire_and_forget`의 xfail 제거)은 KMS 컨테이너를 머지된 main으로 재빌드한 라이브 환경에서 별도 확인 후 진행한다(ADR-006 참조).
+
+---
+
 ## [0.11.0] — 2026-05-07
 
 ### Added
