@@ -45,6 +45,11 @@ async def test_no_hash_with_external_id_upserts():
     conn.fetchrow.assert_awaited_once()
     sql = conn.fetchrow.call_args[0][0]
     assert "ON CONFLICT (external_id, domain_code)" in sql
+    # 부분 유니크 인덱스(uq_documents_external_id_domain, WHERE external_id IS NOT NULL,
+    # 마이그레이션 022)를 ON CONFLICT arbiter 로 추론하려면 동일 술어 명시가 필수다.
+    # 이 술어가 빠지면 "no unique or exclusion constraint matching..." 로 실패 →
+    # at-least-once 중복 수신이 멱등이 아니게 된다(Step18 회귀 가드).
+    assert "WHERE external_id IS NOT NULL" in sql
     assert "DO UPDATE" in sql
     # 멱등: 기존 행 id 반환 (신규 uuid가 아님)
     assert result == "existing-doc-1"
