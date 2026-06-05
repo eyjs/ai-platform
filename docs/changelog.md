@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### Fixed — Step 19: docforge 파싱 잡 유실 봉합 (G21, Seam②)
+
+- **내구 잡 큐 (docforge)**: 인메모리 `_async_jobs`/`_async_queue`(단일 워커, 재시작 시 전손실)를 **SQLite 내구 잡 스토어**(`job_store.py` — WAL + `BEGIN IMMEDIATE` 원자 클레임, 부팅 시 `processing` 고아 잡 회수, payload 영속 보존, TTL 정리)로 교체. 워커/프로세스 재시작에도 잡이 잔존·이어서 처리되고 폴링 200을 유지(404 증발 제거). `DOCFORGE_WORKERS=1` 제약 해제. — parser (merge 9b63d39)
+- **내구성 경계 보강**: 잡 스토어 경로를 `DOCFORGE_ASYNC_STORE_DIR`로 영속 볼륨(`/app/uploads/async_jobs`)에 고정 → 컨테이너 재생성에도 큐 잔존. — parser `eb0ceef`
+- **G21 green 전환 (ai-platform)**: `test_g21_docforge_job_evaporation`의 `xfail(strict)` 제거, "재시작 견딤→재처리→파싱 성공" green 단언으로 반전. `_injection.py`에 `make_docforge_durable_restart_transport` 추가(제출→processing×N→done 계약 재현). — ai-platform (merge 9949684)
+
+### Added — 테스트 (Step 19)
+
+- parser: `test_job_store.py` + `test_v1_api.py` — enqueue→INSERT, 동시 claim 단독성, 재시작 고아 회복→재처리, 결과 UPDATE, 라우트 폴링 200 유지, TTL 정리, 워커 e2e (42 passed)
+
+### Decision (Step 19)
+
+- [ADR-007](adr/adr-007-docforge-durable-queue-sqlite.md): docforge 내구 큐를 **SQLite로 구현(PostgreSQL 단일스택 예외, 사용자 승인)**. docforge가 PG에 네트워크 도달 불가한 standalone 도구라, PG화가 결합·드라이버·마이그레이션 인프라를 늘려 단일스택의 정신에 역행. 임베디드 SQLite(서버 0, 의존성 0)로 G21 봉합. scale-out 시 PG 재검토.
+
 ### Fixed — Step 18: KMS→ai-platform 동기화 발행 내구화 (G20, Seam①)
 
 - **Transactional Outbox (KMS)**: fire-and-forget webhook 발행을 비즈니스 트랜잭션 내부 `outbox_events` 적재 + 폴링 디스패처 재시도로 봉합. 커밋成·발행失(웹훅 5xx / 네트워크 단절 / 프로세스 강제종료)로 인한 RAG 미동기를 제거. PostgreSQL 단일스택(테이블 + `FOR UPDATE SKIP LOCKED` 폴링, Redis/Kafka 0). 외부 webhook 페이로드 무변. — KMS `feature/step18-kms-outbox` (merge 5684dd7a)
