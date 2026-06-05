@@ -109,14 +109,21 @@ class VectorStore(AbstractVectorStore):
 
             # file_hash가 없는 경로(스트림 업로드 등). external_id가 있으면
             # (external_id, domain_code) 기준으로 멱등 UPSERT — 동일 외부 문서가
-            # 복수 행으로 적재되는 것을 막는다(at-least-once 수신측 정합, Step25).
+            # 복수 행으로 적재되는 것을 막는다(at-least-once 수신측 정합, Step25/Step18).
+            #
+            # conflict target 은 부분 유니크 인덱스 uq_documents_external_id_domain
+            # (WHERE external_id IS NOT NULL, 마이그레이션 022)이다. PostgreSQL 은
+            # 부분 인덱스를 ON CONFLICT arbiter 로 추론(infer)하려면 동일한 술어를
+            # ON CONFLICT 에 명시해야 한다. WHERE 술어가 없으면 "no unique or
+            # exclusion constraint matching the ON CONFLICT specification" 로
+            # 실패하여 at-least-once 중복 수신이 멱등이 아니게 된다(Step18 봉합 대상).
             if external_id is not None:
                 row = await conn.fetchrow(
                     """
                     INSERT INTO documents (id, external_id, title, file_name, file_hash,
                         domain_code, security_level, source_url, metadata, tenant_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (external_id, domain_code) DO UPDATE
+                    ON CONFLICT (external_id, domain_code) WHERE external_id IS NOT NULL DO UPDATE
                         SET title = EXCLUDED.title,
                             security_level = EXCLUDED.security_level,
                             source_url = EXCLUDED.source_url,
