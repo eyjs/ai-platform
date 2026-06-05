@@ -125,6 +125,25 @@ def _get_app_state(request: Request):
     return request.app.state
 
 
+async def _resolve_session_scope_id(state, session_id: str) -> str | None:
+    """세션 업로드 문서 스코프 격리(Step26) 키를 해석한다.
+
+    해당 세션에 업로드된 문서(metadata.session_id로 태깅, /documents/session-upload
+    경유)가 있을 때만 session_id를 반환한다. 그러면 이후 검색은 RAG SQL의
+    `documents.metadata->>'session_id'` additive 필터로 해당 세션 문서에만 격리된다.
+    업로드가 없으면 None을 반환하여 일반 검색(전체 도메인) 동작을 유지한다.
+    조회 실패는 격리 부재로 폴백하지 않고 None(일반 검색)으로 안전하게 처리한다.
+    """
+    try:
+        meta = await state.session_memory.get_orchestrator_metadata(session_id) or {}
+    except Exception as e:
+        logger.warning("session_scope_resolve_failed", session_id=session_id, error=str(e))
+        return None
+    if meta.get("uploaded_external_ids"):
+        return session_id
+    return None
+
+
 async def _authenticate(request: Request) -> UserContext:
     """요청을 인증하고 UserContext를 반환한다."""
     state = _get_app_state(request)
@@ -333,6 +352,7 @@ async def _prepare_chat(
 
             skip_context_resolve = req.chatbot_id is not None
 
+            session_scope_id = await _resolve_session_scope_id(state, session_id)
             tools = state.tool_registry.resolve(profile.tool_names)
             plan = await state.ai_router.route(
                 query=req.question,
@@ -343,6 +363,7 @@ async def _prepare_chat(
                 skip_context_resolve=skip_context_resolve,
                 external_context=req.context or "",
                 tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+                session_scope_id=session_scope_id,
             )
 
         agent_context = AgentContext(
@@ -468,6 +489,7 @@ async def _prepare_chat_fast(
             # 이미 특정 챗봇을 지정했으므로 대명사 해소/질문 재작성이 불필요
             skip_context_resolve = req.chatbot_id is not None
 
+            session_scope_id = await _resolve_session_scope_id(state, session_id)
             tools = state.tool_registry.resolve(profile.tool_names)
             plan = await state.ai_router.route(
                 query=req.question,
@@ -478,6 +500,7 @@ async def _prepare_chat_fast(
                 skip_context_resolve=skip_context_resolve,
                 external_context=req.context or "",
                 tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+                session_scope_id=session_scope_id,
             )
 
         agent_context = AgentContext(

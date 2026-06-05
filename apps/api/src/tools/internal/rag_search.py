@@ -120,6 +120,7 @@ class RAGSearchTool:
             allowed_doc_ids=scope.allowed_doc_ids,
             max_security_level=scope.security_level_max,
             tenant_id=scope.tenant_id,
+            session_id=scope.session_id,
         )
 
         total_ms = (time.time() - t_start) * 1000
@@ -209,6 +210,7 @@ class RAGSearchTool:
             allowed_doc_ids=scope.allowed_doc_ids,
             max_security_level=scope.security_level_max,
             tenant_id=scope.tenant_id,
+            session_id=scope.session_id,
         )
 
         # 기존 결과에 없는 doc_id 추출
@@ -266,6 +268,7 @@ class RAGSearchTool:
             allowed_doc_ids=scope.allowed_doc_ids,
             max_security_level=scope.security_level_max,
             tenant_id=scope.tenant_id,
+            session_id=scope.session_id,
         )
 
         if not probe_results:
@@ -313,6 +316,7 @@ class RAGSearchTool:
                 allowed_doc_ids=scope.allowed_doc_ids,
                 max_security_level=scope.security_level_max,
                 tenant_id=scope.tenant_id,
+                session_id=scope.session_id,
             )
             for query, embedding in zip(queries, embeddings)
         ]

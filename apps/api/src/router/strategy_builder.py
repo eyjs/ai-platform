@@ -60,6 +60,7 @@ class StrategyBuilder:
         workflow_step: Optional[str] = None,
         external_context: str = "",
         tenant_id: Optional[str] = None,
+        session_scope_id: Optional[str] = None,
     ) -> ExecutionPlan:
         # SearchScope 생성
         effective_security = min(
@@ -80,6 +81,7 @@ class StrategyBuilder:
             security_level_max=security_level,
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,
             tenant_id=tenant_id,
+            session_id=session_scope_id,  # 세션 업로드 문서 검색 시에만 격리 필터 적용(Step26)
         )
 
         # external_context가 있으면 history_turns를 최소 3으로 보장

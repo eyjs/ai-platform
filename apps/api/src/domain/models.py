@@ -103,6 +103,7 @@ class SearchScope:
     security_level_max: str = SecurityLevel.PUBLIC
     allowed_doc_ids: list[str] | None = None
     tenant_id: str | None = None  # 테넌트 격리(A2). 4b에서 검색 WHERE에 적용
+    session_id: str | None = None  # 세션 스코프 격리(Step26). 세션 업로드 문서 검색 시에만 주입
 
 
 class SourceRef(BaseModel):
