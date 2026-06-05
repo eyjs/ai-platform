@@ -154,6 +154,41 @@ class ProfileStore:
         )
 
     @staticmethod
+    def _parse_intent_hint(h: dict, profile_id: str, idx: int) -> IntentHint:
+        """intent_hint 한 건을 방어적으로 파싱한다.
+
+        로더 스키마는 `name`/`patterns`(복수, 리스트)를 요구하지만,
+        구버전 프로필이 `intent`/`pattern`(단수, 문자열)을 쓸 수 있어 폴백을 둔다.
+        둘 다 없으면 어느 프로필/어느 hint인지 포함한 명확한 에러를 던진다.
+        """
+        # name 폴백: name → intent
+        name = h.get("name") or h.get("intent")
+        if not name:
+            raise ValueError(
+                f"intent_hint[{idx}] in profile '{profile_id}' must have 'name' "
+                f"(or legacy 'intent'). Got keys: {list(h.keys())}"
+            )
+
+        # patterns 폴백: patterns(리스트) → pattern(단수 문자열 → 1-요소 리스트)
+        patterns = h.get("patterns")
+        if patterns is None:
+            single = h.get("pattern")
+            if single is None:
+                raise ValueError(
+                    f"intent_hint '{name}' in profile '{profile_id}' must have "
+                    f"'patterns' (list) or legacy 'pattern' (str). Got keys: {list(h.keys())}"
+                )
+            patterns = [single]
+        if not isinstance(patterns, list):
+            patterns = [patterns]
+
+        return IntentHint(
+            name=name,
+            patterns=patterns,
+            description=h.get("description", ""),
+        )
+
+    @staticmethod
     def _parse_profile(data: dict) -> AgentProfile:
         if "id" not in data or "name" not in data:
             raise ValueError(f"Profile must have 'id' and 'name'. Got keys: {list(data.keys())}")
@@ -161,12 +196,10 @@ class ProfileStore:
             ToolRef(name=t["name"], config=t.get("config", {}))
             for t in data.get("tools", [])
         ]
+        profile_id = data.get("id", "<unknown>")
         intent_hints = [
-            IntentHint(
-                name=h["name"], patterns=h["patterns"],
-                description=h.get("description", ""),
-            )
-            for h in data.get("intent_hints", [])
+            ProfileStore._parse_intent_hint(h, profile_id, idx)
+            for idx, h in enumerate(data.get("intent_hints", []))
         ]
         hybrid_triggers = [
             HybridTrigger(
