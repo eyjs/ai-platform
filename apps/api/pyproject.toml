@@ -53,6 +53,10 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "e2e: 3-서비스 라이브 E2E (AIP_E2E_LIVE=1 게이트, tests/e2e/)",
+    "live: 라이브 서비스 의존(KMS:3001/ai-platform:8020/docforge:5051 + OCR:5052/임베딩:8103)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
