@@ -56,6 +56,7 @@ asyncio_mode = "auto"
 markers = [
     "e2e: 3-서비스 라이브 E2E (AIP_E2E_LIVE=1 게이트, tests/e2e/)",
     "live: 라이브 서비스 의존(KMS:3001/ai-platform:8020/docforge:5051 + OCR:5052/임베딩:8103)",
+    "contract: 라이브 의존 없는 계약 mock 테스트 — AIP_E2E_LIVE 게이트 면제(항상 실행)",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -72,8 +72,92 @@ def make_docforge_evaporation_transport():
 
     한계: 실제 docforge 워커 재시작이 아니라 transport 404 재현.
     실제 seam 의 인메모리 큐 증발 계약(v1_routes.py:294/420)을 검증한다.
+
+    ⚠️ Step18 이전(인메모리 큐) 결함 계약. Step19 에서 docforge 가 SQLite 내구
+    큐로 전환되어 G21 이 green 으로 봉합되었다 — 현재 G21 테스트는 아래
+    ``make_docforge_durable_restart_transport`` 를 사용한다. 본 함수는 회귀/이력
+    참고용으로 보존.
     """
     return _MockTransport().transport
+
+
+# ---------------------------------------------------------------------------
+# 주입② G21 (green) — docforge 내구 큐: 워커 재시작 견딤 계약 mock
+# ---------------------------------------------------------------------------
+#
+# Step19 봉합 후 실제 코드(parser/docforge/web/v1_routes.py + job_store.py):
+#   잡이 SQLite parse_jobs 에 INSERT 되어 워커/프로세스 재시작에도 잔존.
+#   부팅 시 recover_orphans 가 processing 고아 잡을 queued 로 회수 → 워커가
+#   재클레임해 이어서 처리. 폴링은 재시작 동안에도 200(queued/processing/done)
+#   을 유지하며 404 를 내지 않는다 (v1_routes.py parse_async_status).
+# ai-platform 폴러(docforge_client.py:128-160):
+#   200 + status in (queued/processing) → 계속 폴링, status==done → 결과 반환.
+#   404 가 없으므로 ParseError 없이 성공.
+
+
+class _DurableRestartTransport:
+    """워커 재시작을 견디는 docforge 내구 큐 계약을 재현하는 transport.
+
+    submit → job_id. 폴링: 처음 ``restart_polls`` 회는 200 'processing'
+    (워커 재시작 중 — 잡은 parse_jobs 에 잔존, 404 아님) → 이후 200 'done' +
+    markdown. 어떤 단계에서도 404 를 내지 않는다(잡 영속).
+
+    한계: 실제 docforge 워커 재시작이 아니라 내구 큐의 *성공 계약*(잡 잔존 →
+    재처리 → done, poll 200 유지)을 transport 레벨로 재현. 실제 재시작 회복은
+    parser/tests/test_job_store.py 의 단위 테스트가 증명한다(SQLite 고아 회복).
+    """
+
+    def __init__(self, restart_polls: int = 2):
+        import httpx
+
+        state = {"polls": 0}
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if url.endswith("/v1/parse/async"):
+                # 제출 성공 — 잡이 내구 스토어에 INSERT 됨.
+                return httpx.Response(
+                    200,
+                    json={
+                        "success": True,
+                        "data": {"job_id": "durable-job", "status": "queued",
+                                 "queue_size": 1},
+                    },
+                )
+            # 폴링 — 잡은 항상 잔존(200). 재시작 동안 processing, 회복 후 done.
+            state["polls"] += 1
+            if state["polls"] <= restart_polls:
+                return httpx.Response(
+                    200,
+                    json={"success": True, "data": {"status": "processing"}},
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "status": "done",
+                        "markdown": "# parsed (durable)\n\nrecovered after restart",
+                        "metadata": {},
+                        "stats": {},
+                    },
+                },
+            )
+
+        self._transport = httpx.MockTransport(_handler)
+
+    @property
+    def transport(self):
+        return self._transport
+
+
+def make_docforge_durable_restart_transport(restart_polls: int = 2):
+    """docforge SQLite 내구 큐(Step19)의 재시작 견딤 계약을 재현하는 transport.
+
+    한계: 실제 워커 재시작이 아니라 내구 큐의 성공 계약(잡 잔존→재처리→done,
+    poll 200 유지)을 재현. 실제 SQLite 고아 회복은 parser 단위 테스트가 증명.
+    """
+    return _DurableRestartTransport(restart_polls=restart_polls).transport
 
 
 # ---------------------------------------------------------------------------
