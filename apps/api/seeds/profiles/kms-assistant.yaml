@@ -40,9 +40,12 @@ memory_type: "short"
 memory_ttl_seconds: 3600
 
 intent_hints:
-  - pattern: "문서.*찾아"
-    intent: "SEARCH"
-  - pattern: "비교.*해줘"
-    intent: "COMPARISON"
-  - pattern: "요약.*해줘"
-    intent: "SUMMARY"
+  - name: "SEARCH"
+    patterns: ["문서.*찾아"]
+    description: "문서 검색 의도"
+  - name: "COMPARISON"
+    patterns: ["비교.*해줘"]
+    description: "상품/문서 비교 의도"
+  - name: "SUMMARY"
+    patterns: ["요약.*해줘"]
+    description: "요약 의도"
