@@ -7,6 +7,22 @@
 
 ## [Unreleased]
 
+### Fixed — Step 20: docforge 호스트 엔진 가용성 자가회복 (G23, Seam③)
+
+- **가용성 영구 캐시 제거 → TTL 재프로브 (docforge)**: `apple_vision_remote.py`·`host_vlm_engine.py`의 `is_available()`가 `self._available`에 결과를 **영구 캐시**(한 번 False면 영구 → 호스트 OCR/VLM 재기동해도 docforge 죽은 채 유지, 자가회복 불가)했다. 공통 `host_health.TTLAvailability`로 교체 — `time.monotonic` 기준 TTL(기본 30s, `DOCFORGE_HOST_PROBE_TTL_SEC`) 경과 시 재프로브 + 원격 호출 실패 시 `invalidate()`로 즉시 재프로브. 재기동된 호스트 서비스를 docforge가 **스스로 다시 잡음**(다음 페이지/잡에서 자동 정상화). graceful degrade(다운 동안 빈 결과)는 보존. — parser (merge 63dff7b, feat 1c14b63)
+- **경량 헬스 폴러 (docforge)**: `HostHealthPoller`(stdlib daemon thread)가 OCR:5052·VLM:5053·임베딩:8103 `/health`를 주기 핑하고 **상태 전이(up↔down)만** 로깅. 관측 전용·**자동 시작 안 함**(명시 `start()`) → 기존 동작 무변. `probe_health`가 `status:ok`(OCR/VLM)·`status:healthy`(임베딩) 스키마를 모두 흡수. 자동기동은 범위 외(문서화 대체). — parser
+- **G23 green 전환 (ai-platform)**: `test_g23_ocr_availability_cache_sticky`(`xfail strict`)를 `test_g23_ocr_availability_reprobe_recovery`(contract, green)로 반전. `_injection.py`의 `_StickyAvailability`(영구 False) → `_RecoverableAvailability`(TTL 재프로브 자가회복), 회복이 재프로브에서 비롯됨을 `probe_count`로 증명(가짜 통과 방지). — ai-platform (merge, test 98041b1)
+
+### Added — 테스트 (Step 20)
+
+- parser: `test_host_health.py` — TTL 만료 재프로브, 캐시 유지, 실패→복구 전이, `invalidate` 즉시 재프로브, 폴러 전이 로깅, `probe_health` 스키마(ok·healthy), 어댑터 자가회복(통합) (16 passed)
+
+### Decision (Step 20)
+
+- [ADR-008](adr/adr-008-docforge-host-engine-availability-self-recovery.md): 호스트 엔진 가용성 **영구 캐시 → TTL 재프로브** 자가회복. 자동기동은 범위 외(재기동을 스스로 감지해 다시 잡을 뿐, 기동은 운영자/launchd 책임). 추가 인프라·의존성 0(stdlib).
+
+> **G23 라이브 자가회복 실증 (2026-06-05).** 실 `AppleVisionRemoteEngine`·실 호스트(:5052 up / :5053 down / :8103 healthy)·실 wall-clock TTL(1s)로: 다운→False 캐시 → 복구돼도 TTL 내 False(캐시 증명) → 1.2s sleep으로 TTL 경과 → 재프로브 → True + `host engine recovered (re-probe)` 로깅. 구 영구캐시면 영원히 False였을 가용성이 장애를 넘어 자동 복구. (컨테이너 내부 다운→재기동 실증은 docforge 재빌드 후 수동 게이트.)
+
 ### Fixed — Step 19: docforge 파싱 잡 유실 봉합 (G21, Seam②)
 
 - **내구 잡 큐 (docforge)**: 인메모리 `_async_jobs`/`_async_queue`(단일 워커, 재시작 시 전손실)를 **SQLite 내구 잡 스토어**(`job_store.py` — WAL + `BEGIN IMMEDIATE` 원자 클레임, 부팅 시 `processing` 고아 잡 회수, payload 영속 보존, TTL 정리)로 교체. 워커/프로세스 재시작에도 잡이 잔존·이어서 처리되고 폴링 200을 유지(404 증발 제거). `DOCFORGE_WORKERS=1` 제약 해제. — parser (merge 9b63d39)
