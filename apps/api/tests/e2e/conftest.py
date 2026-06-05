@@ -62,6 +62,11 @@ def pytest_collection_modifyitems(config, items):
     AIP_E2E_LIVE 미설정 시: skip 마커 + 명시적 사유 부착.
     이렇게 하면 'collected N, skipped N' 로 **명시적으로** 드러나며
     조용히 통과(pass)하지 않는다.
+
+    예외: ``@pytest.mark.contract`` 가 붙은 테스트는 라이브 서비스에 의존하지
+    않는 계약 mock 이므로 게이트를 면제하고 항상 실행한다(예: Step19 G21 내구
+    큐 green 계약). 이들은 mock 으로 실제 코드 계약을 검증하며 라이브가 없어도
+    유효한 green/red 신호를 낸다.
     """
     if _live_enabled():
         return
@@ -74,8 +79,11 @@ def pytest_collection_modifyitems(config, items):
     )
     e2e_root = os.path.dirname(__file__)
     for item in items:
-        if str(item.fspath).startswith(e2e_root):
-            item.add_marker(skip_live)
+        if not str(item.fspath).startswith(e2e_root):
+            continue
+        if item.get_closest_marker("contract") is not None:
+            continue  # 계약 mock — 라이브 게이트 면제
+        item.add_marker(skip_live)
 
 
 # ---------------------------------------------------------------------------

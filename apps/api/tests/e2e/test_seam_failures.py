@@ -76,36 +76,39 @@ async def test_g20_webhook_fire_and_forget(
 
 
 # ===========================================================================
-# 주입② G21 — docforge 잡 증발(404) → ParseError, 재큐 없음
+# 주입② G21 (green) — docforge 내구 큐: 워커 재시작 견딤 → 이어서 처리
 # ===========================================================================
 
 @pytest.mark.e2e
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "G21: docforge v1_routes.py:294 _async_jobs 인메모리. 워커 재시작 시 job 증발 → "
-        "polling 404(:420) → ai-platform docforge_client.py:138 ParseError, 재큐 없음. "
-        "현재 코드는 실패해야 정상(Step19 PG큐에서 green 전환)."
-    ),
-)
+@pytest.mark.contract
 async def test_g21_docforge_job_evaporation(monkeypatch):
-    """docforge 워커 재시작(잡 증발) → poll 404 → ParseError → 영구 실패 → xfail.
+    """docforge 워커 재시작 → 잡 잔존(parse_jobs) → 이어서 처리 → 파싱 성공 → green.
 
-    계약 mock: httpx.AsyncClient 를 잡 증발 transport 로 교체하고 **실제** DocForgeClient.parse
-    를 돌린다. 실제 폴링 로직(docforge_client.py:128-141)이 404 를 받아 ParseError 를 던지는지
-    검증한다.
+    Step19 봉합: docforge 비동기 큐가 인메모리 dict/Queue 에서 SQLite 내구 큐
+    (parser/docforge/web/job_store.py)로 전환됐다. 워커/프로세스 재시작에도 잡이
+    `parse_jobs` 에 잔존하고, 부팅 시 processing 고아 잡을 queued 로 회수해 워커가
+    재클레임·이어서 처리한다. 폴링은 재시작 동안에도 200(processing→done)을
+    유지하므로 ai-platform 폴러(docforge_client.py:128-160)는 404 없이 성공한다.
 
-    한계: 실제 docforge 워커 재시작이 아니라 transport 404 재현. 인메모리 큐 증발(v1_routes.py:294)
-    의 *실패 계약*을 검증하며, 라이브 재시작 검증은 AIP_E2E_LIVE_INJECT 경로 별도.
+    계약 mock: httpx.AsyncClient 를 내구 재시작 transport 로 교체하고 **실제**
+    DocForgeClient.parse 를 돌린다. transport 는 제출 후 첫 폴들에서 'processing'
+    (= 워커 재시작 중 잡 잔존), 이후 'done'+markdown 을 돌려준다. 어떤 단계에서도
+    404 를 내지 않는다.
 
-    본문은 "파싱이 성공해야 한다"고 단언 — 현재 코드는 404 로 영구 실패하므로 이 단언이 실패(xfail).
+    한계: 실제 docforge 워커 재시작이 아니라 내구 큐의 성공 계약(잡 잔존→재처리→
+    done, poll 200 유지)을 transport 레벨로 재현. 실제 SQLite 고아 회복 동작은
+    parser/tests/test_job_store.py 단위 테스트가 증명한다(orphan→queued→done).
+    라이브 재시작 실증(docforge 컨테이너 재기동)은 AIP_E2E_LIVE_INJECT 경로 +
+    REPORT 수동 검증 절차로 위임한다.
+
+    본문은 "재시작을 견디고 파싱이 성공해야 한다"고 단언 — Step19 내구 큐로 green.
     """
     # 실제 ai-platform 클라이언트(같은 앱 단위) import — 계약 검증 대상.
     from src.pipeline.parsing.docforge_client import DocForgeClient, ParseError
 
     import httpx
 
-    transport = INJ.make_docforge_evaporation_transport()
+    transport = INJ.make_docforge_durable_restart_transport(restart_polls=2)
     original_init = httpx.AsyncClient.__init__
 
     def _patched_init(self, *args, **kwargs):
@@ -118,19 +121,20 @@ async def test_g21_docforge_job_evaporation(monkeypatch):
 
     client = DocForgeClient(base_url="http://docforge.test:5051", poll_interval_sec=0.01)
 
-    # 현재 코드: poll 404 → ParseError("만료/소실"). 재큐 없음.
-    # 우리는 "파싱 성공"을 기대 단언 → 실제로는 ParseError → 이 테스트 본문이 실패(xfail).
+    # Step19 내구 큐: 재시작(첫 폴들 processing) 견딘 뒤 done → 성공. 404/ParseError 없음.
     raised = None
+    result = None
     try:
-        await client.parse(b"%PDF-1.4 fake", "evap.pdf", "application/pdf")
+        result = await client.parse(b"%PDF-1.4 fake", "durable.pdf", "application/pdf")
     except ParseError as exc:
         raised = exc
 
-    # 결함 가시화: 현재 코드는 ParseError 로 끝남(재큐/재시도 없음).
-    # green 전환(Step19) 후엔 재큐로 성공해 raised is None 이어야 한다.
     assert raised is None, (
-        f"docforge 잡 증발(404) 후 재큐 없이 영구 실패: {raised}. "
-        "Step19 PG큐가 이 단언을 green 으로 만든다."
+        f"docforge 내구 큐는 재시작을 견디고 이어서 처리해야 한다 — ParseError: {raised}"
+    )
+    assert result is not None, "내구 큐 재처리 후 파싱 결과를 받아야 한다"
+    assert getattr(result, "markdown", ""), (
+        "재시작 후 재처리된 잡의 markdown 을 수신해야 한다(잡 영속·이어서 처리 증명)"
     )
 
 
