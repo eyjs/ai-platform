@@ -35,7 +35,11 @@
 
 - [ADR-006](adr/adr-006-transactional-outbox-webhook-durability.md): Transactional Outbox로 webhook 발행 내구화 (Kafka/Redis 대신 PostgreSQL 테이블 + 폴링)
 
-> G20 라이브 green 전환(`test_g20_webhook_fire_and_forget`의 xfail 제거)은 KMS 컨테이너를 머지된 main으로 재빌드한 라이브 환경에서 별도 확인 후 진행한다(ADR-006 참조).
+> **G20 라이브 green 검증 완료 (2026-06-05).** KMS 컨테이너를 머지 main으로 재빌드 → 수신부(aip-api) 정지 주입 → 배치 커밋 시 outbox 이벤트가 PENDING으로 잔존(유실 0), ai-platform 미동기 → 수신부 복구 시 디스패처 재시도로 SENT 전환 + ai-platform `documents` 행 출현(RAG 동기화 회복) 확인. 구 fire-and-forget이면 영구 유실됐을 문서가 장애를 넘어 도달.
+
+### Fixed — Step 18 후속: Outbox 디스패처 트랜잭션 결함 (G20 라이브 검증서 발견)
+
+- **디스패처 네트워크 I/O를 트랜잭션 밖으로 (KMS)**: `dispatchPending`이 webhook 발송(내부 재시도 ~6s)을 Prisma 인터랙티브 트랜잭션(타임아웃 5s) 안에서 수행 → 발송 지연·실패 시 트랜잭션이 먼저 만료되어 상태전이 update가 무효화. attempts/last_error 미기록(0 고정)으로 백오프·dead-letter(FAILED)·관측성이 깨지고, 느린 성공(>5s)은 SENT 유실→중복 재전송. **수정**: 클레임(PENDING→SENDING 원자적, FOR UPDATE SKIP LOCKED, 짧은 tx) → 발송(tx 밖) → 종결(짧은 update) 3단계 분리 + 고아 SENDING lease 회수. 라이브 재검증: 지속 실패 시 attempts 0→1→2→3 증가, Transaction-closed 에러 0, 복구 후 SENT+RAG 동기화. — KMS `0aea523a`
 
 ---
 
