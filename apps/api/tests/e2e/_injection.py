@@ -161,39 +161,61 @@ def make_docforge_durable_restart_transport(restart_polls: int = 2):
 
 
 # ---------------------------------------------------------------------------
-# 주입③ G23 — OCR 가용성 캐시 영구 False 계약 mock
+# 주입③ G23 (green) — OCR 가용성 TTL 재프로브 자가회복 계약 mock
 # ---------------------------------------------------------------------------
 #
-# 실제 코드(parser/docforge/adapters/apple_vision_remote.py:37 is_available):
-#   self._available 를 1회 평가 후 캐시. 다운 시 :48 False 세팅 →
-#   :38-39 에서 TTL/리셋 없이 영구 False 반환. OCR 복구돼도 미반영.
+# Step20 봉합: 실제 코드(parser/docforge/adapters/apple_vision_remote.py +
+#   host_health.TTLAvailability)는 더 이상 _available 를 영구 캐시하지 않는다.
+#   TTL(기본 30s) 경과 시 — 또는 호출 실패 후 invalidate 시 — 다음 is_available()
+#   에서 health 를 재프로브한다. OCR 가 재기동되면 docforge 가 스스로 다시 잡는다.
 #
-# 계약 mock 은 동일한 캐시 고착 동작을 재현한다 (실제 :5052 다운/재기동이 아님).
+# 계약 mock 은 그 TTL 재프로브 회복 동작을 재현한다 (실제 :5052 다운/재기동이 아님).
+# 회복이 "재프로브 때문"임을 probe 호출 횟수로 증명한다 (가짜 통과 방지).
 
 
 @dataclass
-class _StickyAvailability:
-    """is_available() 캐시 고착을 재현하는 최소 모델.
+class _RecoverableAvailability:
+    """is_available() TTL 재프로브 자가회복을 재현하는 최소 모델.
 
-    apple_vision_remote.AppleVisionRemoteEngine 와 동일 계약:
-      - 첫 평가에서 health 가 다운이면 False 캐시
-      - 이후 health 가 복구돼도 캐시된 False 를 영구 반환
+    docforge host_health.TTLAvailability 와 동일 계약:
+      - 첫 평가에서 health 를 프로브해 캐시
+      - TTL 안에서는 캐시 반환(프로브 안 함)
+      - TTL 경과(advance) 또는 invalidate 후엔 health 를 다시 프로브 → 현재 health 반영
+      - 따라서 다운 후 health 가 복구되면 재프로브에서 True 로 자가회복
     """
 
     health_ok: bool
+    ttl_sec: float = 30.0
     _cached: bool | None = None
+    _age: float = 0.0  # 마지막 프로브 이후 가상 경과 시간(monotonic 대체)
+    probe_count: int = 0  # 실제 health 프로브 횟수 — 재프로브 회복 증명용
 
-    def is_available(self) -> bool:
-        if self._cached is not None:
-            return self._cached
+    def _probe(self) -> bool:
+        self.probe_count += 1
         self._cached = bool(self.health_ok)
+        self._age = 0.0
         return self._cached
 
+    def is_available(self) -> bool:
+        if self._cached is None or self._age >= self.ttl_sec:
+            return self._probe()
+        return self._cached
 
-def make_sticky_ocr_availability(initial_down: bool = True):
-    """OCR 캐시 고착 계약 재현 객체.
+    def advance(self, seconds: float) -> None:
+        """가상 시간 경과 — TTL 만료를 시뮬레이션해 다음 호출에서 재프로브하게 한다."""
+        self._age += seconds
 
-    한계: 실제 :5052 다운/재기동이 아니라 캐시 고착 동작 재현.
-    실제 seam(apple_vision_remote.py:37-50)의 영구 False 계약을 검증한다.
+    def invalidate(self) -> None:
+        """다음 is_available() 을 즉시 재프로브하게 한다(호출 실패 후 빠른 회복)."""
+        self._age = self.ttl_sec
+
+
+def make_recoverable_ocr_availability(initial_down: bool = True, ttl_sec: float = 30.0):
+    """OCR TTL 재프로브 자가회복 계약 재현 객체.
+
+    한계: 실제 :5052 다운/재기동이 아니라 TTL 재프로브 회복 동작 재현.
+    실제 seam 은 docforge host_health.TTLAvailability 이며, 여기선 그 회복 계약
+    (다운 캐시 → TTL 경과/invalidate → 재프로브 → 복구된 health 반영)을 모사한다.
+    회복이 재프로브에서 비롯됨을 probe_count 로 증명한다.
     """
-    return _StickyAvailability(health_ok=not initial_down)
+    return _RecoverableAvailability(health_ok=not initial_down, ttl_sec=ttl_sec)

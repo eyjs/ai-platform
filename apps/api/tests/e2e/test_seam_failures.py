@@ -139,40 +139,59 @@ async def test_g21_docforge_job_evaporation(monkeypatch):
 
 
 # ===========================================================================
-# 주입③ G23 — OCR 가용성 캐시 영구 False → 재기동 후 자동복구 안 됨
+# 주입③ G23 (green) — OCR 가용성 TTL 재프로브: 다운→재기동 자가회복
 # ===========================================================================
 
 @pytest.mark.e2e
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "G23: docforge adapters/apple_vision_remote.py:37 is_available 가 self._available 캐시. "
-        "다운 시 :48 False → :38-39 TTL/리셋 없이 영구 False. OCR 복구돼도 미반영. "
-        "현재 코드는 실패해야 정상(Step20 호스트 회복에서 green 전환)."
-    ),
-)
-async def test_g23_ocr_availability_cache_sticky():
-    """OCR :5052 다운 → 캐시 False 고착 → 재기동 후에도 자동복구 안 됨 → xfail.
+@pytest.mark.contract
+async def test_g23_ocr_availability_reprobe_recovery():
+    """OCR :5052 다운 → 재기동 → docforge 가 TTL 재프로브로 스스로 다시 잡음 → green.
 
-    계약 mock: apple_vision_remote.AppleVisionRemoteEngine.is_available 의 캐시 고착 계약을
-    재현(_StickyAvailability). 첫 평가에서 다운(False) → 이후 health 복구돼도 False 유지.
+    Step20 봉합: docforge adapters(apple_vision_remote.py / host_vlm_engine.py)는
+    더 이상 가용성을 영구 캐시하지 않는다. host_health.TTLAvailability 가 TTL(기본
+    30s) 경과 — 또는 호출 실패 후 invalidate — 시 다음 is_available() 에서 health 를
+    재프로브한다. OCR 가 재기동되면 다음 호출에서 자동 인지(자가회복)하고 파이프라인이
+    복구된다. graceful degrade(다운 동안 빈 결과)는 유지된다.
 
-    한계: 실제 :5052 다운/재기동이 아니라 캐시 고착 동작 재현. 실제 seam(apple_vision_remote.py:37-50)
-    의 영구 False 계약을 검증.
+    계약 mock: _RecoverableAvailability 가 그 TTL 재프로브 회복 계약을 재현한다 —
+    다운 첫 평가(False 캐시) → TTL 경과(advance)/invalidate → 재프로브 → 복구된
+    health 반영. 회복이 "재프로브 때문"임을 probe_count 증가로 증명한다(가짜 통과 방지:
+    단순 True 반환이 아니라 실제 재프로브가 일어남을 단언).
 
-    본문은 "OCR 복구 후 is_available()==True 여야 한다"고 단언 — 현재 코드는 캐시 고착으로 False →
-    이 단언이 실패(xfail).
+    한계: 실제 :5052 다운/재기동이 아니라 TTL 재프로브 회복 동작 재현. 실제 seam 회복은
+    parser/tests/unit/test_host_health.py 단위 테스트가 증명(다운→TTL 만료→재프로브→True,
+    어댑터 자가회복). 라이브 :5052 다운/재기동 실증은 REPORT 수동 검증 절차로 위임.
+
+    본문은 "OCR 재기동 후 재프로브로 is_available()==True 로 자가회복해야 한다"고
+    단언 — Step20 TTL 재프로브로 green.
     """
-    engine = INJ.make_sticky_ocr_availability(initial_down=True)
+    engine = INJ.make_recoverable_ocr_availability(initial_down=True, ttl_sec=30.0)
 
-    # 1) 다운 상태 첫 평가 → False 캐시
+    # 1) OCR 다운 상태 첫 평가 → 프로브 1회, False 캐시.
     assert engine.is_available() is False
+    assert engine.probe_count == 1
 
-    # 2) OCR 복구 (health 가 다시 ok). 현재 코드는 캐시를 리셋하지 않는다.
+    # 2) TTL 안에서는 재프로브하지 않고 캐시(False) 반환 — 불필요한 프로브 폭주 방지.
+    assert engine.is_available() is False
+    assert engine.probe_count == 1, "TTL 안에서는 재프로브하지 않아야 한다(캐시)"
+
+    # 3) OCR 재기동 (health 복구) + TTL 경과.
     engine.health_ok = True
+    engine.advance(31.0)  # TTL(30s) 초과 → 다음 호출에서 재프로브
 
-    # 3) 자동복구 기대 — 현재 코드는 캐시 고착으로 여전히 False → 이 단언이 실패(xfail).
+    # 4) 자가회복 — 재프로브가 복구된 health 를 반영해 True. probe_count 증가로 재프로브 증명.
     assert engine.is_available() is True, (
-        "OCR 복구 후 자동 재감지 기대 — 현재 코드는 _available 캐시 영구 False. "
-        "Step20 호스트 회복(캐시 TTL/리셋)이 이 단언을 green 으로 만든다."
+        "OCR 재기동 후 TTL 재프로브로 자가회복 기대 — Step20 host_health.TTLAvailability 가 "
+        "영구 캐시를 TTL 재프로브로 교체해 이 단언을 green 으로 만든다."
     )
+    assert engine.probe_count == 2, (
+        "회복은 재프로브에서 비롯돼야 한다(가짜 통과 방지) — TTL 경과 후 health 재프로브 1회 추가."
+    )
+
+    # 5) 보강: 호출 실패 후 invalidate 시 TTL 전에도 즉시 재프로브로 회복 인지.
+    engine2 = INJ.make_recoverable_ocr_availability(initial_down=True, ttl_sec=30.0)
+    assert engine2.is_available() is False
+    engine2.health_ok = True
+    engine2.invalidate()  # 호출 실패 추정 → 다음 호출 즉시 재프로브
+    assert engine2.is_available() is True
+    assert engine2.probe_count == 2
