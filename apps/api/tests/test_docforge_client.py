@@ -49,20 +49,32 @@ class TestDocForgeResult:
 
 class TestParseSuccess:
     async def test_parse_success(self, client):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        # 비동기 2단계 프로토콜: submit(job_id) → poll(done).
+        submit_response = MagicMock()
+        submit_response.status_code = 202
+        submit_response.json.return_value = {
+            "success": True,
+            "data": {"job_id": "job-123"},
+        }
+
+        poll_response = MagicMock()
+        poll_response.status_code = 200
+        poll_response.json.return_value = {
             "success": True,
             "data": {
+                "status": "done",
                 "markdown": "# Document\n\nContent here",
                 "metadata": {"pages": 2, "confidence": 0.95},
                 "stats": {"parse_time_ms": 150},
             },
         }
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
+        with patch("httpx.AsyncClient") as mock_client_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock()
+        ):
             mock_async_client = AsyncMock()
-            mock_async_client.post.return_value = mock_response
+            mock_async_client.post.return_value = submit_response
+            mock_async_client.get.return_value = poll_response
             mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
             mock_async_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_async_client
@@ -127,7 +139,9 @@ class TestParseErrors:
             with pytest.raises(ParseError, match="500"):
                 await client.parse(b"data", "test.pdf", "application/pdf")
 
-    async def test_408_raises_parse_timeout_error(self, client):
+    async def test_408_submit_raises_parse_error(self, client):
+        # submit 단계에서 408(200/202 외)을 받으면 ParseError로 거른다.
+        # ParseTimeoutError는 폴링 타임아웃 경로 전용(아래 별도 테스트)이다.
         mock_response = MagicMock()
         mock_response.status_code = 408
         mock_response.text = "Request Timeout"
@@ -144,8 +158,45 @@ class TestParseErrors:
             mock_async_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_async_client
 
-            with pytest.raises(ParseTimeoutError):
+            with pytest.raises(ParseError, match="408"):
                 await client.parse(b"data", "large.pdf", "application/pdf")
+
+    async def test_poll_timeout_raises_parse_timeout_error(self):
+        # 제출은 성공(job_id)하지만 폴링이 max_wait를 넘기면 ParseTimeoutError.
+        # max_wait를 0으로 두면 폴링 루프 진입 즉시 타임아웃 분기로 들어간다.
+        timeout_client = DocForgeClient(
+            base_url="http://localhost:5001",
+            timeout_sec=10.0,
+            max_wait_sec=0.0,
+            poll_interval_sec=0.0,
+        )
+
+        submit_response = MagicMock()
+        submit_response.status_code = 202
+        submit_response.json.return_value = {
+            "success": True,
+            "data": {"job_id": "job-timeout"},
+        }
+
+        poll_response = MagicMock()
+        poll_response.status_code = 200
+        poll_response.json.return_value = {
+            "success": True,
+            "data": {"status": "processing"},
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock()
+        ):
+            mock_async_client = AsyncMock()
+            mock_async_client.post.return_value = submit_response
+            mock_async_client.get.return_value = poll_response
+            mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+            mock_async_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_async_client
+
+            with pytest.raises(ParseTimeoutError):
+                await timeout_client.parse(b"data", "large.pdf", "application/pdf")
 
     async def test_network_error_raises_parse_error(self, client):
         with patch("httpx.AsyncClient") as mock_client_cls:
@@ -166,20 +217,31 @@ class TestParseErrors:
 
 class TestLowConfidenceWarning:
     async def test_low_confidence_logs_warning(self, client, caplog):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        submit_response = MagicMock()
+        submit_response.status_code = 202
+        submit_response.json.return_value = {
+            "success": True,
+            "data": {"job_id": "job-low-conf"},
+        }
+
+        poll_response = MagicMock()
+        poll_response.status_code = 200
+        poll_response.json.return_value = {
             "success": True,
             "data": {
+                "status": "done",
                 "markdown": "# Low quality",
                 "metadata": {"confidence": 0.4},
                 "stats": {},
             },
         }
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
+        with patch("httpx.AsyncClient") as mock_client_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock()
+        ):
             mock_async_client = AsyncMock()
-            mock_async_client.post.return_value = mock_response
+            mock_async_client.post.return_value = submit_response
+            mock_async_client.get.return_value = poll_response
             mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
             mock_async_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_async_client
