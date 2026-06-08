@@ -48,6 +48,9 @@ KMS → ai-platform → docforge seam을 잇는 라이브 E2E + 실패주입 하
 ```bash
 export AIP_E2E_LIVE=1
 export AIP_DATABASE_URL="postgresql://aip:aip_dev@localhost:5434/ai_platform"
+# 골든패스(test_kms_to_rag) 필수 — 라이브 KMS 는 JWT sub 를 documents.created_by(UUID) 로
+# 기록하므로 실제 user UUID 가 필요하다. 조회: kms-pg 에서 SELECT id FROM users LIMIT 1;
+export AIP_E2E_KMS_USER_ID="<kms users.id UUID>"
 # 선택 override (기본값은 conftest.py 참조)
 export AIP_E2E_KMS_URL="http://localhost:3001"
 export AIP_E2E_AIP_URL="http://localhost:8020"
