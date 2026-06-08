@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### Changed — Step 22: god-file 분할 (G25, P3 마지막 — 순수 이동, 동작·회귀 0)
+
+두 1000줄+ god-file을 **동작 무변 순수 이동(pure-movement) 리팩터**로 도메인 경계별 모듈로 분할했다. 외부 동작·응답·라우트 경로·공개 import·호출 순서 전부 불변. AST 함수 본문 대조로 순수이동 증명(본문 변경 0), 양쪽 회귀 0.
+
+- **ai-platform `gateway/router.py`(1327줄) → `gateway/routes/*` 분할**: 도메인 경계별 모듈(`public`=/health·/profiles, `chat`=/chat·/chat/stream, `ingest`=/documents/ingest·/chat/sessions/{id}/files·/documents/ingest/{job_id}, `workflow`, `admin`=/api-keys, `feedback`, `session`)로 라우트를 이동하고, 공용 로직(`_authenticate`/`_check_rate_limit`/`_save_extracted_memories`/`_resolve_session_scope_id`/graceful-shutdown 카운터/`_prepare_chat`·`_prepare_chat_fast`/`_step_to_response`/`APP_VERSION`)을 `routes/helpers.py`에 집결. `routes/__init__.py`가 분할 전 등록 순서 그대로 `gateway_router`를 조합. `router.py`는 `gateway_router`/`APP_VERSION`/`wait_for_pending_requests`를 재수출하는 얇은 facade로 축소 → **`main.py` import 무변경**. routes/* 상호 import 0(`helpers`만 의존 → 순환 없음). 레이어 규칙(Gateway→Router→Agent→Tool, Profile 하드코딩 0) 유지. **라우트 인벤토리 불변**(15 routes 동일 경로·메서드·순서). — ai-platform (merge 0049fab, refactor b18f0cf)
+- **parser `usecases/page_processor.py`(1177줄) → helpers 믹스인 분할 (Option A)**: 공개 `page_processor.py`는 `PageResult` + `PageProcessor.__init__`/`process()` 오케스트레이션만 유지(공개 인터페이스·import 경로 불변), 13개 `_*` 헬퍼 메서드를 `_page_processor_helpers.py`의 `_PageProcessorHelpers` 믹스인으로 이동(`PageProcessor` 상속 → MRO로 동일 해석). **G23 결합 보존**: `llm_engine.describe_image()`/`is_available()` 호출 경로·순서·인자 불변(host_health TTL 재프로브 회귀 방지). 역참조(`parse_pdf`/`pipeline_coordinator`/`page_reprocessor`/`_parse_pdf_helpers`)·`_PageResult` 별칭·로거 이름 불변. 순환 import 0(`TYPE_CHECKING` 보호). — parser (로컬 main 머지 93fd981, refactor 838eb97, origin push 안 함)
+
+### Fixed — 테스트 (Step 22, 그린 전제 복원)
+
+- **`test_docforge_client` 3건 그린 복원** (분할 전 그린 전제): `docforge_client.parse()`는 비동기 2단계(POST `/v1/parse/async` submit→`data.job_id`→GET 폴링→`status:done`)로 동작하나 테스트 mock이 구 동기 프로토콜이라 사전존재 실패(`KeyError: 'job_id'`)였다. **프로덕션 코드 무변경**, mock만 실제 클라이언트 흐름에 정렬. 408 케이스는 클라이언트 진실에 맞춰 분리: submit 408→`ParseError`(실제 동작), 폴링 `max_wait` 초과→`ParseTimeoutError`(폴링 타임아웃 전용 경로). 전체 단위 1015 passed/3 failed → **1019 passed/0 failed**. — ai-platform (merge a17c3c5, test ba9a5b9)
+
+### Verification (Step 22)
+
+- **ai-platform**: 전체 단위 `pytest tests/ --ignore=tests/e2e` **1019 passed / 9 skipped / 0 failed**(분할 전후 동일), Step 17 E2E 비라이브 게이트 **2 passed / 4 skipped** 불변, 라우트 인벤토리 15 routes 불변. AST 함수 본문 대조: 29개 함수 본문 100% 동일(데코레이터 모듈-로컬 router명 정규화 후 경로·메서드·kwargs 동일).
+- **parser**: target(`test_page_processor`·`test_pipeline_coordinator`·`test_sprint6_p0`·`test_host_health`) **85 passed**, 어댑터(cloud_vlm/vision_llm/image_vlm/region_vlm) 회귀 green. **전체 unit 1203 passed / 4 failed = base 63dff7b 동일**(사전존재 실패 4건 `test_web`·`test_worker_queue`만 잔존 — 분할 무관, 회귀 0 증명). AST 대조: 19개 함수/메서드 본문 100% 동일, `PageResult` 11필드 동일. ruff 신규 findings 0(잔존 13건은 원본에서 그대로 이동된 사전존재 스타일 — 순수이동 가드로 미수정). parser 미커밋 5종(value_objects/document_intelligence/markdown_assembler/scripts.__init__/vlm_service.log) 머지 전후 shasum 동일(불가침 보존).
+
+> **순수 이동 가드**: G25는 분할만 수행한다. 로직/시그니처/응답/호출순서 변경 0, 기능 추가 0, 범위 외 reformat 0. ADR는 작성하지 않는다(순수 리팩터, 결정 사항 없음). G20/G21/G23/G24 산출물 불침범.
+
 ### Changed — Step 21: RAG 진실원천 확정 + KMS 죽은 스키마 드롭 (G24, 이중스토어 해소)
 
 - **RAG 단일 진실원천 = ai-platform pgvector(aip-pg `document_chunks`) 확정**, 레이어 책임 계약 명문화: [layer-responsibility.md](architecture/layer-responsibility.md) — KMS=원문/배치 SoT, ai-platform=RAG SoT, docforge=stateless 파싱, 동기화=outbox→webhook 단일경로.
