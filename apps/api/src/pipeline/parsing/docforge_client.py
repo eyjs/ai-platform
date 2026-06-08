@@ -52,6 +52,9 @@ class DocForgeClient:
         internal_key: str = "",
         max_wait_sec: float = 3600.0,
         poll_interval_sec: float = 2.0,
+        submit_max_retries: int = 5,
+        submit_retry_after_default_sec: float = 2.0,
+        submit_retry_after_cap_sec: float = 30.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         # Per-HTTP-request timeout. With the async queue each request (submit /
@@ -61,6 +64,128 @@ class DocForgeClient:
         # Total time to wait for an async parse job to finish before giving up.
         self._max_wait = max_wait_sec
         self._poll_interval = poll_interval_sec
+        # --- Submit-stage backpressure / transient-retry budget ---
+        # DocForge returns 503 + Retry-After (error code QUEUE_FULL) when its
+        # parse queue is saturated. That is an explicit "back off and retry"
+        # signal, NOT a hard failure -- treating it as ParseError (as before)
+        # would kill a job that the queue would happily accept moments later and
+        # turns transient saturation into a thundering herd. A transient
+        # connection drop on submit ("Server disconnected") is likewise retried
+        # briefly. Both share ONE bounded budget so submit can never loop
+        # forever: at most ``submit_max_retries`` re-attempts, each capped wait.
+        self._submit_max_retries = max(0, submit_max_retries)
+        self._submit_retry_after_default = max(0.0, submit_retry_after_default_sec)
+        self._submit_retry_after_cap = max(0.0, submit_retry_after_cap_sec)
+
+    def _retry_after_seconds(self, resp: httpx.Response) -> float:
+        """``Retry-After`` 헤더(초)를 파싱한다. 없거나 잘못되면 기본값.
+
+        값은 ``submit_retry_after_cap_sec`` 로 상한을 둬 한 번의 대기가 과도하게
+        길어지지 않도록 한다.
+        """
+        raw = resp.headers.get("Retry-After")
+        wait = self._submit_retry_after_default
+        if raw is not None:
+            try:
+                wait = float(int(str(raw).strip()))
+            except (TypeError, ValueError):
+                wait = self._submit_retry_after_default
+        return min(max(0.0, wait), self._submit_retry_after_cap)
+
+    async def _submit_with_backpressure(
+        self,
+        client: httpx.AsyncClient,
+        submit_url: str,
+        headers: dict,
+        file_bytes: bytes,
+        file_name: str,
+        mime_type: str,
+    ) -> str:
+        """파일을 제출하고 job_id를 돌려준다.
+
+        DocForge의 503(QUEUE_FULL) 배압과 일시 연결 끊김은 ``submit_max_retries``
+        횟수 내에서 ``Retry-After`` 백오프 후 재시도한다. 그 외 비-503 4xx/5xx,
+        ``success=false`` 응답은 기존과 동일하게 ``ParseError`` 로 즉시 거른다.
+        재시도 예산은 유한하므로 제출이 무한 루프에 빠지지 않는다.
+        """
+        attempt = 0
+        while True:
+            try:
+                resp = await client.post(
+                    submit_url,
+                    files={"file": (file_name, file_bytes, mime_type)},
+                    headers=headers,
+                )
+            except httpx.RemoteProtocolError as exc:
+                # 스트림 중간 연결 끊김("Server disconnected")은 docforge 가 CPU
+                # 포화로 잠시 HTTP 응답을 못 한 일시적 과부하 신호다. 짧은 백오프
+                # 후 제한된 횟수만 재시도한다. 예산을 소진하면 기존 계약대로
+                # ParseError 로 표면화한다(호출부 httpx.HTTPError except 가 받는다).
+                # 단, ConnectError(연결 거부=서버 다운/도달 불가)는 재시도하지 않고
+                # 기존처럼 즉시 실패시킨다.
+                if attempt >= self._submit_max_retries:
+                    raise
+                wait = min(self._submit_retry_after_default, self._submit_retry_after_cap)
+                attempt += 1
+                logger.info(
+                    "docforge_submit_disconnect_retry",
+                    file_name=file_name,
+                    mime_type=mime_type,
+                    attempt=attempt,
+                    max_retries=self._submit_max_retries,
+                    wait_sec=wait,
+                    error=str(exc),
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            is_json = resp.headers.get("content-type", "").startswith("application/json")
+            body = resp.json() if is_json else {}
+            error_info = body.get("error", {}) if isinstance(body, dict) else {}
+            error_code = error_info.get("code", "")
+
+            # 503 배압(QUEUE_FULL): 실패가 아니라 "잠시 후 재시도" 신호.
+            if resp.status_code == 503 and (
+                error_code == "QUEUE_FULL" or error_code == ""
+            ):
+                if attempt >= self._submit_max_retries:
+                    raise ParseError(
+                        "DocForge 파싱 큐가 가득 차 제출을 완료하지 못했습니다 "
+                        f"(재시도 {self._submit_max_retries}회 소진): {file_name}"
+                    )
+                wait = self._retry_after_seconds(resp)
+                attempt += 1
+                logger.info(
+                    "docforge_backpressure_wait",
+                    file_name=file_name,
+                    mime_type=mime_type,
+                    attempt=attempt,
+                    max_retries=self._submit_max_retries,
+                    retry_after_sec=wait,
+                    error_code=error_code or "QUEUE_FULL",
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            # 그 외 비-202/200 응답은 기존과 동일하게 즉시 실패 처리.
+            if resp.status_code not in (200, 202):
+                error_msg = error_info.get("message", resp.text[:200])
+                logger.error(
+                    "docforge_submit_failed",
+                    status=resp.status_code,
+                    error_code=error_code,
+                    file_name=file_name,
+                    mime_type=mime_type,
+                    error=error_msg,
+                )
+                raise ParseError(
+                    f"DocForge submit returned {resp.status_code}: {error_msg}"
+                )
+
+            if not body.get("success"):
+                error_msg = error_info.get("message", "unknown error")
+                raise ParseError(f"DocForge submit failed: {error_msg}")
+            return body["data"]["job_id"]
 
     async def parse(
         self,
@@ -98,32 +223,12 @@ class DocForgeClient:
                 headers["X-Internal-Key"] = self._internal_key
 
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                # 1) 제출 — job_id 즉시 수신 (연결 유지 없음)
-                resp = await client.post(
-                    submit_url,
-                    files={"file": (file_name, file_bytes, mime_type)},
-                    headers=headers,
+                # 1) 제출 — job_id 즉시 수신 (연결 유지 없음). 503(QUEUE_FULL)
+                #    배압과 일시 연결 끊김은 제한된 횟수만큼 백오프 후 재시도한다.
+                job_id = await self._submit_with_backpressure(
+                    client, submit_url, headers,
+                    file_bytes, file_name, mime_type,
                 )
-                if resp.status_code not in (200, 202):
-                    body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                    error_info = body.get("error", {})
-                    error_msg = error_info.get("message", resp.text[:200])
-                    error_code = error_info.get("code", "")
-                    logger.error(
-                        "docforge_submit_failed",
-                        status=resp.status_code,
-                        error_code=error_code,
-                        file_name=file_name,
-                        mime_type=mime_type,
-                        error=error_msg,
-                    )
-                    raise ParseError(f"DocForge submit returned {resp.status_code}: {error_msg}")
-
-                body = resp.json()
-                if not body.get("success"):
-                    error_msg = body.get("error", {}).get("message", "unknown error")
-                    raise ParseError(f"DocForge submit failed: {error_msg}")
-                job_id = body["data"]["job_id"]
 
                 # 2) 폴링 — 짧은 요청 반복, 완료/실패까지
                 poll_url = f"{self._base_url}/v1/parse/async/{job_id}"

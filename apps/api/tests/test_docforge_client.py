@@ -92,6 +92,179 @@ class TestParseSuccess:
 
 
 # ---------------------------------------------------------------------------
+# parse() backpressure (503 / QUEUE_FULL) + transient disconnect
+# ---------------------------------------------------------------------------
+
+
+def _resp(status, *, json_body, headers=None):
+    """Build a MagicMock httpx-style response."""
+    r = MagicMock()
+    r.status_code = status
+    r.json.return_value = json_body
+    base_headers = {"content-type": "application/json"}
+    if headers:
+        base_headers.update(headers)
+    r.headers = base_headers
+    r.text = str(json_body)
+    return r
+
+
+def _make_async_client(mock_client_cls):
+    mock_async_client = AsyncMock()
+    mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+    mock_async_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client_cls.return_value = mock_async_client
+    return mock_async_client
+
+
+class TestBackpressure:
+    async def test_503_queue_full_then_success_retries(self, client):
+        """첫 제출이 503(QUEUE_FULL) → 백오프 후 재제출 202 → poll done."""
+        busy = _resp(
+            503,
+            json_body={"success": False, "error": {"code": "QUEUE_FULL", "message": "full"}},
+            headers={"Retry-After": "1"},
+        )
+        accepted = _resp(
+            202, json_body={"success": True, "data": {"job_id": "job-ok"}},
+        )
+        poll_done = _resp(
+            200,
+            json_body={
+                "success": True,
+                "data": {"status": "done", "markdown": "# ok", "metadata": {}, "stats": {}},
+            },
+        )
+
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ) as mock_sleep:
+            mac = _make_async_client(mock_cls)
+            mac.post.side_effect = [busy, accepted]
+            mac.get.return_value = poll_done
+
+            result = await client.parse(b"data", "f.pdf", "application/pdf")
+
+        assert result.markdown == "# ok"
+        # 제출이 정확히 2번 시도됨 (503 → 재시도 → 성공).
+        assert mac.post.call_count == 2
+        # Retry-After=1 이 sleep 인자로 반영됨.
+        assert any(call.args and call.args[0] == 1.0 for call in mock_sleep.await_args_list)
+
+    async def test_503_persistent_exhausts_then_parse_error_bounded(self):
+        """503 이 계속되면 제한된 재시도 후 ParseError (무한 루프 아님)."""
+        retries = 3
+        bounded_client = DocForgeClient(
+            base_url="http://localhost:5001",
+            submit_max_retries=retries,
+            submit_retry_after_default_sec=1.0,
+        )
+        busy = _resp(
+            503,
+            json_body={"success": False, "error": {"code": "QUEUE_FULL", "message": "full"}},
+            headers={"Retry-After": "1"},
+        )
+
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ):
+            mac = _make_async_client(mock_cls)
+            mac.post.return_value = busy
+
+            with pytest.raises(ParseError, match="큐가 가득"):
+                await bounded_client.parse(b"data", "f.pdf", "application/pdf")
+
+        # 초기 시도 1 + 재시도 retries = retries+1 총 제출. 무한 루프 아님.
+        assert mac.post.call_count == retries + 1
+
+    async def test_503_not_parse_timeout_error(self):
+        """배압 소진은 ParseError 이며 ParseTimeoutError(폴링 전용)가 아니다."""
+        bounded = DocForgeClient(
+            base_url="http://localhost:5001",
+            submit_max_retries=1,
+            submit_retry_after_default_sec=1.0,
+        )
+        busy = _resp(
+            503,
+            json_body={"success": False, "error": {"code": "QUEUE_FULL"}},
+            headers={"Retry-After": "1"},
+        )
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ):
+            mac = _make_async_client(mock_cls)
+            mac.post.return_value = busy
+            with pytest.raises(ParseError) as exc_info:
+                await bounded.parse(b"data", "f.pdf", "application/pdf")
+        assert not isinstance(exc_info.value, ParseTimeoutError)
+
+    async def test_retry_after_absent_uses_default(self, client):
+        """Retry-After 헤더가 없으면 기본 대기값을 사용한다."""
+        busy = _resp(
+            503,
+            json_body={"success": False, "error": {"code": "QUEUE_FULL"}},
+            headers=None,  # no Retry-After
+        )
+        accepted = _resp(202, json_body={"success": True, "data": {"job_id": "j"}})
+        poll_done = _resp(
+            200,
+            json_body={
+                "success": True,
+                "data": {"status": "done", "markdown": "m", "metadata": {}, "stats": {}},
+            },
+        )
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ) as mock_sleep:
+            mac = _make_async_client(mock_cls)
+            mac.post.side_effect = [busy, accepted]
+            mac.get.return_value = poll_done
+            await client.parse(b"data", "f.pdf", "application/pdf")
+        # 기본값 2.0초가 사용됨 (생성자 기본 submit_retry_after_default_sec=2.0).
+        assert any(call.args and call.args[0] == 2.0 for call in mock_sleep.await_args_list)
+
+    async def test_transient_disconnect_then_success(self, client):
+        """제출 중 RemoteProtocolError(Server disconnected) → 짧은 재시도 → 성공."""
+        accepted = _resp(202, json_body={"success": True, "data": {"job_id": "j2"}})
+        poll_done = _resp(
+            200,
+            json_body={
+                "success": True,
+                "data": {"status": "done", "markdown": "ok", "metadata": {}, "stats": {}},
+            },
+        )
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ):
+            mac = _make_async_client(mock_cls)
+            mac.post.side_effect = [
+                httpx.RemoteProtocolError("Server disconnected"),
+                accepted,
+            ]
+            mac.get.return_value = poll_done
+            result = await client.parse(b"data", "f.pdf", "application/pdf")
+        assert result.markdown == "ok"
+        assert mac.post.call_count == 2
+
+    async def test_persistent_disconnect_exhausts_to_parse_error(self):
+        """RemoteProtocolError 가 계속되면 예산 소진 후 ParseError (무한 아님)."""
+        retries = 2
+        bounded = DocForgeClient(
+            base_url="http://localhost:5001",
+            submit_max_retries=retries,
+            submit_retry_after_default_sec=1.0,
+        )
+        with patch("httpx.AsyncClient") as mock_cls, patch(
+            "src.pipeline.parsing.docforge_client.asyncio.sleep", new=AsyncMock(),
+        ):
+            mac = _make_async_client(mock_cls)
+            mac.post.side_effect = httpx.RemoteProtocolError("Server disconnected")
+            with pytest.raises(ParseError, match="HTTP error"):
+                await bounded.parse(b"data", "f.pdf", "application/pdf")
+        assert mac.post.call_count == retries + 1
+
+
+# ---------------------------------------------------------------------------
 # parse() error cases
 # ---------------------------------------------------------------------------
 
