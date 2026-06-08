@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Changed — docforge 파싱 워커 프로세스 분리 + 배압 (아키텍처 P0, 결함 A·B)
+
+DB손해보험 약관 PDF(69~119p) 실파싱 검증 중 드러난 docforge 실행모델 결함을 교정했다. 근본 원인: 파싱(CPU 바운드)을 `gunicorn --workers 1` **웹 프로세스 내부 데몬 스레드 1개**로 돌려, 대형 문서 파싱이 GIL을 잡으면 HTTP 핸들러가 굶어 submit/poll이 "Server disconnected"로 끊김 → 상류 재시도 소진 → 잡 영구 실패. 배압도 없어 큐 무한증가·thundering herd. SQLite 큐(`job_store`)는 이미 멀티프로세스 안전이라 **소비자만 프로세스화**. 분석·설계: [ADR-010](adr/adr-010-docforge-parse-worker-process-separation.md).
+
+- **파싱 워커 프로세스 분리 (docforge)**: `docforge-worker` 콘솔 스크립트(`worker_main.py`) — `DOCFORGE_PARSE_WORKERS`(기본 `min(cpu,4)`)개 프로세스가 SQLite 큐를 claim→parse→mark. 소비자 루프·설정을 `async_worker.py`로 추출(파싱 알고리즘 불변). 멱등 orphan 복구 + SIGTERM graceful. 웹은 `DOCFORGE_INPROC_WORKER=0`(기본)으로 enqueue/poll만 → GIL 격리. compose에 `docforge-worker` 서비스(같은 이미지·`uploads` 볼륨 공유). — parser (merge cd8ec02, feat ad6f928)
+- **배압 (docforge)**: `queued_count >= DOCFORGE_QUEUE_MAX`(기본 16) → `/v1/parse/async`가 **503 + Retry-After + `{error:{code:"QUEUE_FULL"}}`**. 무한 큐·thundering herd 차단. 설정 가드 일원화(`resolve_positive_int`, 0/음수→양수)로 `Semaphore(0)` 류 재발 방지. — parser
+- **상류 503 배압 처리 (ai-platform)**: `docforge_client.parse()`가 503/QUEUE_FULL·일시 연결끊김을 진짜 실패와 구분 — `Retry-After` 백오프로 제한 횟수(기본 5) 재submit. 비-503 4xx/5xx는 `ParseError`, 폴링 타임아웃은 `ParseTimeoutError` 유지. — ai-platform (merge db08b59, feat e25499e)
+
+### Verification (docforge P0)
+
+- parser: 신규 `test_worker_split`(설정 검증·배압 503 경계·web 무스폰·inproc 폴백) + 기존 `test_job_store`·`test_v1_api`·`test_host_health` green. **회귀 0** — merged·base `c0c49d2` 동일 사전존재 실패만(`test_v1_live` 8건=실서버 환경의존, `test_web`·`test_worker_queue` 2건). 큐 스키마·claim·파싱 알고리즘 불변.
+- ai-platform: `test_docforge_client` 19 passed, 전체 단위 1025 passed/0 failed.
+
+> **배포 결합 주의**: `DOCFORGE_INPROC_WORKER=0` 기본이라 docforge 재배포 시 **`docforge-worker` 프로세스도 함께 기동 필수**(`docker compose up -d`가 둘 다 띄움). `docforge`만 단독 재기동하면 async 파싱이 멈춘다. **현재 가동 컨테이너는 미반영 — 재빌드는 수동 게이트.** P1(콘텐츠 멱등·OCR 게이트)·P2(서킷브레이커·메트릭)는 후속.
+
 ### Changed — Step 22: god-file 분할 (G25, P3 마지막 — 순수 이동, 동작·회귀 0)
 
 두 1000줄+ god-file을 **동작 무변 순수 이동(pure-movement) 리팩터**로 도메인 경계별 모듈로 분할했다. 외부 동작·응답·라우트 경로·공개 import·호출 순서 전부 불변. AST 함수 본문 대조로 순수이동 증명(본문 변경 0), 양쪽 회귀 0.
