@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### Changed — Step 21: RAG 진실원천 확정 + KMS 죽은 스키마 드롭 (G24, 이중스토어 해소)
+
+- **RAG 단일 진실원천 = ai-platform pgvector(aip-pg `document_chunks`) 확정**, 레이어 책임 계약 명문화: [layer-responsibility.md](architecture/layer-responsibility.md) — KMS=원문/배치 SoT, ai-platform=RAG SoT, docforge=stateless 파싱, 동기화=outbox→webhook 단일경로.
+- **KMS 죽은 RAG 스키마 드롭** (택1 (A)정리, 2026-06-08 사용자 확정): ai-worker 완전 제거(KMS `fae75cf8`) 후 reader/writer 0건이던 raw SQL 잔재 7개 테이블(`document_chunks` 17,307행 · `document_contents` 1,023행 · `processing_jobs` 2,727행 · `chat_sessions`/`chat_messages`/`chat_turns`/`intent_examples` 0행) + 미사용 pgvector extension을 `20260608000000_drop_dead_rag_schema` 마이그레이션으로 제거. 드롭 전 전체 pg_dump 백업(`~/Backups/kms-dead-rag-tables-20260608.sql.gz`). aip-pg 동명 테이블과의 이중스토어 혼선 해소. — KMS (feature/step21-rag-sot)
+
+### Fixed — E2E 하니스 bitrot 3건 (Step 21, 라이브 골든패스 복구)
+
+- **업로드 기본 확장자 `.txt`→`.csv`** (`_harness.py`): KMS multer 허용(`.pdf/.md/.csv`)과 ai-platform ingestion 허용(`pdf/csv/xlsx/xls`)의 교집합(pdf/csv)으로 정렬. `.txt`는 KMS가 500으로 거부해 골든패스가 라이브에서 실행 불가였다. content도 호출마다 고유화(KMS 동일내용 재업로드 409 회피).
+- **KMS JWT `sub`에 실 user UUID 주입** (`conftest.py`): `AIP_E2E_KMS_USER_ID` env — 라이브 KMS는 `sub`를 `documents.created_by`(UUID)로 기록하므로 더미 문자열이면 Prisma UUID 오류.
+- **동기화 대기 30s→90s** (`test_kms_to_rag.py`): docforge 일시 장애 시 job_queue 재시도 1사이클(딜레이 30s)을 흡수. 30s는 정상경로만 커버해 재시도 한 번에도 플레이키였다.
+
+### Decision (Step 21)
+
+- [ADR-009](adr/adr-009-rag-single-source-of-truth.md): RAG SoT = ai-platform pgvector. 죽은 동명 스키마는 잘못된 문서 역할을 하므로 (B)보류가 아닌 (A)드롭. 향후 KMS 자체 RAG는 새 마이그레이션으로 재구축(금지 대상은 *죽은 스키마 방치*).
+
+> **Step 17 E2E 풀 라이브 green (2026-06-08).** 드롭 후 골든패스 3건이 **처음으로 전부 라이브 통과**(5 passed / 1 skipped — 유일한 skip은 G20 라이브주입 게이트, Step 18에서 기실증): KMS 업로드 → outbox(전부 SENT) → webhook → job_queue → docforge 파싱 → 임베딩 → aip-pg 단일행 + 멱등 재적재. 드롭이 살아있는 경로를 건드리지 않았음을 계약이 아닌 실동작으로 증명. (참고: `tests/test_docforge_client.py` 3건 실패는 클린 main에서도 동일한 사전존재 — Step 21 무관, 후속 수리 대상.)
+
 ### Fixed — Step 20: docforge 호스트 엔진 가용성 자가회복 (G23, Seam③)
 
 - **가용성 영구 캐시 제거 → TTL 재프로브 (docforge)**: `apple_vision_remote.py`·`host_vlm_engine.py`의 `is_available()`가 `self._available`에 결과를 **영구 캐시**(한 번 False면 영구 → 호스트 OCR/VLM 재기동해도 docforge 죽은 채 유지, 자가회복 불가)했다. 공통 `host_health.TTLAvailability`로 교체 — `time.monotonic` 기준 TTL(기본 30s, `DOCFORGE_HOST_PROBE_TTL_SEC`) 경과 시 재프로브 + 원격 호출 실패 시 `invalidate()`로 즉시 재프로브. 재기동된 호스트 서비스를 docforge가 **스스로 다시 잡음**(다음 페이지/잡에서 자동 정상화). graceful degrade(다운 동안 빈 결과)는 보존. — parser (merge 63dff7b, feat 1c14b63)
