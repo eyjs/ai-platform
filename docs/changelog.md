@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### Changed — KMS 회사도메인 → 상품도메인 매핑 (분류 불일치 근본해결)
+
+KMS는 회사중심 도메인(`DB-DAMAGE`)으로 문서를 배치하지만 ai-platform RAG·챗봇은 상품중심 도메인(`자동차보험`/`건강보험`/…)으로 검색 스코프를 건다. 동기화 시 aip-pg가 KMS 회사도메인을 그대로 `domain_code`에 적재해, 상품도메인 스코프 프로필이 DB손해보험 문서를 검색에서 배제했다(크롤한 자동차보험 6건이 챗봇에 안 떠 수동 `domain_code` 패치 → 재동기화하면 되돌아가는 데이터 패치라 근본해결). 두 분류가 이질적이고(1:1 규칙 없음) 카테고리가 웹훅에 안 실려, **KMS 웹훅 보강 + ai-platform 설정형 매핑**이 둘 다 필요한 cross-repo 변경이다. 분석·설계: [ADR-011](adr/adr-011-kms-domain-mapping.md).
+
+- **웹훅 categoryPath 계약 (KMS)**: `document.updated` payload에 `categoryPath: string[]`(예 `["DB-DAMAGE","자동차보험","개인용"]`) 추가. `placements.service`가 docCode용 `calculateCategoryPath`를 재사용해 계산하되, **트랜잭션 밖**에서 미리 구해 넘긴다(`resolveCategoryPathForSync`) — 카테고리 조회 I/O로 인터랙티브 트랜잭션 창을 넓히지 않는다(G20 정렬). `enqueue(tx, …)`는 기존 `$transaction` 안에 그대로 유지(원자성 보존), 디스패처 불변. 계산 실패 시 `[domainCode]` 폴백 — enqueue를 막지 않는다(하위호환). — KMS (merge `5c741270`, feat `cab9a992`)
+- **설정형 도메인 매핑 (ai-platform)**: `seeds/domain_mapping.yaml`로 `(회사도메인, categoryPath) → 상품도메인` 매핑을 외부화(`DB-DAMAGE`: 자동차보험→자동차보험, 장기보험/건강→건강보험, 장기보험/간병→간병보험, 일반보험/화재→화재보험). 새 상품/카테고리는 코드 변경 없이 이 파일만 갱신(운영성). 로더 `domain_mapping.resolve_product_domain(domain, category_path)`가 `categoryPath[1:]`를 가장 구체적(긴 경로)부터 매칭하고 미매핑/부재 시 `None`. 프로세스 1회 로드+캐시, 파일 부재/파싱오류/스키마 위반은 방어적 흡수(WARN). — ai-platform
+- **동기화 적용 + 조용한 누락 0 (ai-platform)**: `kms_sync.sync_document`가 `domain_code` 확정 직후 매핑을 적용 — 매핑되면 상품도메인으로 치환(`documents`·`document_chunks` 동일), 미매핑/부재(구 KMS·타 consumer·매핑 미정의 도메인 예 HANHWA)면 **회사도메인 fallback + `kms_sync_domain_unmapped` WARN**으로 가시화(조용한 누락 0). KMS=분류 SoT(ADR-009), ai-platform은 해석만. — ai-platform (merge `c3da04e`, feat `2742cab`)
+
+### Verification (도메인 매핑 근본해결)
+
+- ai-platform: 신규 매핑 단위테스트 16건 — 6경로 매핑·구체성 우선(`장기보험/건강` > `장기보험`)·미매핑(`장기보험/종합`)·빈배열·도메인코드만·미정의 도메인(HANHWA)·`kms_sync` 적용(자동차보험/건강 치환)·미매핑·categoryPath 부재 fallback+WARN. 전체 단위 **1041 passed/9 skipped/0 fail**(`--ignore=tests/e2e`). Step17 E2E 비라이브 게이트 불변.
+- KMS: `npx tsc --noEmit` green. 신규 `placements.service.spec` 5건(트랜잭션 밖 경로 계산·폴백, 트랜잭션 안 payload categoryPath 적재·동일 tx) + outbox(G20) 10건 포함 api 스위트 **42 passed**(회귀 0).
+- 계약 정합: KMS payload `categoryPath` ↔ ai-platform `data.get("categoryPath")` 소비 일치 확인.
+
+> **머지 상태**: KMS·ai-platform 각각 로컬 main에 feature 브랜치를 no-ff 머지(파일 디스조인트·다른 repo라 충돌 0). **origin push 안 함**(최종 결정은 사용자, origin/main 불변: KMS `edf2ce21`, ai-platform `b736b6b`). 워크트리 정리 완료, feature 브랜치 보존.
+> **배포·backfill 수동 게이트**: 계약 성립에 KMS(kms-api)+ai-platform(worker) **동반 재배포** 필수(KMS만 재배포 시 ai-platform이 옛 코드로 categoryPath 무시 → 여전히 fallback). 기존 DB손해보험 문서(수동 패치 6건 포함)는 재동기화(placement touch/재sync 트리거)로 매핑 경로 재적재 — 멱등(external_id UPSERT). **현재 가동 컨테이너 미반영.**
+
 ### Changed — docforge 파싱 워커 프로세스 분리 + 배압 (아키텍처 P0, 결함 A·B)
 
 DB손해보험 약관 PDF(69~119p) 실파싱 검증 중 드러난 docforge 실행모델 결함을 교정했다. 근본 원인: 파싱(CPU 바운드)을 `gunicorn --workers 1` **웹 프로세스 내부 데몬 스레드 1개**로 돌려, 대형 문서 파싱이 GIL을 잡으면 HTTP 핸들러가 굶어 submit/poll이 "Server disconnected"로 끊김 → 상류 재시도 소진 → 잡 영구 실패. 배압도 없어 큐 무한증가·thundering herd. SQLite 큐(`job_store`)는 이미 멀티프로세스 안전이라 **소비자만 프로세스화**. 분석·설계: [ADR-010](adr/adr-010-docforge-parse-worker-process-separation.md).
