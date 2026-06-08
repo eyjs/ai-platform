@@ -1,0 +1,340 @@
+"""채팅 엔드포인트: /chat (비스트리밍), /chat/stream (SSE). 인증 필수."""
+
+import asyncio
+import json
+import time
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Request
+from sse_starlette.sse import EventSourceResponse
+
+from src.domain.models import AgentResponse
+from src.gateway.gateway_hooks import (
+    latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
+)
+from src.gateway.models import ChatRequest
+from src.gateway.routes.helpers import (
+    _authenticate,
+    _check_rate_limit,
+    _ChatSetup,
+    _get_app_state,
+    _prepare_chat,
+    _prepare_chat_fast,
+    _save_extracted_memories,
+    decrement_active,
+    increment_active,
+    logger,
+)
+from src.observability.logging import request_context
+from src.observability.request_log_models import RequestLogEntry
+
+router = APIRouter()
+
+
+@router.post("/chat", response_model=AgentResponse)
+async def chat(req: ChatRequest, request: Request):
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+    setup: Optional[_ChatSetup] = None
+
+    increment_active()
+
+    request_log_svc = getattr(state, "request_log_service", None)
+    cache_svc = getattr(state, "response_cache_service", None)
+
+    # Task 014: 응답 식별자 생성 (api 레이어가 단일 출처)
+    response_id = str(uuid.uuid4())
+    captured_faithfulness_score: Optional[float] = None
+
+    status_code = 200
+    error_code: Optional[str] = None
+    cache_hit = False
+    response_preview: Optional[str] = None
+    profile_for_log: str = ""
+
+    with latency_timer() as timer:
+        try:
+            setup = await _prepare_chat(req, request, user_ctx)
+            profile_for_log = setup.profile_id or ""
+
+            profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
+            plan_mode = getattr(setup.plan, "mode", None)
+            mode_str = plan_mode.value if hasattr(plan_mode, "value") else str(plan_mode or "")
+            cacheable = bool(profile) and should_use_cache(profile, mode_str, cache_svc)
+
+            if cacheable:
+                cached_text = await try_cache_get(
+                    cache_svc, setup.profile_id, mode_str, req.question,
+                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+                )
+                if cached_text is not None:
+                    cache_hit = True
+                    response_preview = RequestLogEntry.truncate_preview(cached_text)
+                    await state.session_memory.add_turn(setup.session_id, "user", req.question)
+                    await state.session_memory.add_turn(setup.session_id, "assistant", cached_text)
+                    # Task 014: 캐시 응답도 response_id 포함
+                    return AgentResponse(answer=cached_text, response_id=response_id)
+
+            response = await state.agent.execute(
+                question=req.question,
+                plan=setup.plan,
+                session_id=setup.session_id,
+                trace=setup.trace,
+                context=setup.context,
+            )
+
+            await state.session_memory.add_turn(setup.session_id, "user", req.question)
+            await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
+
+            if profile and profile.memory_type in ("session", "long"):
+                asyncio.create_task(_save_extracted_memories(
+                    state=state,
+                    tenant_id=user_ctx.user_id,
+                    turns=[
+                        {"role": "user", "content": req.question},
+                        {"role": "assistant", "content": response.answer},
+                    ],
+                    retention_days=profile.memory_retention_days,
+                ))
+
+            setup.trace.log_summary()
+
+            if response.trace:
+                response.trace.request_id = setup.trace.request_id
+                response.trace.latency_ms = setup.trace.total_ms
+
+            response_preview = RequestLogEntry.truncate_preview(response.answer)
+            # Task 014: finally 에서 request_log 에 기록할 점수 캡처
+            captured_faithfulness_score = response.guardrail_score
+
+            if cacheable and response.answer:
+                await try_cache_put(
+                    cache_svc, setup.profile_id, mode_str, req.question, response.answer,
+                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+                )
+
+            # Task 014: 응답에 response_id 주입 (JSON body)
+            response.response_id = response_id
+            # guardrail_score 는 내부 전달용 — 클라이언트 응답에서 제거
+            response.guardrail_score = None
+            return response
+
+        except HTTPException as he:
+            status_code = he.status_code
+            error_code = f"http_{he.status_code}"
+            raise
+        except Exception as e:
+            status_code = 500
+            error_code = "internal_error"
+            logger.error("chat_error", error=str(e), exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
+        finally:
+            if request_log_svc is not None:
+                safe_enqueue(
+                    request_log_svc,
+                    RequestLogEntry(
+                        api_key_id=getattr(user_ctx, "api_key_id", None),
+                        profile_id=profile_for_log or None,
+                        status_code=status_code,
+                        latency_ms=timer["elapsed_ms"],
+                        cache_hit=cache_hit,
+                        error_code=error_code,
+                        request_preview=RequestLogEntry.truncate_preview(req.question),
+                        response_preview=response_preview,
+                        # Task 014: 응답 식별자 + faithfulness 스코어 영속화
+                        response_id=response_id,
+                        faithfulness_score=captured_faithfulness_score,
+                    ),
+                )
+            if setup:
+                request_context.reset(setup.ctx_token)
+            decrement_active()
+
+
+@router.post("/chat/stream")
+async def chat_stream(req: ChatRequest, request: Request):
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+
+    increment_active()
+
+    request_log_svc = getattr(state, "request_log_service", None)
+    stream_timer_start = time.monotonic()
+    # Task 014: 응답 식별자 (api 단일 출처). SSE done 이벤트 + request_log 에 기록.
+    response_id = str(uuid.uuid4())
+
+    try:
+        setup = await _prepare_chat_fast(req, request, user_ctx)
+    except HTTPException as he:
+        if request_log_svc is not None:
+            elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    status_code=he.status_code,
+                    latency_ms=elapsed_ms,
+                    error_code=f"http_{he.status_code}",
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_id=response_id,
+                ),
+            )
+        decrement_active()
+        raise
+    except Exception as e:
+        logger.error("chat_stream_setup_error", error=str(e), exc_info=True)
+        if request_log_svc is not None:
+            elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    status_code=500,
+                    latency_ms=elapsed_ms,
+                    error_code="internal_error",
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_id=response_id,
+                ),
+            )
+        decrement_active()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    # 메모리 추출 대상 프로필 조회
+    stream_profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
+
+    # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
+    routing_task: Optional[asyncio.Task] = None
+    if setup.needs_routing:
+        async def _background_route():
+            """백그라운드에서 오케스트레이터 라우팅을 실행하고 세션 메타에 결과를 기록한다."""
+            try:
+                result = await state.orchestrator.route(
+                    question=req.question,
+                    session_id=setup.session_id,
+                    user_ctx=user_ctx,
+                )
+                if result and result.selected_profile_id:
+                    await state.session_memory.update_current_profile(
+                        setup.session_id, result.selected_profile_id,
+                    )
+                logger.info(
+                    "background_routing_complete",
+                    session_id=setup.session_id,
+                    selected_profile=result.selected_profile_id if result else "none",
+                    reason=result.reason if result else "none",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "background_routing_error",
+                    session_id=setup.session_id,
+                    error=str(exc),
+                )
+
+        routing_task = asyncio.create_task(_background_route())
+
+    # context reset을 generator 종료 시점으로 연기
+    async def event_generator():
+        gen_status_code = 200
+        gen_error_code: Optional[str] = None
+        gen_response_preview: Optional[str] = None
+        # Task 014: done 이벤트에서 faithfulness_score 포집 (finally enqueue 에 사용)
+        captured_faithfulness_score: Optional[float] = None
+        try:
+            answer_parts = []
+            async for event in state.agent.execute_stream(
+                question=req.question, plan=setup.plan,
+                session_id=setup.session_id, trace=setup.trace,
+                context=setup.context,
+            ):
+                event_type = event["type"]
+                if event_type == "thinking":
+                    yield {"event": "trace", "data": json.dumps({"step": "thinking", "content": event["data"]}, ensure_ascii=False)}
+                elif event_type == "token":
+                    answer_parts.append(event["data"])
+                    yield {"event": "token", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
+                elif event_type == "replace":
+                    answer_parts.clear()
+                    answer_parts.append(event["data"])
+                    yield {"event": "replace", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
+                elif event_type == "trace":
+                    yield {"event": "trace", "data": json.dumps(event["data"], ensure_ascii=False)}
+                elif event_type == "done":
+                    done_data = event["data"]
+                    done_data["profile_id"] = setup.profile_id
+                    done_data["orchestrated"] = setup.orchestrated
+                    # KMS 프론트 호환: answer, confidence, traversal_path 필드 추가
+                    done_data.setdefault("answer", "".join(answer_parts))
+                    done_data.setdefault("confidence", None)
+                    done_data.setdefault("traversal_path", [])
+                    # Task 014: response_id 주입 + faithfulness_score 캡처
+                    done_data["response_id"] = response_id
+                    score_value = done_data.get("faithfulness_score")
+                    if isinstance(score_value, (int, float)):
+                        captured_faithfulness_score = float(score_value)
+                    yield {"event": "done", "data": json.dumps(done_data, ensure_ascii=False)}
+
+            full_answer = "".join(answer_parts)
+            await state.session_memory.add_turn(setup.session_id, "user", req.question)
+            await state.session_memory.add_turn(setup.session_id, "assistant", full_answer)
+
+            if stream_profile and stream_profile.memory_type in ("session", "long"):
+                asyncio.create_task(_save_extracted_memories(
+                    state=state,
+                    tenant_id=user_ctx.user_id,
+                    turns=[
+                        {"role": "user", "content": req.question},
+                        {"role": "assistant", "content": full_answer},
+                    ],
+                    retention_days=stream_profile.memory_retention_days,
+                ))
+
+            setup.trace.log_summary()
+            logger.info(
+                "stream_complete",
+                answer_len=len(full_answer),
+                total_ms=round(setup.trace.total_ms, 1),
+            )
+            gen_response_preview = RequestLogEntry.truncate_preview(full_answer)
+        except Exception as stream_err:
+            gen_status_code = 500
+            gen_error_code = "stream_error"
+            logger.error("chat_stream_error", error=str(stream_err), exc_info=True)
+            raise
+        finally:
+            # 백그라운드 라우팅 태스크 정리
+            if routing_task and not routing_task.done():
+                routing_task.cancel()
+                try:
+                    await routing_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            # Request log enqueue — generator 종료 후 (R1 보장)
+            if request_log_svc is not None:
+                elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)
+                safe_enqueue(
+                    request_log_svc,
+                    RequestLogEntry(
+                        api_key_id=getattr(user_ctx, "api_key_id", None),
+                        profile_id=setup.profile_id or None,
+                        status_code=gen_status_code,
+                        latency_ms=elapsed_ms,
+                        error_code=gen_error_code,
+                        request_preview=RequestLogEntry.truncate_preview(req.question),
+                        response_preview=gen_response_preview,
+                        # Task 014: 응답 식별자 + faithfulness 스코어 영속화
+                        response_id=response_id,
+                        faithfulness_score=captured_faithfulness_score,
+                    ),
+                )
+            # SSE 제너레이터는 별도 Task에서 실행되므로
+            # ContextVar 토큰 reset은 안전하게 스킵
+            try:
+                request_context.reset(setup.ctx_token)
+            except ValueError:
+                pass  # 다른 Context에서 생성된 토큰
+            decrement_active()
+
+    return EventSourceResponse(event_generator())
