@@ -30,15 +30,26 @@ async def kms_upload_document(
     jwt: str,
     *,
     file_name: str | None = None,
-    content: bytes = "DB 손해보험 차량 파손 보상 약관 테스트 문서.\n".encode("utf-8"),
-    mime_type: str = "text/plain",
+    content: bytes | None = None,
+    mime_type: str = "text/csv",
     security_level: str = "PUBLIC",
 ) -> str:
     """KMS 에 문서 업로드. POST :3001/api/documents (multipart, file 필수).
 
+    기본 확장자는 .csv — KMS 업로드 허용(.pdf/.md/.csv)과 ai-platform
+    ingestion 허용(pdf/csv/xlsx/xls)의 교집합(pdf/csv) 중 텍스트 친화 포맷.
+    (.txt 는 KMS multer fileFilter 가 거부한다.)
+
+    기본 content 는 호출마다 고유 — KMS 가 동일 내용 재업로드를 409(중복)로
+    거부하므로, 고정 기본값이면 두 번째 테스트부터 충돌한다.
+
     반환: KMS documentId (ai-platform external_id 가 될 값).
     """
-    name = file_name or f"e2e-{uuid.uuid4().hex[:8]}.txt"
+    if content is None:
+        content = (
+            f"DB 손해보험 차량 파손 보상 약관 테스트 문서 {uuid.uuid4().hex}.\n".encode("utf-8")
+        )
+    name = file_name or f"e2e-{uuid.uuid4().hex[:8]}.csv"
     files = {"file": (name, content, mime_type)}
     data = {"securityLevel": security_level}
     resp = await client.post(

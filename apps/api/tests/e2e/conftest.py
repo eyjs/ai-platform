@@ -130,14 +130,19 @@ def live_services() -> dict[str, str]:
 
 @pytest.fixture(scope="session")
 def kms_jwt() -> str:
-    """KMS 인증용 dev JWT(HS256). EDITOR 권한(배치 POST 게이트 통과)."""
+    """KMS 인증용 dev JWT(HS256). EDITOR 권한(배치 POST 게이트 통과).
+
+    라이브 KMS 는 sub 를 users.id(UUID) 로 그대로 기록하므로(document.created_by),
+    실제 user UUID 를 AIP_E2E_KMS_USER_ID 로 주입해야 골든패스가 통과한다.
+    미설정 시 비-UUID 더미("e2e-editor") — 업로드 시 Prisma UUID 오류로 실패함.
+    """
     try:
         import jwt as pyjwt
     except ImportError:  # pragma: no cover - 환경 의존
         pytest.skip("PyJWT 미설치 — KMS JWT 발급 불가 (pip install pyjwt)")
     now = int(time.time())
     payload = {
-        "sub": "e2e-editor",
+        "sub": os.environ.get("AIP_E2E_KMS_USER_ID", "e2e-editor"),
         "role": "EDITOR",
         "iat": now,
         "exp": now + 3600,

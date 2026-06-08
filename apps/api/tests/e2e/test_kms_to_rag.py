@@ -37,8 +37,10 @@ async def test_golden_path_single_row(
     assert resp.status_code in (200, 201), f"배치 실패: {resp.status_code} {resp.text}"
 
     # 3) ai-platform 적재 대기 + 단일행 단언
+    # 90s = docforge 일시 장애 시 job_queue 재시도 1사이클(딜레이 30s) + 처리 여유.
+    # 30s 는 정상경로만 커버해 라이브에서 재시도 한 번에도 플레이키했다.
     rows = await H.wait_for_sync(
-        aip_db, kms_doc_id, expected_count=1, timeout_sec=30.0
+        aip_db, kms_doc_id, expected_count=1, timeout_sec=90.0
     )
     assert len(rows) == 1, (
         f"external_id={kms_doc_id} 단일행 기대, 실제 {len(rows)}건: {rows}"
@@ -72,7 +74,7 @@ async def test_created_skips_updated_succeeds(
     resp = await H.kms_create_placement(kms_client, kms_jwt, kms_doc_id)
     assert resp.status_code in (200, 201), f"배치 실패: {resp.status_code} {resp.text}"
 
-    post = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=30.0)
+    post = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=90.0)
     assert len(post) == 1, f"배치 후 단일 적재 기대, 실제 {len(post)}건: {post}"
     assert post[0]["domain_code"] == H.DEFAULT_DOMAIN_CODE
 
@@ -89,7 +91,7 @@ async def test_idempotent_replacement_row_count_stable(
     # 1차 배치
     r1 = await H.kms_create_placement(kms_client, kms_jwt, kms_doc_id)
     assert r1.status_code in (200, 201, 409), f"1차 배치: {r1.status_code} {r1.text}"
-    rows1 = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=30.0)
+    rows1 = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=90.0)
     assert len(rows1) == 1, f"1차 적재 단일행 기대, 실제 {len(rows1)}: {rows1}"
 
     # 2차 배치(동일) — 이미 배치돼 있으면 KMS 409 가능. 어느 쪽이든
