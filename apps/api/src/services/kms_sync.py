@@ -12,6 +12,7 @@ from src.config import Settings
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.pipeline.ingest import IngestPipeline
+from src.services.domain_mapping import resolve_product_domain
 
 logger = get_logger(__name__)
 
@@ -73,6 +74,26 @@ class KmsSyncService:
         if not domain_code:
             logger.info("kms_sync_awaiting_placement", document_id=document_id)
             return {"status": "skipped", "reason": "awaiting placement (no domain)"}
+
+        # ── 도메인 매핑 (근본해결) ─────────────────────────────────────────
+        # KMS 는 회사중심 도메인(DB-DAMAGE)으로 배치하지만, 챗봇 프로필은 상품중심
+        # 도메인(자동차보험/건강보험/…)으로 검색 스코프를 건다. KMS 가 webhook 으로
+        # 전달한 categoryPath(["DB-DAMAGE","자동차보험","개인용"])로 상품도메인을 해석한다.
+        # KMS=분류 SoT(ADR-009), ai-platform 은 해석만 — 매핑은 seeds/domain_mapping.yaml.
+        company_domain = domain_code
+        category_path = data.get("categoryPath", []) or []
+        product_domain = resolve_product_domain(company_domain, category_path)
+        if product_domain:
+            domain_code = product_domain
+        else:
+            # 미매핑/부재(구 KMS·타 consumer·매핑 미정의 카테고리) → 회사도메인 fallback.
+            # 조용한 누락 0: 반드시 WARN 으로 가시화한다(메트릭/로그 신호).
+            logger.warning(
+                "kms_sync_domain_unmapped",
+                company_domain=company_domain,
+                category_path=category_path,
+                document_id=document_id,
+            )
 
         # 파일 다운로드
         file_bytes = await self._download_file(document_id)
