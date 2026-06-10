@@ -12,6 +12,7 @@ from pydantic import BaseModel, create_model
 
 from src.domain.models import SearchScope
 from src.domain.agent_context import AgentContext
+from src.tools.authz import authorize_tool
 from src.tools.base import ScopedTool, Tool, ToolResult
 
 MAX_TOOL_RESULT_LEN = 2000
@@ -97,6 +98,10 @@ def convert_tools_to_langchain(
         _is_scoped = is_scoped
 
         async def _ainvoke(_t=_tool, _s=_is_scoped, **kwargs) -> str:
+            # F19: 에이전틱 경로는 레지스트리를 거치지 않으므로 여기서도 하드 인가
+            denial = authorize_tool(_t, context)
+            if denial:
+                return _format_tool_result(ToolResult.fail(denial))
             if _s:
                 result = await _t.execute(params=kwargs, context=context, scope=scope)
             else:
