@@ -39,6 +39,7 @@ from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
 from src.orchestrator.embedding_router import EmbeddingRouter
+from src.orchestrator.llm_adapter import OrchestratorLLM
 from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
@@ -339,9 +340,11 @@ async def create_app_state(settings: Settings) -> AppState:
     # 14. TenantService
     tenant_service = TenantService(pool)
 
-    # 15. MasterOrchestrator. LLM 백엔드 선택은 ProviderFactory가 단일 결정(provider_mode 기준).
+    # 15. MasterOrchestrator. 백엔드 선택은 ProviderFactory(provider_mode 기준)가 설정으로
+    # 반환하고, 어댑터 생성은 합성 루트인 여기서 한다(infra→orchestrator 역의존 회피).
     orchestrator = None
-    orchestrator_llm = provider_factory.get_orchestrator_llm()
+    orchestrator_cfg = provider_factory.get_orchestrator_llm_config()
+    orchestrator_llm = OrchestratorLLM.from_config(orchestrator_cfg) if orchestrator_cfg else None
     if orchestrator_llm:
         await orchestrator_llm.initialize()
         # 임베딩 기반 프로필 라우터 초기화

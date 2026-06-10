@@ -18,6 +18,22 @@ class StreamChunk:
 
 
 @dataclass(frozen=True)
+class OrchestratorLLMConfig:
+    """오케스트레이터 LLM 백엔드 설정 (provider_mode 해석 결과).
+
+    인프라(팩토리)는 "어떤 백엔드로 갈지"만 결정하고, 실제 OrchestratorLLM
+    어댑터(상위 orchestrator 계층) 생성은 합성 루트(bootstrap)가 맡는다.
+    이로써 infrastructure → orchestrator 역방향 의존을 제거한다.
+    """
+    provider: str
+    model: str
+    api_key: str
+    timeout: float
+    server_url: str
+    ollama_host: str
+
+
+@dataclass(frozen=True)
 class ProviderCapability:
     """Provider 메타데이터. Router Policy 가 후보 선택에 사용.
 
