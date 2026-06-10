@@ -165,3 +165,93 @@ async def test_workflow_save_falls_back_to_default():
     await store.save("sess-1", session)  # tenant_id 없음 + 컨텍스트 없음
 
     assert pool.execute.call_args[0][-1] == "default"
+
+
+# ── 4d 하드닝: 명시적 NULL 바인딩 방어 ──────────────────────────────────────
+# 마이그레이션 021의 DEFAULT 'default'는 *컬럼 누락* INSERT에만 적용되고
+# 명시적 NULL 바인딩에는 적용되지 않는다. 저장 계층이 tenant_id=None을 그대로
+# 바인딩하면 런타임 NOT NULL 위반 → 모든 쓰기 메서드가 코일레싱해야 한다.
+
+
+@pytest.mark.asyncio
+async def test_insert_fact_none_falls_back_to_default():
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    store = FactStore(pool)
+
+    import uuid
+    await store.insert_fact(
+        document_id=str(uuid.uuid4()), domain_code="d",
+        subject="s", predicate="p", obj="o", tenant_id=None,
+    )
+
+    assert pool.execute.call_args[0][-1] == "default"
+
+
+@pytest.mark.asyncio
+async def test_insert_fact_none_falls_back_to_context_tenant():
+    from src.infrastructure.db.tenant_context import current_tenant
+
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    store = FactStore(pool)
+
+    import uuid
+    token = current_tenant.set("ctx-tenant")
+    try:
+        await store.insert_fact(
+            document_id=str(uuid.uuid4()), domain_code="d",
+            subject="s", predicate="p", obj="o",
+        )
+    finally:
+        current_tenant.reset(token)
+
+    assert pool.execute.call_args[0][-1] == "ctx-tenant"
+
+
+@pytest.mark.asyncio
+async def test_create_session_none_falls_back_to_default():
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    mem = SessionMemory(pool)
+
+    await mem.create_session(session_id="s1", profile_id="p1", tenant_id=None)
+
+    assert pool.execute.call_args[0][-1] == "default"
+
+
+@pytest.mark.asyncio
+async def test_insert_document_none_falls_back_to_default():
+    """file_hash 없는 execute 경로에서 None → 'default' 코일레싱."""
+    conn = AsyncMock()
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_acquire_conn(conn))
+
+    vs = VectorStore("postgresql://x")
+    vs._pool = pool
+
+    await vs.insert_document(title="t", domain_code="d")  # tenant_id 미지정
+
+    args = conn.execute.call_args[0]
+    assert args[-1] == "default"
+
+
+@pytest.mark.asyncio
+async def test_insert_chunks_none_falls_back_to_default():
+    conn = AsyncMock()
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=None)
+    tx.__aexit__ = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=tx)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_acquire_conn(conn))
+
+    vs = VectorStore("postgresql://x")
+    vs._pool = pool
+
+    import uuid
+    chunks = [{"chunkIndex": 0, "content": "내용", "tokenCount": 2}]
+    await vs.insert_chunks(str(uuid.uuid4()), chunks, [[0.1] * 4])  # tenant_id 미지정
+
+    records = conn.executemany.call_args[0][1]
+    assert records[0][-1] == "default"
