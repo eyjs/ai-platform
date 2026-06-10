@@ -138,6 +138,13 @@ async def create_app_state(settings: Settings) -> AppState:
     await access_policy.load()
 
     # 2. AuthService
+    # D17: RS256 공개키 로드. 경로가 설정됐는데 읽기 실패면 즉시 중단 —
+    # 보안 설정 오류를 조용한 HS256 강등으로 흡수하지 않는다.
+    jwt_public_key = ""
+    if settings.jwt_public_key_path:
+        from pathlib import Path as _Path
+        jwt_public_key = _Path(settings.jwt_public_key_path).read_text()
+
     auth_service = AuthService(
         pool=pool,
         jwt_secret=settings.jwt_secret,
@@ -145,11 +152,15 @@ async def create_app_state(settings: Settings) -> AppState:
         access_policy=access_policy,
         profile_auth_strict=settings.profile_auth_strict,
         publishable_rate_limit_max=settings.publishable_rate_limit_max,
+        jwt_public_key=jwt_public_key,
+        jwt_hs256_fallback=settings.jwt_hs256_fallback,
     )
     logger.info(
         "auth_initialized",
         auth_required=settings.auth_required,
         profile_auth_strict=settings.profile_auth_strict,
+        jwt_rs256_enabled=bool(jwt_public_key),
+        jwt_hs256_fallback=settings.jwt_hs256_fallback,
     )
 
     # 3. FactStore + Memory

@@ -19,6 +19,7 @@ dependencies = [
     "sse-starlette>=2.0.0",
     "python-multipart>=0.0.9",
     "PyJWT>=2.8.0",
+    "cryptography>=42.0",
     "sqlalchemy[asyncio]>=2.0.0",
 ]
 

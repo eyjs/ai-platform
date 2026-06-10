@@ -64,6 +64,41 @@ async def test_jwt_valid_token(auth_service):
 
 
 @pytest.mark.asyncio
+async def test_jwt_admin_gets_wildcard_profiles(auth_service):
+    """A1+D17: 클레임 없는 ADMIN JWT는 전체 프로필 허용(['*'])."""
+    import jwt
+    token = jwt.encode(
+        {"sub": "admin-1", "role": "ADMIN"}, "test-secret", algorithm="HS256",
+    )
+    ctx = await auth_service.authenticate(authorization=f"Bearer {token}")
+    assert ctx.allowed_profiles == ["*"]
+
+
+@pytest.mark.asyncio
+async def test_jwt_non_admin_no_claim_empty_profiles(auth_service):
+    """클레임 없는 비-ADMIN JWT는 빈 목록 → strict 정책이 적용된다."""
+    import jwt
+    token = jwt.encode(
+        {"sub": "u-1", "role": "VIEWER"}, "test-secret", algorithm="HS256",
+    )
+    ctx = await auth_service.authenticate(authorization=f"Bearer {token}")
+    assert ctx.allowed_profiles == []
+
+
+@pytest.mark.asyncio
+async def test_jwt_honors_allowed_profiles_claim(auth_service):
+    """allowed_profiles 클레임이 있으면 그대로 존중한다 (ADMIN이라도)."""
+    import jwt
+    token = jwt.encode(
+        {"sub": "u-2", "role": "ADMIN", "allowed_profiles": ["insurance-qa"]},
+        "test-secret",
+        algorithm="HS256",
+    )
+    ctx = await auth_service.authenticate(authorization=f"Bearer {token}")
+    assert ctx.allowed_profiles == ["insurance-qa"]
+
+
+@pytest.mark.asyncio
 async def test_jwt_expired_token(auth_service):
     """만료된 JWT → AuthError."""
     import jwt

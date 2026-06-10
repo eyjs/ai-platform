@@ -12,10 +12,19 @@ import { JwtStrategy } from './jwt.strategy';
   imports: [
     TypeOrmModule.forFeature([WebUser]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: jwtConfig.secret,
-      signOptions: { algorithm: jwtConfig.algorithm },
-    }),
+    // D17: 개인키가 있으면 RS256 서명(+kid), 없으면 레거시 HS256
+    JwtModule.register(
+      jwtConfig.privateKey
+        ? {
+            privateKey: jwtConfig.privateKey,
+            publicKey: jwtConfig.publicKey,
+            signOptions: { algorithm: 'RS256', keyid: jwtConfig.kid },
+          }
+        : {
+            secret: jwtConfig.secret,
+            signOptions: { algorithm: 'HS256' },
+          },
+    ),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

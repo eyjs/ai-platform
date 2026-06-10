@@ -39,9 +39,7 @@ export class AuthService {
 
   async refresh(refreshToken: string): Promise<TokenResponseDto> {
     try {
-      const payload = this.jwtService.verify(refreshToken, {
-        secret: jwtConfig.secret,
-      });
+      const payload = this.verifyRefreshToken(refreshToken);
       const user = await this.userRepository.findOne({
         where: { id: payload.sub },
       });
@@ -52,6 +50,29 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('유효하지 않은 리프레시 토큰입니다');
     }
+  }
+
+  /**
+   * 리프레시 토큰 검증 (D17 듀얼-모드).
+   * 토큰 헤더 alg 기준으로 키를 고정 — RS256=공개키, HS256=과도기 폴백 시 시크릿.
+   */
+  private verifyRefreshToken(token: string): { sub: string } {
+    const headerJson = Buffer.from(token.split('.')[0] ?? '', 'base64url').toString('utf8');
+    const { alg } = JSON.parse(headerJson) as { alg?: string };
+
+    if (alg === 'RS256' && jwtConfig.publicKey) {
+      return this.jwtService.verify(token, {
+        publicKey: jwtConfig.publicKey,
+        algorithms: ['RS256'],
+      });
+    }
+    if (alg === 'HS256' && jwtConfig.hs256Fallback) {
+      return this.jwtService.verify(token, {
+        secret: jwtConfig.secret,
+        algorithms: ['HS256'],
+      });
+    }
+    throw new UnauthorizedException(`지원하지 않는 토큰 알고리즘: ${alg ?? '없음'}`);
   }
 
   async getMe(userId: string): Promise<CurrentUserDto> {

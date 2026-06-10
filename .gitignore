@@ -32,6 +32,9 @@ env/
 .env.local
 .env.*.local
 
+# JWT 키페어 (D17) — 절대 커밋 금지
+secrets/
+
 # Testing
 .pytest_cache/
 .coverage

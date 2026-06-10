@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     # 인증
     auth_required: bool = True
     jwt_secret: str = ""
+    # JWT 비대칭 검증 (D17, Step 13). RSA 공개키 PEM 파일 경로.
+    # 설정 시 RS256 토큰(bff 개인키 서명) 검증 활성. api는 공개키만 가진다.
+    jwt_public_key_path: str = ""
+    # 과도기 HS256 허용 (D17). RS256 전환 검증 후 false로 잠가 대칭키를 퇴역시킨다.
+    jwt_hs256_fallback: bool = True
     # 프로필 인가 deny-by-default (A1). True면 빈 allowed_profiles/테넌트 매핑 = 전체 거부.
     # 와일드카드 "*"로 명시적 전체 허용. 기존 fail-open 호환을 위해 기본 False.
     profile_auth_strict: bool = False
