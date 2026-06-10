@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Security — P0 보안 활성화 + 실행단 인가 (2026-06-10)
+
+로드맵 P0-보안(Step 1~4)은 코드로는 기구현이었으나 플래그 기본 OFF 상태였다. 운영 전환을 실행하고, 그 과정에서 발견된 결함 2건을 봉합했으며, P1/P2의 보안 직결 항목(F19·D14 일부)을 앞당겨 적용했다.
+
+- **strict 프로필 인가 + RLS 활성화 (A1·A2)**: `backfill_profile_authz --apply`(빈 allowed_profiles 3건 → `['*']`, default 테넌트에 12개 프로필 구체화) 선행 후 `AIP_PROFILE_AUTH_STRICT=true` + `AIP_RLS_ENABLED=true` 전환(docker-compose 공유 env). 네거티브 검증: 제한키→타프로필 403 / 빈목록키 전체거부 403 / RLS 타테넌트 raw 쿼리 0건. (merge `204885a`)
+- **chat 라우트 403→500 결함 수정**: Step 22 god-file 분할 시 `routes/chat.py`의 `HTTPException` import 누락 — except 절은 예외 발생 시에야 평가되어 기존 테스트 미검출, 인가 거부가 NameError→500으로 둔갑. import 복구 + 동류 회귀 차단 테스트(`test_routes_imports.py`, AST 기반 except/raise 이름 바인딩 검증). (fix `e6a12dd`)
+- **tenant_id 명시적 NULL 바인딩 방어 (4d 하드닝)**: 마이그레이션 021의 DEFAULT는 컬럼 누락에만 적용되고 명시적 NULL 바인딩에는 미적용 → vector_store/fact_store/memory.session에 `tenant_id or current_tenant.get() or 'default'` 코일레싱(session_store 기존 패턴 통일). (merge `86bc4fc`)
+- **도구 실행단 하드 인가 (F19, Step 15)**: 프롬프트 레벨 제한(Profile.tools)과 별개로 실행 직전 역할 기반 차단. `tools/authz.py` + `ROLE_HIERARCHY`. registry(결정론)·tool_adapter(에이전틱) **양 경로** 체크 — 에이전틱 경로는 레지스트리를 우회하므로 둘 다 필요. `flowsns_task_actions`(전 액션 변이)에 `required_role=EDITOR` 선언. 알 수 없는 역할은 fail-closed. (merge `6a635d8`)
+- **프로필 변경 시 그래프 캐시 무효화 (D14 부분)**: admin update/delete·/cache/invalidate가 GraphCache를 안 건드려 제거된 도구가 컴파일된 그래프에서 TTL(2h)까지 생존하던 구멍 봉합. 멀티 인스턴스 LISTEN/NOTIFY는 스케일아웃 시점에. (merge `de2e074`, fix `b083a0b`)
+- **테스트 결정성**: conftest에서 보안 플래그를 레거시 기본값으로 고정 — 개발자 `.env`가 테스트 가정을 오염시키지 않도록. 전체 **1072 passed/13 skipped/0 fail**.
+
 ### Changed — KMS 회사도메인 → 상품도메인 매핑 (분류 불일치 근본해결)
 
 KMS는 회사중심 도메인(`DB-DAMAGE`)으로 문서를 배치하지만 ai-platform RAG·챗봇은 상품중심 도메인(`자동차보험`/`건강보험`/…)으로 검색 스코프를 건다. 동기화 시 aip-pg가 KMS 회사도메인을 그대로 `domain_code`에 적재해, 상품도메인 스코프 프로필이 DB손해보험 문서를 검색에서 배제했다(크롤한 자동차보험 6건이 챗봇에 안 떠 수동 `domain_code` 패치 → 재동기화하면 되돌아가는 데이터 패치라 근본해결). 두 분류가 이질적이고(1:1 규칙 없음) 카테고리가 웹훅에 안 실려, **KMS 웹훅 보강 + ai-platform 설정형 매핑**이 둘 다 필요한 cross-repo 변경이다. 분석·설계: [ADR-011](adr/adr-011-kms-domain-mapping.md).
