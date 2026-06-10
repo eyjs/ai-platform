@@ -11,6 +11,13 @@ import pytest
 
 from src.locale.bundle import LocaleBundle, set_locale
 
+# 테스트 결정성: 개발자 로컬 .env의 보안 플래그(A1/A2 활성화)가 테스트 가정을 바꾸지
+# 않도록 레거시 기본값으로 고정한다. src.config의 settings 싱글톤은 테스트 모듈
+# import 시점(이 파일 실행 이후)에 생성되므로 여기서의 env 고정이 항상 선행된다.
+# strict/RLS 동작 자체는 test_profile_authz 등에서 양쪽 모드를 명시적으로 검증한다.
+os.environ["AIP_PROFILE_AUTH_STRICT"] = "false"
+os.environ["AIP_RLS_ENABLED"] = "false"
+
 # 상용 LLM 차단 대상 env keys
 _COMMERCIAL_LLM_ENV_KEYS = (
     "ANTHROPIC_API_KEY",

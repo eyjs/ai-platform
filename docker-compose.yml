@@ -47,6 +47,10 @@ services:
       # 인증
       AIP_AUTH_REQUIRED: "true"
       AIP_JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
+      # 프로필 인가 deny-by-default (A1, Step 1). 백필(backfill_profile_authz) 적용 후 활성화됨.
+      AIP_PROFILE_AUTH_STRICT: "true"
+      # RLS 심층방어 (A2, Step 4c). 마이그레이션 019/020 적용 + tenant_id 백필 완료 후 활성화됨.
+      AIP_RLS_ENABLED: "true"
       # KMS 연동
       AIP_KMS_API_URL: http://kms-api:3000/api
       AIP_KMS_INTERNAL_KEY: ${INTERNAL_KEY:-dev_internal_key_32_chars_minimum}
