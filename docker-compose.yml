@@ -47,6 +47,10 @@ services:
       # 인증
       AIP_AUTH_REQUIRED: "true"
       AIP_JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
+      # JWT 비대칭 검증 (D17, Step 13). api는 공개키만 가진다(개인키는 bff 전용).
+      # RS256 전환 검증 후 AIP_JWT_HS256_FALLBACK=false로 대칭키를 퇴역.
+      AIP_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public.pem
+      AIP_JWT_HS256_FALLBACK: "true"
       # 프로필 인가 deny-by-default (A1, Step 1). 백필(backfill_profile_authz) 적용 후 활성화됨.
       AIP_PROFILE_AUTH_STRICT: "true"
       # RLS 심층방어 (A2, Step 4c). 마이그레이션 019/020 적용 + tenant_id 백필 완료 후 활성화됨.
@@ -75,6 +79,8 @@ services:
       - kms-aip-shared
     volumes:
       - ./apps/api/seeds:/app/seeds
+      # D17: JWT 공개키만 마운트 (개인키는 api에 두지 않는다)
+      - ./secrets/jwt_public.pem:/run/secrets/jwt_public.pem:ro
 
   worker:
     build:
@@ -92,6 +98,9 @@ services:
     networks:
       - default
       - kms-aip-shared
+    volumes:
+      # worker도 bootstrap에서 공개키 경로를 읽으므로 동일 마운트 필요
+      - ./secrets/jwt_public.pem:/run/secrets/jwt_public.pem:ro
 
   bff:
     build:
@@ -106,6 +115,10 @@ services:
       BFF_PORT: 3001
       DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
       JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
+      # D17: bff가 개인키로 RS256 서명, 공개키로 자체 검증. 개인키는 bff에만.
+      AIP_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private.pem
+      AIP_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public.pem
+      AIP_JWT_HS256_FALLBACK: "true"
       CORS_ORIGIN: "http://localhost:3000,https://ai-platform-eight-sigma.vercel.app"
     depends_on:
       postgres:
@@ -113,6 +126,9 @@ services:
     networks:
       - default
       - kms-aip-shared
+    volumes:
+      - ./secrets/jwt_private.pem:/run/secrets/jwt_private.pem:ro
+      - ./secrets/jwt_public.pem:/run/secrets/jwt_public.pem:ro
 
 networks:
   kms-aip-shared:

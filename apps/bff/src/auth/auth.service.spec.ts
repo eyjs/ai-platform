@@ -39,6 +39,15 @@ function makeJwtService(overrides: Partial<{ sign: jest.Mock; verify: jest.Mock 
   };
 }
 
+/**
+ * 테스트용 토큰 — verifyRefreshToken이 헤더 alg를 파싱하므로(D17 듀얼-모드)
+ * 서명은 더미지만 헤더/페이로드는 실제 JWT 구조여야 한다.
+ */
+function makeToken(alg: 'HS256' | 'RS256' = 'HS256'): string {
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  return `${b64({ alg, typ: 'JWT' })}.${b64({ sub: 'x' })}.sig`;
+}
+
 describe('AuthService', () => {
   let userRepo: ReturnType<typeof makeUserRepo>;
   let jwtService: ReturnType<typeof makeJwtService>;
@@ -111,13 +120,15 @@ describe('AuthService', () => {
       userRepo.findOne.mockResolvedValue(user);
 
       // Act
-      const result = await authService.refresh('valid-refresh-token');
+      const result = await authService.refresh(makeToken('HS256'));
 
       // Assert
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
-      expect(jwtService.verify).toHaveBeenCalledWith('valid-refresh-token', {
+      // D17: HS256 토큰은 공유 시크릿 + 알고리즘 고정으로 검증
+      expect(jwtService.verify).toHaveBeenCalledWith(expect.any(String), {
         secret: jwtConfig.secret,
+        algorithms: ['HS256'],
       });
     });
 
@@ -128,7 +139,12 @@ describe('AuthService', () => {
       });
 
       // Act & Assert
-      await expect(authService.refresh('invalid-token')).rejects.toThrow(UnauthorizedException);
+      await expect(authService.refresh(makeToken('HS256'))).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('헤더를 파싱할 수 없는 토큰이면 UnauthorizedException을 던진다', async () => {
+      // D17: alg 헤더가 없으면 키 선택 불가 → 거부
+      await expect(authService.refresh('not-a-jwt')).rejects.toThrow(UnauthorizedException);
     });
 
     it('토큰의 sub에 해당하는 유저가 없으면 UnauthorizedException을 던진다', async () => {
@@ -137,7 +153,7 @@ describe('AuthService', () => {
       userRepo.findOne.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(authService.refresh('valid-refresh-token')).rejects.toThrow(UnauthorizedException);
+      await expect(authService.refresh(makeToken('HS256'))).rejects.toThrow(UnauthorizedException);
     });
 
     it('비활성화된 유저의 refresh 토큰이면 UnauthorizedException을 던진다', async () => {
@@ -147,7 +163,7 @@ describe('AuthService', () => {
       userRepo.findOne.mockResolvedValue(user);
 
       // Act & Assert
-      await expect(authService.refresh('valid-token')).rejects.toThrow(UnauthorizedException);
+      await expect(authService.refresh(makeToken('HS256'))).rejects.toThrow(UnauthorizedException);
     });
   });
 

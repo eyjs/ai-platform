@@ -55,6 +55,8 @@ class AuthService:
         access_policy: AccessPolicyStore | None = None,
         profile_auth_strict: bool = False,
         publishable_rate_limit_max: int = 120,
+        jwt_public_key: str = "",
+        jwt_hs256_fallback: bool = True,
     ):
         self._pool = pool
         self._jwt_secret = jwt_secret
@@ -62,6 +64,10 @@ class AuthService:
         self._access_policy = access_policy
         self._profile_auth_strict = profile_auth_strict
         self._publishable_rate_limit_max = publishable_rate_limit_max
+        # D17: RSA 공개키(PEM). 설정 시 RS256 검증 활성. api는 개인키를 갖지 않는다.
+        self._jwt_public_key = jwt_public_key
+        # D17 과도기: HS256(공유 시크릿) 허용. 전환 완료 후 false로 잠금.
+        self._jwt_hs256_fallback = jwt_hs256_fallback
         self._background_tasks: set[asyncio.Task] = set()
 
     async def authenticate(
@@ -98,15 +104,37 @@ class AuthService:
         raise AuthError("인증이 필요합니다. Authorization 또는 X-API-Key 헤더를 제공하세요.")
 
     def _verify_jwt(self, token: str) -> UserContext:
-        """JWT 토큰을 검증하고 UserContext를 반환한다."""
+        """JWT 토큰을 검증하고 UserContext를 반환한다 (D17 듀얼-모드).
+
+        토큰 헤더의 alg로 검증 경로를 고정한다 — 키와 알고리즘을 교차시키지
+        않아 알고리즘 혼동(algorithm confusion) 공격을 차단한다:
+          - RS256: 공개키로만 검증 (개인키는 bff에만 존재)
+          - HS256: 과도기 폴백이 켜진 경우에만 공유 시크릿으로 검증
+        """
         if not HAS_JWT:
             raise AuthError("JWT 지원이 설치되지 않았습니다 (pip install PyJWT)")
 
-        if not self._jwt_secret:
-            raise AuthError("JWT 시크릿이 설정되지 않았습니다")
+        try:
+            header = pyjwt.get_unverified_header(token)
+        except pyjwt.InvalidTokenError as e:
+            raise AuthError(f"유효하지 않은 토큰: {e}")
+
+        alg = header.get("alg", "")
+        if alg == "RS256":
+            if not self._jwt_public_key:
+                raise AuthError("RS256 토큰을 검증할 공개키가 설정되지 않았습니다")
+            key: str = self._jwt_public_key
+        elif alg == "HS256":
+            if not self._jwt_hs256_fallback:
+                raise AuthError("HS256 토큰은 더 이상 허용되지 않습니다 (RS256 전환 완료)")
+            if not self._jwt_secret:
+                raise AuthError("JWT 시크릿이 설정되지 않았습니다")
+            key = self._jwt_secret
+        else:
+            raise AuthError(f"지원하지 않는 JWT 알고리즘: {alg or '없음'}")
 
         try:
-            payload = pyjwt.decode(token, self._jwt_secret, algorithms=["HS256"])
+            payload = pyjwt.decode(token, key, algorithms=[alg])
         except pyjwt.ExpiredSignatureError:
             raise AuthError("토큰이 만료되었습니다")
         except pyjwt.InvalidTokenError as e:
@@ -120,11 +148,21 @@ class AuthService:
         if user_role not in UserRole.__members__.values():
             raise AuthError(f"유효하지 않은 역할: {user_role}")
 
+        # A1+D17: 프로필 인가 해석.
+        # JWT는 RS256로 서명된 신뢰 자격이다. 선택적 allowed_profiles 클레임을
+        # 존중하되, 클레임이 없으면:
+        #   - ADMIN: 전체 허용(["*"]) — 운영자는 bff로 이미 전 프로필을 관리한다.
+        #   - 그 외: 빈 목록 → strict 정책(deny-by-default)을 그대로 적용.
+        allowed_profiles = payload.get("allowed_profiles")
+        if allowed_profiles is None:
+            allowed_profiles = ["*"] if user_role == UserRole.ADMIN else []
+
         return UserContext(
             user_id=user_id,
             user_role=user_role,
             security_level_max=security_max,
             user_type=user_type,
+            allowed_profiles=allowed_profiles,
         )
 
     async def _verify_api_key(self, raw_key: str) -> UserContext:
@@ -192,7 +230,7 @@ class AuthService:
         )
         if not is_profile_allowed(allowed, chatbot_id):
             raise AuthError(
-                f"이 API Key는 '{chatbot_id}' 프로필에 접근 권한이 없습니다"
+                f"'{chatbot_id}' 프로필에 접근 권한이 없습니다"
             )
 
         # segment 교차 검증: AccessPolicyStore가 주입된 경우에만 수행
