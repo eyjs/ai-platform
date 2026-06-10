@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from src.domain.agent_context import AgentContext
+from src.domain.models import UserRole
 from src.tools.base import ToolResult
 from src.tools.internal.flowsns.flowsns_client import FlowSNSClient, FlowSNSClientError
 
@@ -25,6 +26,8 @@ class FlowSNSTaskActionsTool:
     """
 
     name = "flowsns_task_actions"
+    # F19: 전 액션(create/update/addRevision)이 외부 상태를 변경하는 도구 — EDITOR 이상만
+    required_role = UserRole.EDITOR
     description = (
         "FlowSNS 태스크 생성/수정/상태변경 — 작업 발행, 완료 처리, 담당자 변경, 리비전 추가. "
         "clientId와 assigneeId에 고객사/담당자 이름을 넣으면 자동으로 UUID를 조회합니다."

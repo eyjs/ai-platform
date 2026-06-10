@@ -52,6 +52,17 @@ class UserRole(str, Enum):
     ADMIN = "ADMIN"
 
 
+# 역할 위계 (F19 도구 실행단 인가 등에서 최소 요구 역할 비교용).
+# SECURITY_HIERARCHY와 동일한 패턴 — 숫자가 클수록 상위 권한.
+ROLE_HIERARCHY: dict[str, int] = {
+    UserRole.VIEWER: 0,
+    UserRole.EDITOR: 1,
+    UserRole.REVIEWER: 2,
+    UserRole.APPROVER: 3,
+    UserRole.ADMIN: 4,
+}
+
+
 # --- 응답 정책 ---
 
 class ResponsePolicy(str, Enum):

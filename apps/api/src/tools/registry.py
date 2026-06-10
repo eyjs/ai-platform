@@ -8,6 +8,7 @@ from typing import Optional, Union
 
 from src.domain.models import SearchScope
 from src.domain.agent_context import AgentContext
+from src.tools.authz import authorize_tool
 from src.tools.base import ScopedTool, Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,11 @@ class ToolRegistry:
         tool = self._tools.get(tool_name)
         if not tool:
             return ToolResult.fail(f"Tool not found: {tool_name}")
+
+        # F19: 실행단 하드 인가 — 프롬프트 레벨 제한과 별개로 역할 기반 차단
+        denial = authorize_tool(tool, context)
+        if denial:
+            return ToolResult.fail(denial)
 
         try:
             if isinstance(tool, ScopedTool):

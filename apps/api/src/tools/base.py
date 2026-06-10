@@ -41,6 +41,9 @@ class ToolDefinition:
     timeout_seconds: int = 5
     retry_count: int = 2
     cost_tier: str = "free"  # "free" | "low" | "high"
+    # F19 실행단 하드 인가: 최소 요구 역할 (UserRole 값). None = 제한 없음.
+    # 도구 클래스 속성 required_role과 동일 계약 — src/tools/authz.py 참조.
+    required_role: str | None = None
 
 
 from src.domain.agent_context import AgentContext  # noqa: F401
