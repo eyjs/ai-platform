@@ -16,6 +16,7 @@
 - **tenant_id 명시적 NULL 바인딩 방어 (4d 하드닝)**: 마이그레이션 021의 DEFAULT는 컬럼 누락에만 적용되고 명시적 NULL 바인딩에는 미적용 → vector_store/fact_store/memory.session에 `tenant_id or current_tenant.get() or 'default'` 코일레싱(session_store 기존 패턴 통일). (merge `86bc4fc`)
 - **도구 실행단 하드 인가 (F19, Step 15)**: 프롬프트 레벨 제한(Profile.tools)과 별개로 실행 직전 역할 기반 차단. `tools/authz.py` + `ROLE_HIERARCHY`. registry(결정론)·tool_adapter(에이전틱) **양 경로** 체크 — 에이전틱 경로는 레지스트리를 우회하므로 둘 다 필요. `flowsns_task_actions`(전 액션 변이)에 `required_role=EDITOR` 선언. 알 수 없는 역할은 fail-closed. (merge `6a635d8`)
 - **프로필 변경 시 그래프 캐시 무효화 (D14 부분)**: admin update/delete·/cache/invalidate가 GraphCache를 안 건드려 제거된 도구가 컴파일된 그래프에서 TTL(2h)까지 생존하던 구멍 봉합. 멀티 인스턴스 LISTEN/NOTIFY는 스케일아웃 시점에. (merge `de2e074`, fix `b083a0b`)
+- **JWT 비대칭 RS256 전환 (D17, Step 13)**: HS256 대칭(api·bff 시크릿 공유) → RS256. bff 개인키 서명, api 공개키 검증만(api에 서명능력 제거). 토큰 헤더 alg로 검증 경로 고정 → 알고리즘 혼동 공격 차단. `kid`(공개키 지문)로 회전 대비. 과도기 HS256 폴백 유지(전환 후 `AIP_JWT_HS256_FALLBACK=false`로 퇴역). strict 활성화로 노출된 web ADMIN 락아웃은 JWT allowed_profiles 클레임 존중 + ADMIN 와일드카드로 수정. 라이브 왕복 검증 완료. (merge `0dedf90`)
 - **테스트 결정성**: conftest에서 보안 플래그를 레거시 기본값으로 고정 — 개발자 `.env`가 테스트 가정을 오염시키지 않도록. 전체 **1072 passed/13 skipped/0 fail**.
 
 ### Changed — KMS 회사도메인 → 상품도메인 매핑 (분류 불일치 근본해결)
