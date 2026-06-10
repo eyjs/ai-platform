@@ -77,9 +77,14 @@ def _create_test_app() -> FastAPI:
     # Mock WorkflowStore (DB 없이)
     workflow_store = WorkflowStore()
 
+    # Mock GraphExecutor (D14 부분: 프로필 변경 시 그래프 캐시 무효화 검증용)
+    mock_agent = MagicMock()
+    mock_agent.invalidate_graph_cache = MagicMock(return_value=0)
+
     app.state.auth_service = mock_auth
     app.state.profile_store = profile_store
     app.state.workflow_store = workflow_store
+    app.state.agent = mock_agent
 
     return app
 
@@ -292,6 +297,49 @@ class TestCacheInvalidation:
         resp = client.post("/api/admin/cache/invalidate", headers={"X-API-Key": "test"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+    def test_invalidate_cache_clears_graph_cache(self, client):
+        """전체 캐시 무효화가 컴파일된 agentic 그래프 캐시도 비운다 (D14 부분)."""
+        client.post("/api/admin/cache/invalidate", headers={"X-API-Key": "test"})
+        client.app.state.agent.invalidate_graph_cache.assert_called_with()
+
+
+class TestGraphCacheInvalidationOnProfileChange:
+    """프로필 변경 시 그래프 캐시 무효화 (D14 부분).
+
+    무효화가 없으면 프로필에서 제거한 도구가 캐시된 그래프에서 TTL(2h)까지
+    계속 동작하는 보안 구멍이 된다.
+    """
+
+    def test_update_profile_invalidates_graph_cache(self, client):
+        client.post("/api/admin/profiles", json={"id": "gc-bot", "name": "원래"},
+                     headers={"X-API-Key": "test"})
+        client.app.state.agent.invalidate_graph_cache.reset_mock()
+
+        resp = client.put("/api/admin/profiles/gc-bot", json={"name": "변경"},
+                          headers={"X-API-Key": "test"})
+
+        assert resp.status_code == 200
+        client.app.state.agent.invalidate_graph_cache.assert_called_once_with("gc-bot")
+
+    def test_delete_profile_invalidates_graph_cache(self, client):
+        client.post("/api/admin/profiles", json={"id": "gc-del", "name": "삭제"},
+                     headers={"X-API-Key": "test"})
+        client.app.state.agent.invalidate_graph_cache.reset_mock()
+
+        resp = client.delete("/api/admin/profiles/gc-del", headers={"X-API-Key": "test"})
+
+        assert resp.status_code == 200
+        client.app.state.agent.invalidate_graph_cache.assert_called_once_with("gc-del")
+
+    def test_update_nonexistent_does_not_invalidate(self, client):
+        client.app.state.agent.invalidate_graph_cache.reset_mock()
+
+        resp = client.put("/api/admin/profiles/ghost", json={"name": "x"},
+                          headers={"X-API-Key": "test"})
+
+        assert resp.status_code == 404
+        client.app.state.agent.invalidate_graph_cache.assert_not_called()
 
 
 # --- KMS Proxy ---

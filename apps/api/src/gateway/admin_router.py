@@ -236,7 +236,13 @@ async def update_profile(profile_id: str, req: ProfileUpdateRequest, request: Re
     profile = state.profile_store.parse_profile(merged)
     await state.profile_store.update(profile)
 
-    logger.info("admin_profile_updated", profile_id=profile_id, by=user_ctx.user_id, fields=list(updates.keys()))
+    # D14 부분: 컴파일된 agentic 그래프 캐시 무효화 — 도구 제거가 TTL까지 안 먹는 구멍 차단
+    evicted = state.agent.invalidate_graph_cache(profile_id)
+
+    logger.info(
+        "admin_profile_updated", profile_id=profile_id, by=user_ctx.user_id,
+        fields=list(updates.keys()), graph_cache_evicted=evicted,
+    )
     return _profile_to_response(profile)
 
 
@@ -250,7 +256,12 @@ async def delete_profile(profile_id: str, request: Request):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"프로필을 찾을 수 없습니다: {profile_id}")
 
-    logger.info("admin_profile_deleted", profile_id=profile_id, by=user_ctx.user_id)
+    evicted = state.agent.invalidate_graph_cache(profile_id)
+
+    logger.info(
+        "admin_profile_deleted", profile_id=profile_id, by=user_ctx.user_id,
+        graph_cache_evicted=evicted,
+    )
     return {"status": "deleted", "id": profile_id}
 
 
@@ -549,8 +560,9 @@ async def invalidate_cache(request: Request):
 
     state.profile_store.invalidate_cache()
     state.workflow_store.invalidate_cache()
+    evicted = state.agent.invalidate_graph_cache()
 
-    logger.info("admin_cache_invalidated", by=user_ctx.user_id)
+    logger.info("admin_cache_invalidated", by=user_ctx.user_id, graph_cache_evicted=evicted)
     return {"status": "ok", "message": "모든 캐시가 무효화되었습니다"}
 
 

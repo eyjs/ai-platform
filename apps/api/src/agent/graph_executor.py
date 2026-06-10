@@ -80,6 +80,17 @@ class GraphExecutor:
         )
         self._deterministic_app = det_graph.compile()
 
+    def invalidate_graph_cache(self, profile_id: str | None = None) -> int:
+        """프로필 변경 시 컴파일된 agentic 그래프 캐시를 무효화한다 (D14 부분).
+
+        프로필에서 도구를 제거해도 캐시된 그래프가 TTL(2h)까지 옛 도구로
+        동작하는 보안 구멍을 막는다. profile_id=None이면 전체 무효화.
+        제거된 엔트리 수를 반환한다.
+        """
+        if profile_id is None:
+            return self._graph_cache.invalidate_all()
+        return self._graph_cache.invalidate(profile_id)
+
     async def execute(
         self,
         question: str,
