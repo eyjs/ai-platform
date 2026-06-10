@@ -15,7 +15,12 @@ import numpy as np
 from pgvector.asyncpg import register_vector
 
 from src.domain.models import SECURITY_HIERARCHY
+from src.infrastructure.db.tenant_context import current_tenant
 from src.infrastructure.providers.vector_store_base import AbstractVectorStore
+
+# tenant_id 미지정 시 최종 폴백 (config.default_tenant_id 및 마이그레이션 019 백필값과 일치).
+# 4d(NOT NULL 잠금) 이후 NULL 삽입은 DB가 거부하므로 저장 계층에서 항상 코일레싱한다.
+_DEFAULT_TENANT = "default"
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +90,7 @@ class VectorStore(AbstractVectorStore):
         """문서 레코드 생성, ID 반환."""
         if not self._pool:
             raise RuntimeError("VectorStore not connected")
+        tenant_id = tenant_id or current_tenant.get() or _DEFAULT_TENANT
         doc_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
             if file_hash:
@@ -157,6 +163,7 @@ class VectorStore(AbstractVectorStore):
         """청크 + 임베딩 + tsvector 배치 삽입."""
         if not self._pool:
             raise RuntimeError("VectorStore not connected")
+        tenant_id = tenant_id or current_tenant.get() or _DEFAULT_TENANT
 
         query = """
             INSERT INTO document_chunks

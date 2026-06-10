@@ -10,7 +10,12 @@ from typing import List, Optional
 
 import asyncpg
 
+from src.infrastructure.db.tenant_context import current_tenant
+
 logger = logging.getLogger(__name__)
+
+# tenant_id 미지정 시 최종 폴백 (config.default_tenant_id 및 마이그레이션 019 백필값과 일치)
+_DEFAULT_TENANT = "default"
 
 
 class SessionMemory:
@@ -28,6 +33,7 @@ class SessionMemory:
         ttl_seconds: Optional[int] = None,
         tenant_id: str | None = None,
     ) -> None:
+        tenant_id = tenant_id or current_tenant.get() or _DEFAULT_TENANT
         ttl = ttl_seconds or self._default_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
         await self._pool.execute(
