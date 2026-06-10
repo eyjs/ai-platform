@@ -11,7 +11,13 @@ import httpx
 from src.config import ProviderMode, Settings
 from src.locale.bundle import get_locale
 
-from .base import EmbeddingProvider, LLMProvider, ParsingProvider, RerankerProvider
+from .base import (
+    EmbeddingProvider,
+    LLMProvider,
+    OrchestratorLLMConfig,
+    ParsingProvider,
+    RerankerProvider,
+)
 from .registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
@@ -174,10 +180,13 @@ class ProviderFactory:
 
         return ChatOpenAI(model=model_name or s.prod_llm_model, api_key=s.openai_api_key)
 
-    def get_orchestrator_llm(self):
-        """오케스트레이터(프로필 선택)용 LLM. provider_mode가 백엔드를 결정.
+    def get_orchestrator_llm_config(self) -> "OrchestratorLLMConfig | None":
+        """오케스트레이터(프로필 선택)용 LLM 백엔드 설정. provider_mode가 백엔드를 결정.
 
-        Returns: OrchestratorLLM 또는 None(비활성/키 없음).
+        어댑터 객체를 직접 만들지 않고 설정만 반환한다 — 생성은 bootstrap이
+        맡아 infrastructure → orchestrator 역방향 의존을 피한다.
+
+        Returns: OrchestratorLLMConfig 또는 None(비활성/키 없음).
         """
         s = self._settings
         if not s.orchestrator_enabled:
@@ -201,9 +210,7 @@ class ProviderFactory:
             logger.warning("orchestrator_disabled: %s 키 없음", provider)
             return None
 
-        from src.orchestrator.llm_adapter import OrchestratorLLM
-
-        return OrchestratorLLM(
+        return OrchestratorLLMConfig(
             provider=provider, model=model, api_key=api_key,
             timeout=s.orchestrator_timeout, server_url=server_url, ollama_host=s.ollama_host,
         )
