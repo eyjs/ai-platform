@@ -29,6 +29,31 @@ from src.workflow.engine import StepResult, WorkflowEngine
 logger = get_logger(__name__)
 
 
+def _content_to_text(content) -> str:
+    """LangChain 메시지 content 를 평문 텍스트로 평탄화한다.
+
+    `AIMessageChunk.content` 는 모델에 따라 `str` 또는 content-block
+    리스트(`list[str | dict]`, 예: `[{"type": "text", "text": "..."}]`)로
+    반환된다. 리스트가 그대로 토큰 스트림에 흘러가면
+    - 프론트엔드에서 `[object Object]` 로 렌더되고
+    - `answer += content` (str + list) 에서 TypeError 가 발생한다.
+    여기서 항상 str 로 정규화하여 두 문제를 차단한다.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text") or block.get("content") or ""
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return "" if content is None else str(content)
+
+
 def _extract_faithfulness_score(guardrail_results: dict) -> Optional[float]:
     """guardrail_results 에서 faithfulness guard 의 수치 스코어를 추출한다.
 
@@ -524,7 +549,7 @@ class GraphExecutor:
             # 마지막 AI 메시지가 최종 답변
             last_msg = result["messages"][-1]
             if hasattr(last_msg, "content"):
-                answer = last_msg.content or ""
+                answer = _content_to_text(last_msg.content)
 
         # Guardrail
         guardrail_score: Optional[float] = None
@@ -626,8 +651,10 @@ class GraphExecutor:
                 chunk = event.get("data", {}).get("chunk")
                 if chunk and hasattr(chunk, "content") and chunk.content:
                     if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
-                        yield {"type": "token", "data": chunk.content}
-                        answer += chunk.content
+                        text = _content_to_text(chunk.content)
+                        if text:
+                            yield {"type": "token", "data": text}
+                            answer += text
 
         # Guardrail
         faithfulness_score: Optional[float] = None
