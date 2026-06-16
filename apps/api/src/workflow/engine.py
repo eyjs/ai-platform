@@ -142,6 +142,13 @@ class WorkflowEngine:
             current_step_id=entry_id,
         )
 
+        # 세션 컨텍스트를 워크플로우 변수로 주입한다.
+        # 예: 사주 챗의 session_id "saju-{uuid}" → collected["saju_id"]="{uuid}"
+        #     워크플로우 action 엔드포인트에서 {{saju_id}}로 참조 가능.
+        session.collected["session_id"] = session_id
+        if session_id.startswith("saju-"):
+            session.collected["saju_id"] = session_id[len("saju-"):]
+
         logger.info(
             "workflow_start",
             layer="WORKFLOW",
@@ -468,18 +475,23 @@ class WorkflowEngine:
                     step, session, action_endpoint, action_headers,
                 )
                 if action_result.completed or not step.next:
-                    # 액션 실패 또는 다음 스텝 없음 -> 종료
+                    # 액션 실패 또는 다음 스텝 없음 -> 워크플로우 종료.
+                    # 종료 상태를 세션에 명시 저장해야 다음 메시지가 일반 대화로
+                    # 복귀한다 (미설정 시 워크플로우에 갇힘).
+                    session.completed = True
+                    await self._save_session(session_id, session)
+                    bot_message = action_result.bot_message
                     if message_parts:
-                        action_result = StepResult(
-                            bot_message="\n\n".join(message_parts) + "\n\n" + action_result.bot_message,
-                            options=action_result.options,
-                            step_id=action_result.step_id,
-                            step_type=action_result.step_type,
-                            collected=action_result.collected,
-                            completed=action_result.completed,
-                            action_result=action_result.action_result,
-                        )
-                    return action_result
+                        bot_message = "\n\n".join(message_parts) + "\n\n" + bot_message
+                    return StepResult(
+                        bot_message=bot_message,
+                        options=action_result.options,
+                        step_id=action_result.step_id,
+                        step_type=action_result.step_type,
+                        collected=action_result.collected,
+                        completed=True,
+                        action_result=action_result.action_result,
+                    )
 
                 # 액션 성공 + 다음 스텝 있음 -> 메시지 축적 후 다음 스텝으로
                 if action_result.bot_message:

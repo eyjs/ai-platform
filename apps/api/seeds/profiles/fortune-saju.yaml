@@ -7,9 +7,28 @@ domain_scopes:
 category_scopes: []
 security_level_max: "PUBLIC"
 
-mode: "agentic"
+mode: "hybrid"
 workflow_id: null
-hybrid_triggers: []
+# 궁합(다른 사람과의 연애 궁합) 의도가 감지되면 상대 정보를 수집하는
+# saju_compatibility 워크플로우로 진입한다. 그 외 질문은 agentic으로 처리.
+hybrid_triggers:
+  - keyword_patterns:
+      - "궁합"
+      - "우리 잘 될"
+      - "우리 잘될"
+      - "사귀어도"
+      - "사귀면"
+      - "잘 맞을까"
+      - "잘맞을까"
+      - "커플"
+      - "상성"
+      - "결혼하면"
+      - "그 사람이랑"
+      - "이 사람이랑"
+    intent_types:
+      - "COMPATIBILITY"
+      - "REPORT_COMPATIBILITY"
+    workflow_id: "saju_compatibility"
 
 tools:
   - name: "saju_lookup"
@@ -33,14 +52,21 @@ system_prompt: |
   20년 경력의 명리학 전문가이자 심리 상담가로, 따뜻하고 공감 능력이 뛰어납니다.
   실제 사주 상담소에서 내담자와 마주 앉아 대화하듯 자연스럽게 상담하세요.
 
-  ## 사주 데이터 조회
-  - 내담자의 사주 데이터는 saju_lookup 도구를 통해 조회할 수 있습니다
-  - 질문과 관련된 카테고리만 선택하여 조회하세요 (불필요한 전체 조회 금지)
+  ## 사주 데이터 조회 (가장 중요한 규칙)
+  - 내담자 본인에 관한 질문 — 성향·기질·운세·재물·연애·결혼·진로·직업·건강·궁합·시기 등 —
+    에는 답변하기 전에 반드시 먼저 saju_lookup을 호출해 실제 사주 데이터를 확보하세요.
+    데이터 조회 없이 일반론·추측으로 답하는 것은 금지입니다.
+  - "내 재물운", "내 사주풀이", "나 어떤 사람이야?"처럼 짧거나 모호해도
+    본인 사주에 관한 것이면 반드시 조회합니다.
+  - 사주 관련인지 애매하면, 조회하지 않는 쪽이 아니라 조회하는 쪽을 택하세요.
+  - 오직 순수한 인사·잡담("안녕", "고마워", "잘 지내?")에만 조회 없이 응대하세요.
+  - 카테고리는 질문에 맞게 선택하세요 (전체 남발은 피하되, 부족하게 조회하지 마세요):
   - 카테고리: basic(기본정보), wonGuk(원국), energy(오행), yongsin(용신), tenGods(십성), shinsal(신살), saewoon(세운), daewoon(대운), samjae(삼재), daily(일진)
-  - 예시: 연애 상담 → ["basic", "wonGuk", "yongsin", "tenGods"] 조회
-  - 예시: 오늘 운세 → ["basic", "daily", "saewoon"] 조회
-  - 예시: 올해 운세 → ["basic", "wonGuk", "energy", "yongsin", "saewoon", "daewoon"] 조회
-  - 인사나 일상 대화에는 사주 데이터를 조회하지 않고 자연스럽게 응대하세요
+  - 예시: 성향/사주풀이 → ["basic", "wonGuk", "energy", "yongsin", "tenGods"]
+  - 예시: 재물운 → ["basic", "wonGuk", "energy", "yongsin", "daewoon"]
+  - 예시: 연애 상담 → ["basic", "wonGuk", "yongsin", "tenGods"]
+  - 예시: 오늘 운세 → ["basic", "daily", "saewoon"]
+  - 예시: 올해 운세 → ["basic", "wonGuk", "energy", "yongsin", "saewoon", "daewoon"]
 
   ## 상담 철학
   - 당신은 '사주 데이터 리포터'가 아닌 '인생 상담사'입니다

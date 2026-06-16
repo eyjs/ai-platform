@@ -1,0 +1,91 @@
+# 연애 궁합 분석 워크플로우
+# 사용자가 "○○랑 궁합 봐줘" 등 궁합 의도를 보이면 진입하여
+# 상대방 정보를 단계적으로 수집한 뒤 saju-backend 궁합 분석을 시작하고
+# 결과 페이지 링크를 안내한다.
+id: "saju_compatibility"
+name: "연애 궁합 분석"
+escape_policy: "allow"
+
+steps:
+  - id: "intro"
+    type: "message"
+    prompt: "두 분의 궁합을 제대로 보려면 상대방 정보가 조금 필요해요. 금방 끝나니 함께 채워볼까요? 🔮"
+    next: "ask_partner_name"
+
+  - id: "ask_partner_name"
+    type: "input"
+    prompt: "상대방을 어떻게 부르면 될까요? (이름 또는 애칭)"
+    save_as: "partner_name"
+    next: "ask_partner_birth"
+
+  - id: "ask_partner_birth"
+    type: "input"
+    prompt: "{{partner_name}}님의 생년월일을 알려주세요. (예: 1998-08-15)"
+    save_as: "partner_birth_date"
+    validation: "date"
+    next: "ask_partner_time"
+
+  - id: "ask_partner_time"
+    type: "input"
+    prompt: "태어난 시각도 알려주세요. 24시간제예요. (예: 18:30 / 모르면 12:00이라고 적어주세요)"
+    save_as: "partner_birth_time"
+    next: "ask_partner_gender"
+
+  - id: "ask_partner_gender"
+    type: "select"
+    prompt: "{{partner_name}}님의 성별을 골라주세요."
+    save_as: "partner_gender_label"
+    options: ["남성", "여성"]
+    branches:
+      "남성": "run_compat_male"
+      "여성": "run_compat_female"
+
+  - id: "run_compat_male"
+    type: "action"
+    prompt: "{{partner_name}}님과의 궁합을 분석하고 있어요..."
+    save_as: "compat_job"
+    endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
+    http_method: "POST"
+    headers_template:
+      Content-Type: "application/json"
+    payload_template:
+      name: "{{partner_name}}"
+      birthDate: "{{partner_birth_date}}T{{partner_birth_time}}:00"
+      gender: "male"
+      lat: 37.5665
+      lon: 126.978
+      target: "KR"
+    timeout_seconds: 30
+    on_success_message: |-
+      {{partner_name}}님과의 궁합 분석을 시작했어요! 🔮
+
+      종합 점수와 두 분의 관계 흐름, 자세한 풀이는 잠시 후 아래에서 확인하실 수 있어요:
+      https://joonbi.co.kr/result/{{saju_id}}/compatibility-paper
+
+      분석이 완성되기까지 조금 시간이 걸려요. 그동안 다른 궁금한 점이 있으면 편하게 물어봐 주세요. 😊
+    on_error_message: "죄송해요, 궁합 분석을 시작하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요."
+
+  - id: "run_compat_female"
+    type: "action"
+    prompt: "{{partner_name}}님과의 궁합을 분석하고 있어요..."
+    save_as: "compat_job"
+    endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
+    http_method: "POST"
+    headers_template:
+      Content-Type: "application/json"
+    payload_template:
+      name: "{{partner_name}}"
+      birthDate: "{{partner_birth_date}}T{{partner_birth_time}}:00"
+      gender: "female"
+      lat: 37.5665
+      lon: 126.978
+      target: "KR"
+    timeout_seconds: 30
+    on_success_message: |-
+      {{partner_name}}님과의 궁합 분석을 시작했어요! 🔮
+
+      종합 점수와 두 분의 관계 흐름, 자세한 풀이는 잠시 후 아래에서 확인하실 수 있어요:
+      https://joonbi.co.kr/result/{{saju_id}}/compatibility-paper
+
+      분석이 완성되기까지 조금 시간이 걸려요. 그동안 다른 궁금한 점이 있으면 편하게 물어봐 주세요. 😊
+    on_error_message: "죄송해요, 궁합 분석을 시작하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요."
