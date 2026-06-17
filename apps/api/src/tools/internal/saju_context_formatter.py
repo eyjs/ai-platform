@@ -6,6 +6,8 @@ saju_report_paper / saju_report_compatibility 에서 공유한다.
 
 from __future__ import annotations
 
+import json
+
 from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +23,18 @@ def format_single_person_context(data: dict, label: str = "사용자") -> str:
     Returns:
         텍스트 형태의 사주 컨텍스트 문자열
     """
+    # 방어 가드: 호출부(특히 agentic LLM 툴 호출)가 dict 아닌 값(JSON 문자열 등)을
+    # 넘기는 경우 'str' object has no attribute 'get' 크래시 → graceful 처리.
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (ValueError, TypeError):
+            logger.warning("saju_context_non_dict", label=label, kind="str")
+            return f"[{label}] 사주 데이터 형식이 올바르지 않습니다."
+    if not isinstance(data, dict):
+        logger.warning("saju_context_non_dict", label=label, kind=type(data).__name__)
+        return f"[{label}] 사주 데이터가 없습니다."
+
     try:
         basic = data.get("basic", {})
         pillars = basic.get("fourPillars", {})
