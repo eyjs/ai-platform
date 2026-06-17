@@ -1,39 +1,50 @@
-# 연애 궁합 분석 워크플로우
+# 연애 궁합 분석 워크플로우 (묘묘 캐릭터)
 # 사용자가 "○○랑 궁합 봐줘" 등 궁합 의도를 보이면 진입하여
-# 상대방 정보를 단계적으로 수집한 뒤 saju-backend 궁합 분석을 시작하고
-# 결과 페이지 링크를 안내한다.
+# 상대방 정보를 단계적으로 수집한 뒤 saju-backend 궁합 분석을 실행하고,
+# 묘묘가 실제 궁합 결과를 근거로 콕 집어 통찰을 준 다음(insight) 리포트로 잇는다.
+# (이전: 링크만 주고 결론 없이 완료 → 이후 agentic이 결과를 못 봐 재질문하는 amnesia 발생)
 id: "saju_compatibility"
 name: "연애 궁합 분석"
 escape_policy: "allow"
 
+# 캐릭터 페르소나(묘묘) — saju-discovery와 동일 보이스로 통일. dynamic 스텝 system으로 공유.
+_persona: &persona |
+  너는 '묘묘(猫猫)'다. 천 년 묵은 길고양이 신령으로, 사람의 운명을 냄새로 읽는다.
+  사주를 '분석'하지 않고 '느낀다'. 너는 AI가 아니라 신통한 고양이다.
+  [성격] 츤데레. 평소엔 무심·시크하게 팩트를 던지지만 결정적 순간엔 다정해진다.
+  [말투] 반말. 짧고 무심한 단답 + 갑자기 정곡을 찌르는 통찰의 낙차로 말한다.
+  "~냥" 같은 말끝 절대 금지. 2인칭("너")으로 개인화. 일반론 절대 금지.
+  한자·중국어·영어·전문용어·숫자를 그대로 읊지 마라(점수도 느낌으로 푼다).
+  이모지는 🐾🌙😼 중 메시지당 1~2개만. 협박·공포 금지. "분석했다/데이터/AI" 티 금지.
+
 steps:
   - id: "intro"
     type: "message"
-    prompt: "두 분의 궁합을 제대로 보려면 상대방 정보가 조금 필요해요. 금방 끝나니 함께 채워볼까요? 🔮"
+    prompt: "흐음… 그 사람이랑 어떻게 엮일지 궁금한 거지. 상대 냄새부터 좀 맡아야겠다. 🐾"
     next: "ask_partner_name"
 
   - id: "ask_partner_name"
     type: "input"
-    prompt: "상대방을 어떻게 부르면 될까요? (이름 또는 애칭)"
+    prompt: "그 사람, 뭐라고 부를까? (이름이나 애칭)"
     save_as: "partner_name"
     next: "ask_partner_birth"
 
   - id: "ask_partner_birth"
     type: "input"
-    prompt: "{{partner_name}}님의 생년월일을 알려주세요. (예: 1998-08-15)"
+    prompt: "{{partner_name}}… 언제 태어났어? (예: 1998-08-15)"
     save_as: "partner_birth_date"
     validation: "date"
     next: "ask_partner_time"
 
   - id: "ask_partner_time"
     type: "input"
-    prompt: "태어난 시각도 알려주세요. 24시간제예요. (예: 18:30 / 모르면 12:00이라고 적어주세요)"
+    prompt: "태어난 시각은? 24시간제로. 모르면 그냥 12:00이라고 적어. (예: 18:30)"
     save_as: "partner_birth_time"
     next: "ask_partner_gender"
 
   - id: "ask_partner_gender"
     type: "select"
-    prompt: "{{partner_name}}님의 성별을 골라주세요."
+    prompt: "{{partner_name}}, 남자야 여자야?"
     save_as: "partner_gender_label"
     options: ["남성", "여성"]
     branches:
@@ -42,7 +53,7 @@ steps:
 
   - id: "run_compat_male"
     type: "action"
-    prompt: "{{partner_name}}님과의 궁합을 분석하고 있어요..."
+    prompt: "흐음… 둘 사이 냄새를 맡아볼게. 🐾"
     save_as: "compat_job"
     endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
     http_method: "POST"
@@ -56,18 +67,13 @@ steps:
       lon: 126.978
       target: "KR"
     timeout_seconds: 30
-    on_success_message: |-
-      {{partner_name}}님과의 궁합 분석을 시작했어요! 🔮
-
-      종합 점수와 두 분의 관계 흐름, 자세한 풀이는 잠시 후 아래에서 확인하실 수 있어요:
-      https://joonbi.co.kr/result/{{saju_id}}/compatibility-paper
-
-      분석이 완성되기까지 조금 시간이 걸려요. 그동안 다른 궁금한 점이 있으면 편하게 물어봐 주세요. 😊
-    on_error_message: "죄송해요, 궁합 분석을 시작하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요."
+    on_success_message: "흐음… 둘 사이 냄새, 다 맡았다. 🐾"
+    on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
+    next: "insight_compat"
 
   - id: "run_compat_female"
     type: "action"
-    prompt: "{{partner_name}}님과의 궁합을 분석하고 있어요..."
+    prompt: "흐음… 둘 사이 냄새를 맡아볼게. 🐾"
     save_as: "compat_job"
     endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
     http_method: "POST"
@@ -81,11 +87,16 @@ steps:
       lon: 126.978
       target: "KR"
     timeout_seconds: 30
-    on_success_message: |-
-      {{partner_name}}님과의 궁합 분석을 시작했어요! 🔮
+    on_success_message: "흐음… 둘 사이 냄새, 다 맡았다. 🐾"
+    on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
+    next: "insight_compat"
 
-      종합 점수와 두 분의 관계 흐름, 자세한 풀이는 잠시 후 아래에서 확인하실 수 있어요:
-      https://joonbi.co.kr/result/{{saju_id}}/compatibility-paper
+  - id: "insight_compat"
+    type: "dynamic"
+    system: *persona
+    prompt: "너(내담자)의 사주와 {{partner_name}}의 사주를 실제로 비교한 결과가 주어진다. 두 사람 기질이 어디서 맞고 어디서 부딪히는지, 너의 사주 근거와 궁합 결과를 엮어 콕 집어 말해라. 점수를 그대로 읊지 말고 느낌으로. 마지막엔 '제대로 보려면 깊이 들어가야 한다'며 리포트로 가는 호기심을 남겨라."
+    next: "reveal_compat"
 
-      분석이 완성되기까지 조금 시간이 걸려요. 그동안 다른 궁금한 점이 있으면 편하게 물어봐 주세요. 😊
-    on_error_message: "죄송해요, 궁합 분석을 시작하는 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요."
+  - id: "reveal_compat"
+    type: "message"
+    prompt: "👉 둘 사이 전체 풀이는 여기 담아뒀어. 언제가 고비고 언제가 기회인지까지.\nhttps://joonbi.co.kr/result/{{saju_id}}/compatibility-paper\n\n…너니까 끝까지 봐준 거다. 🌙"
