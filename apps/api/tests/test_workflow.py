@@ -187,6 +187,37 @@ class TestBranching:
         result = await engine.advance("s1", "X 선택할게요")
         assert "X 경로" in result.bot_message
 
+    async def test_select_unmatched_freetext_reprompts_not_completed(self):
+        """회귀: select 스텝에 분기와 안 맞는 자유텍스트가 오면 워크플로우를 종료하지 않고
+        같은 스텝을 다시 안내한다. (이전: '워크플로우가 완료되었습니다'로 조기종료되던 버그)"""
+        engine = WorkflowEngine(_build_store(_branching_workflow()))
+        await engine.start("test_branch", "s1")
+        result = await engine.advance("s1", "둘 다 궁금해서 왔어")
+        assert not result.completed
+        assert not result.escaped
+        assert result.step_id == "start"  # 같은 스텝에 머무름
+        assert result.options == ["X", "Y"]  # 선택지 재노출
+        assert "choice" not in result.collected  # 미매칭 입력은 저장되지 않음(롤백)
+
+    async def test_select_unmatched_escapes_after_max_retries(self):
+        """회귀: 미매칭이 max_retries(3)만큼 누적되면 그제서야 종료(무한 재안내 방지)."""
+        engine = WorkflowEngine(_build_store(_branching_workflow()))
+        await engine.start("test_branch", "s1")
+        r1 = await engine.advance("s1", "아무거나1")
+        r2 = await engine.advance("s1", "아무거나2")
+        assert not r1.completed and not r2.completed  # 2회까지는 재안내
+        r3 = await engine.advance("s1", "아무거나3")  # 3회째 = max_retries 도달
+        assert r3.completed and r3.escaped
+
+    async def test_select_match_after_unmatched_recovers(self):
+        """미매칭 재안내 후 올바른 선택을 하면 정상 진행한다(retry 카운터 리셋 확인)."""
+        engine = WorkflowEngine(_build_store(_branching_workflow()))
+        await engine.start("test_branch", "s1")
+        await engine.advance("s1", "엉뚱한 입력")  # 1회 미매칭 → 재안내
+        result = await engine.advance("s1", "X")  # 올바른 선택
+        assert "X 경로" in result.bot_message
+        assert result.completed
+
 
 # --- 입력 검증 ---
 

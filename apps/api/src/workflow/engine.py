@@ -304,15 +304,52 @@ class WorkflowEngine:
                 collected=dict(session.collected),
             )
 
-        # 검증 통과 -> retry 카운터 리셋
-        session.retry_count = 0
-
         # 데이터 수집
         if current_step.save_as:
             session.collected[current_step.save_as] = user_input
 
         # 다음 스텝 결정
         next_step_id = _resolve_next(current_step, user_input)
+
+        # select/branch 스텝에서 입력이 어떤 분기에도 안 맞고 fallback next도 없으면,
+        # 워크플로우를 종료하지 말고(자유텍스트 조기종료 버그) 같은 스텝을 다시 안내한다.
+        # 가이드형 funnel에서 버튼 대신 자유텍스트를 친 경우의 이탈 방어.
+        # (retry_count 리셋은 정상 진행 확정 뒤로 미뤘으므로 미매칭이 누적된다)
+        if not next_step_id and current_step.branches:
+            # 방금 save_as에 잘못 담긴 미매칭 입력 롤백
+            if current_step.save_as and current_step.save_as in session.collected:
+                del session.collected[current_step.save_as]
+            session.retry_count += 1
+            if session.retry_count >= definition.max_retries:
+                session.completed = True
+                logger.info(
+                    "workflow_select_no_match_escape",
+                    layer="WORKFLOW", session_id=session_id,
+                    step_id=current_step.id, retries=session.retry_count,
+                )
+                return StepResult(
+                    bot_message="여러 번 이해하지 못했어요. 잠시 후 다시 시도해 주세요.",
+                    completed=True,
+                    escaped=True,
+                    collected=dict(session.collected),
+                    step_id=current_step.id,
+                    step_type=current_step.type,
+                )
+            logger.info(
+                "workflow_select_no_match_reprompt",
+                layer="WORKFLOW", session_id=session_id,
+                step_id=current_step.id, retries=session.retry_count,
+                user_input=user_input[:50],
+            )
+            # current_step_id 변경 없이 같은 스텝을 다시 안내(스텝 고유 프롬프트+옵션 재노출)
+            return await self._process_current_step(
+                definition, session, session_id,
+                action_endpoint=action_endpoint,
+                action_headers=action_headers,
+            )
+
+        # 정상 진행 확정 -> retry 카운터 리셋
+        session.retry_count = 0
 
         logger.info(
             "workflow_advance",
@@ -323,7 +360,7 @@ class WorkflowEngine:
             user_input=user_input[:50],
         )
 
-        # 종료
+        # 종료 (정상 종착: next도 branches도 없는 말단 스텝)
         if not next_step_id:
             session.completed = True
             return StepResult(
