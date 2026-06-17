@@ -36,6 +36,8 @@ hybrid_triggers:
       - "COMPATIBILITY"
       - "REPORT_COMPATIBILITY"
     workflow_id: "saju_compatibility"
+    # LLM 의미 진입용 설명(키워드 없어도 의도로 진입): "헤어질까", "결혼해도 될까" 등
+    description: "상대(연인·썸·배우자)와의 연애·결혼 궁합. 둘 사이가 잘 맞는지, 헤어질지/결혼할지 등 두 사람 관계 고민."
   # 디스커버리 funnel 진입 — 선택지 가이드로 메타데이터를 모아 초개인화 리포트로 연결.
   # 사주 관련 의도(SAJU_ANALYSIS)면 진입하도록 intent로 견고화한다. 키워드는 리터럴
   # 부분문자열 매칭(mode_selector)이라 "사주 좀 봐줘"의 '좀'에 깨지므로 변형형을 보강.
@@ -55,6 +57,8 @@ hybrid_triggers:
     intent_types:
       - "SAJU_ANALYSIS"
     workflow_id: "saju_discovery"
+    # LLM 의미 진입용 설명: 본인 사주/운세/고민 전반(연애 외 돈·일·건강·관계·종합)을 풀고 싶을 때.
+    description: "본인 사주·운세 전반 상담. 연애·돈·일·건강·관계 등 내 고민을 풀거나 사주를 보고 싶을 때(상대와의 궁합이 아닌 나 중심)."
 
 tools:
   - name: "saju_lookup"

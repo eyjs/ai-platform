@@ -206,6 +206,7 @@ class ProfileStore:
                 keyword_patterns=t["keyword_patterns"],
                 intent_types=t["intent_types"],
                 workflow_id=t["workflow_id"],
+                description=t.get("description", ""),
             )
             for t in data.get("hybrid_triggers", [])
         ]
@@ -251,7 +252,7 @@ class ProfileStore:
             "mode": profile.mode.value,
             "workflow_id": profile.workflow_id,
             "hybrid_triggers": [
-                {"keyword_patterns": t.keyword_patterns, "intent_types": t.intent_types, "workflow_id": t.workflow_id}
+                {"keyword_patterns": t.keyword_patterns, "intent_types": t.intent_types, "workflow_id": t.workflow_id, "description": t.description}
                 for t in profile.hybrid_triggers
             ],
             "tools": [{"name": t.name, "config": t.config} for t in profile.tools],

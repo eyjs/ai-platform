@@ -38,6 +38,9 @@ class HybridTrigger:
     keyword_patterns: list[str]
     intent_types: list[str]
     workflow_id: str
+    # LLM 의미 진입 분류용 설명. 키워드/intent fast-path가 빗나간 자유입력을
+    # 이 설명 기준으로 의미 매칭(SemanticClassifier). 비면 workflow_id로 대체.
+    description: str = ""
 
 
 @dataclass(frozen=True)

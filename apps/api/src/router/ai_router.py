@@ -21,6 +21,7 @@ from src.router.context_resolver import ChainResolver, ResolutionResult
 from src.router.execution_plan import ExecutionPlan, QuestionType
 from src.router.intent_classifier import IntentClassifier
 from src.router.mode_selector import ModeSelector
+from src.router.semantic_classifier import SemanticClassifier
 from src.router.strategy_builder import StrategyBuilder
 from src.tools.base import ScopedTool, Tool
 
@@ -46,7 +47,8 @@ class AIRouter:
     def __init__(self, router_llm: LLMProvider):
         self._resolver = ChainResolver(router_llm)
         self._classifier = IntentClassifier(router_llm)
-        self._mode_selector = ModeSelector()
+        # 워크플로우 진입(L2)도 공통 의미 분류기로 — 경량 router_llm 재사용.
+        self._mode_selector = ModeSelector(SemanticClassifier(router_llm))
         self._strategy_builder = StrategyBuilder()
 
     async def route(
@@ -95,8 +97,9 @@ class AIRouter:
 
         # Layer 2: Mode Selector
         t2 = time.time()
-        mode, workflow_id = self._mode_selector.select(
+        mode, workflow_id = await self._mode_selector.select(
             resolved_query, profile, custom_intent,
+            history=history, question_type=question_type,
         )
         l2_ms = (time.time() - t2) * 1000
         logger.info(
