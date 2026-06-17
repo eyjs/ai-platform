@@ -54,6 +54,7 @@ class ProfileCreateRequest(BaseModel):
     max_tool_calls: int = Field(5, ge=1, le=20)
     agent_timeout_seconds: int = Field(30, ge=5, le=300)
     intent_hints: list[dict] = []
+    context_adapter: str | None = None
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -77,6 +78,7 @@ class ProfileUpdateRequest(BaseModel):
     max_tool_calls: int | None = Field(None, ge=1, le=20)
     agent_timeout_seconds: int | None = Field(None, ge=5, le=300)
     intent_hints: list[dict] | None = None
+    context_adapter: str | None = None
 
 
 class WorkflowStepModel(BaseModel):
@@ -624,6 +626,7 @@ def _profile_to_response(profile: Any) -> dict:
             {"name": h.name, "patterns": h.patterns, "description": h.description}
             for h in profile.intent_hints
         ],
+        "context_adapter": profile.context_adapter,
     }
 
 

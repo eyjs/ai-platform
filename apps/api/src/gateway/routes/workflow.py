@@ -42,6 +42,8 @@ async def workflow_start(req: WorkflowStartRequest, request: Request):
     )
 
     try:
+        # 이 직접 라우트는 Profile/ExecutionPlan을 거치지 않으므로 context_adapter를
+        # 전달하지 않는다(grounding 없이 진행). 챗 경로(graph_executor)가 실사용 경로다.
         result = await state.workflow_engine.start(req.workflow_id, session_id)
     except Exception as e:
         logger.error("workflow_start_error", error=str(e), exc_info=True)

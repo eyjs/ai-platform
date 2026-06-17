@@ -45,6 +45,7 @@ from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
 from src.services.null_kms_client import NullKmsClient
 from src.workflow.action_client import ActionClient
+from src.workflow.context_adapter import SajuContextAdapter
 from src.workflow.engine import WorkflowEngine
 from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.store import WorkflowStore
@@ -299,6 +300,10 @@ async def create_app_state(settings: Settings) -> AppState:
         session_store=workflow_session_store,
         action_client=action_client,
         llm=main_llm,  # dynamic 스텝(캐릭터 통찰)용
+        context_adapters={
+            # 서비스별 dynamic 스텝 enrichment 플러그인. 프로파일이 이름으로 선택.
+            "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
+        },
     )
     logger.info("workflows_loaded", count=workflow_store.count)
 

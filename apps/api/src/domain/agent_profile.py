@@ -103,6 +103,7 @@ class AgentProfile:
     # 워크플로우 액션 기본값
     workflow_action_endpoint: str | None = None  # action step endpoint 기본값
     workflow_action_headers: dict = field(default_factory=dict)  # action step headers 기본값
+    context_adapter: str | None = None  # dynamic 스텝 enrichment 어댑터 이름 (예: "saju")
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)

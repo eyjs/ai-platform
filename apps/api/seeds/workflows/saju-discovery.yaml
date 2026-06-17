@@ -112,6 +112,7 @@ steps:
       lon: 126.978
       target: "KR"
     timeout_seconds: 30
+    on_success_message: "흐음… 둘 사이 냄새, 다 맡았다. 🐾"
     on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
     next: "insight_compat"
 
@@ -131,6 +132,7 @@ steps:
       lon: 126.978
       target: "KR"
     timeout_seconds: 30
+    on_success_message: "흐음… 둘 사이 냄새, 다 맡았다. 🐾"
     on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
     next: "insight_compat"
 

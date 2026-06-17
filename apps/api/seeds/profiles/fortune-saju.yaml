@@ -7,6 +7,10 @@ domain_scopes:
 category_scopes: []
 security_level_max: "PUBLIC"
 
+# dynamic 워크플로우 스텝(묘묘 캐릭터 통찰)을 실제 사주/궁합 결과에 grounding하는
+# ContextAdapter. 엔진은 이 이름으로 SajuContextAdapter를 선택해 enrich()를 호출한다.
+context_adapter: "saju"
+
 mode: "hybrid"
 workflow_id: null
 # 궁합(다른 사람과의 연애 궁합) 의도가 감지되면 상대 정보를 수집하는

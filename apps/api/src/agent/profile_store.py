@@ -237,6 +237,7 @@ class ProfileStore:
             intent_hints=intent_hints,
             workflow_action_endpoint=data.get("workflow_action_endpoint"),
             workflow_action_headers=data.get("workflow_action_headers", {}),
+            context_adapter=data.get("context_adapter"),
         )
 
     @staticmethod
@@ -272,6 +273,7 @@ class ProfileStore:
             ],
             "workflow_action_endpoint": profile.workflow_action_endpoint,
             "workflow_action_headers": profile.workflow_action_headers,
+            "context_adapter": profile.context_adapter,
         }
 
     def start_watcher(self) -> None:

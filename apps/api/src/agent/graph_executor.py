@@ -271,7 +271,9 @@ class GraphExecutor:
                 workflow_id=workflow_id,
                 session_id=session_id,
             )
-            return await engine.start(workflow_id, session_id)
+            return await engine.start(
+                workflow_id, session_id, context_adapter=plan.context_adapter,
+            )
 
         # 기존 세션 진행
         return await engine.advance(session_id, question)

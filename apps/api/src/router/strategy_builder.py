@@ -128,6 +128,7 @@ class StrategyBuilder:
             strategy=strategy,
             workflow_id=workflow_id,
             workflow_step=workflow_step,
+            context_adapter=profile.context_adapter,
             conversation_context=conversation_context,
             response_policy=profile.response_policy,
             max_tool_calls=profile.max_tool_calls,
