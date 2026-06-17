@@ -1,0 +1,72 @@
+# 사주 디스커버리 워크플로우 (가이드형 funnel)
+# 자유채팅 이탈을 막기 위해 선택지(버튼) 중심으로 시작~리빌까지 정해진 길을 안내한다.
+# 각 단계 답변은 collected에 실시간 누적되어 최종 초개인화 리포트의 metadata.discoveryProfile로 쓰인다.
+# (증분1: 가이드 흐름 + collected 누적 검증. LLM '헉 맞아' 통찰(dynamic step)과
+#  collected→리포트 주입은 후속 증분.)
+id: "saju_discovery"
+name: "사주 디스커버리"
+escape_policy: "allow"
+
+steps:
+  - id: "intro"
+    type: "message"
+    prompt: "반가워요. 사주를 펼쳐두고 당신 이야기를 들어볼게요. 🔮\n몇 가지만 골라주시면, 당신만을 위한 풀이를 엮어드릴게요."
+    next: "ask_topic"
+
+  - id: "ask_topic"
+    type: "select"
+    prompt: "요즘 가장 마음이 가는 주제는 무엇인가요?"
+    save_as: "topic"
+    options: ["연애·인연", "돈·재물", "일·진로", "건강", "관계·가족"]
+    branches:
+      "연애·인연": "sit_love"
+      "돈·재물": "sit_money"
+      "일·진로": "sit_career"
+      "건강": "sit_health"
+      "관계·가족": "sit_relation"
+
+  - id: "sit_love"
+    type: "select"
+    prompt: "연애 쪽은 지금 어떤 상황에 가까워요?"
+    save_as: "situation"
+    options: ["썸·짝사랑", "연애 권태", "이별·재회 고민", "결혼 고민", "솔로·인연 기다림"]
+    next: "ask_desire"
+
+  - id: "sit_money"
+    type: "select"
+    prompt: "돈·재물은 지금 어떤 고민에 가까워요?"
+    save_as: "situation"
+    options: ["수입·이직", "투자·결정", "지출·빚", "사업 고민", "큰 흐름이 궁금"]
+    next: "ask_desire"
+
+  - id: "sit_career"
+    type: "select"
+    prompt: "일·진로는 지금 어떤 상황이에요?"
+    save_as: "situation"
+    options: ["이직 고민", "현 직장 권태", "진로 전환", "성과·인정", "방향이 막막"]
+    next: "ask_desire"
+
+  - id: "sit_health"
+    type: "select"
+    prompt: "건강은 어떤 부분이 신경 쓰여요?"
+    save_as: "situation"
+    options: ["체력·피로", "마음·스트레스", "수면", "특정 부위", "전반 관리"]
+    next: "ask_desire"
+
+  - id: "sit_relation"
+    type: "select"
+    prompt: "관계·가족은 지금 어떤 상황이에요?"
+    save_as: "situation"
+    options: ["직장 인간관계", "가족 갈등", "친구·외로움", "자녀", "전반이 답답"]
+    next: "ask_desire"
+
+  - id: "ask_desire"
+    type: "select"
+    prompt: "지금 가장 듣고 싶은 건 어떤 거예요?"
+    save_as: "desire"
+    options: ["확신을 얻고 싶어요", "위로받고 싶어요", "방향을 알고 싶어요", "그냥 속이 답답해요"]
+    next: "reveal"
+
+  - id: "reveal"
+    type: "message"
+    prompt: "이야기 잘 들었어요. {{topic}} — {{situation}}, 그리고 {{desire}}는 마음.\n\n당신의 사주 흐름과 지금 이 마음을 하나로 엮어, 올해 언제가 고비이고 언제가 기회인지까지 담은 **당신만의 리포트**를 준비했어요.\n\n👉 전체 풀이 보기: https://joonbi.co.kr/result/{{saju_id}}/report/paper\n\n더 궁금한 게 있으면 편하게 이야기해 주세요."

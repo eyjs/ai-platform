@@ -29,6 +29,19 @@ hybrid_triggers:
       - "COMPATIBILITY"
       - "REPORT_COMPATIBILITY"
     workflow_id: "saju_compatibility"
+  # 디스커버리 funnel 진입 — 선택지 가이드로 메타데이터를 모아 초개인화 리포트로 연결.
+  # 일반 대화를 가로채지 않도록 명시적 funnel-start 표현으로 한정.
+  - keyword_patterns:
+      - "사주 봐줘"
+      - "내 사주 봐"
+      - "내 운세 봐"
+      - "운세 봐줘"
+      - "사주 분석 시작"
+      - "나 좀 봐줘"
+      - "상담 시작"
+      - "디스커버리"
+    intent_types: []
+    workflow_id: "saju_discovery"
 
 tools:
   - name: "saju_lookup"
