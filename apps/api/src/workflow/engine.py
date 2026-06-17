@@ -53,6 +53,7 @@ class StepResult:
     completed: bool = False  # 워크플로우 종료 여부
     escaped: bool = False  # 사용자가 이탈(취소)했는지
     action_result: dict = field(default_factory=dict)  # action 타입 결과
+    report: str = ""  # 추천 리포트 제품 CTA (예: "paper"|"compatibility") — 프론트 버튼
 
 
 # 입력 검증 패턴
@@ -511,12 +512,17 @@ class WorkflowEngine:
         무한 루프 방지를 위해 _MAX_MESSAGE_CHAIN 깊이 제한을 적용한다.
         """
         message_parts: list[str] = []
+        # 메시지 체인(dynamic→message 등)에서 만난 report 힌트를 누적해 최종 결과에 싣는다.
+        report_hint = ""
 
         for _ in range(_MAX_MESSAGE_CHAIN):
             step = definition.get_step(session.current_step_id)
             if not step:
                 session.completed = True
                 return StepResult(bot_message="스텝 오류", completed=True)
+
+            if step.report:
+                report_hint = step.report
 
             rendered = render_template(step.prompt, session.collected)
 
@@ -533,6 +539,7 @@ class WorkflowEngine:
                         collected=dict(session.collected),
                         step_id=step.id,
                         step_type=step.type,
+                        report=report_hint,
                     )
                 session.current_step_id = step.next
                 continue
@@ -559,6 +566,7 @@ class WorkflowEngine:
                         collected=action_result.collected,
                         completed=True,
                         action_result=action_result.action_result,
+                        report=report_hint,
                     )
 
                 # 액션 성공 + 다음 스텝 있음 -> 메시지 축적 후 다음 스텝으로
@@ -581,6 +589,7 @@ class WorkflowEngine:
                     step_id=step.id,
                     step_type=step.type,
                     collected=dict(session.collected),
+                    report=report_hint,
                 )
 
             # message 타입: 축적하고 다음 스텝으로 자동 진행
@@ -593,6 +602,7 @@ class WorkflowEngine:
                     collected=dict(session.collected),
                     step_id=step.id,
                     step_type=step.type,
+                    report=report_hint,
                 )
             session.current_step_id = step.next
 

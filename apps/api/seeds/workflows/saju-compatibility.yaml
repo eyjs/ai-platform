@@ -94,9 +94,10 @@ steps:
   - id: "insight_compat"
     type: "dynamic"
     system: *persona
-    prompt: "너(내담자)의 사주와 {{partner_name}}의 사주를 실제로 비교한 결과가 주어진다. 두 사람 기질이 어디서 맞고 어디서 부딪히는지, 너의 사주 근거와 궁합 결과를 엮어 콕 집어 말해라. 점수를 그대로 읊지 말고 느낌으로. 마지막엔 '제대로 보려면 깊이 들어가야 한다'며 리포트로 가는 호기심을 남겨라."
+    prompt: "너(내담자)의 사주와 {{partner_name}}의 사주를 실제로 비교한 결과가 주어진다. 두 사람 기질이 어디서 맞고 어디서 부딪히는지, 너의 사주 근거와 궁합 결과를 엮어 콕 집어 말해라. 점수를 그대로 읊지 말고 느낌으로. 마지막엔 '너랑 얘기해보니, 이건 끝까지 제대로 봐야겠다'며 궁합 리포트를 추천하는 흐름으로 자연스럽게 이어라(광고 아닌 추천 톤)."
     next: "reveal_compat"
 
   - id: "reveal_compat"
     type: "message"
-    prompt: "👉 둘 사이 전체 풀이는 여기 담아뒀어. 언제가 고비고 언제가 기회인지까지.\nhttps://joonbi.co.kr/result/{{saju_id}}/compatibility-paper\n\n…너니까 끝까지 봐준 거다. 🌙"
+    report: "compatibility"
+    prompt: "흐음… 너랑 {{partner_name}} 사이, 묘묘가 끝까지 봐줄게. 언제가 고비고 언제가 기회인지 두루마리에 다 풀어놨어. 🌙"

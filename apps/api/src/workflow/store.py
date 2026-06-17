@@ -210,6 +210,7 @@ def _parse_step(data: dict) -> WorkflowStep:
         tool=data.get("tool"),
         tool_params=data.get("tool_params", {}),
         validation=data.get("validation", ""),
+        report=data.get("report", ""),
         # action step 전용 필드
         endpoint=data.get("endpoint", ""),
         http_method=data.get("http_method", "POST"),

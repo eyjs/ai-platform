@@ -31,6 +31,9 @@ class WorkflowStep:
     tool: str | None = None  # action용 도구명
     tool_params: dict = field(default_factory=dict)
     validation: str = ""  # 입력 검증 규칙 (예: "phone", "email", "number")
+    # 이 스텝(또는 체인)에서 추천할 리포트 제품 CTA. 프론트가 버튼으로 렌더(깔때기 전환).
+    # 값 예: "paper"(상세 리포트) | "compatibility"(궁합 리포트)
+    report: str = ""
 
     # action step 전용 필드
     endpoint: str = ""  # 외부 API URL (빈 문자열이면 Profile 기본값 사용)

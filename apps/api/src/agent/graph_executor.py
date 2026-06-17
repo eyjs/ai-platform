@@ -244,6 +244,7 @@ class GraphExecutor:
                 "collected": step_result.collected,
                 "completed": step_result.completed,
                 "escaped": step_result.escaped,
+                "report": step_result.report,
             },
         }}
 
