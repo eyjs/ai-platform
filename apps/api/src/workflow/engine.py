@@ -14,10 +14,13 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+import httpx
 
 from src.common.exceptions import GatewayError
 from src.observability.logging import get_logger
@@ -563,7 +566,8 @@ class WorkflowEngine:
         )
 
     async def _generate_dynamic(self, step, collected: dict) -> str:
-        """dynamic 스텝: LLM이 캐릭터 페르소나(step.system)로 collected 기반 통찰을 생성한다.
+        """dynamic 스텝: LLM이 캐릭터 페르소나(step.system)로 collected + 실제 사주
+        풀이 결과를 근거로 통찰을 생성한다.
 
         LLM 미주입/실패 시 step.prompt 템플릿을 정적 폴백으로 사용(워크플로우 진행 보장).
         """
@@ -571,17 +575,40 @@ class WorkflowEngine:
         if not self._llm:
             return fallback
 
+        # 실제 사주 결과를 1회 조회해 collected에 캐시(이후 dynamic 스텝에서 재사용).
+        if collected.get("saju_id") and not collected.get("_saju_summary"):
+            summary = await self._fetch_saju_summary(collected["saju_id"])
+            if summary:
+                collected["_saju_summary"] = summary
+        # 궁합 분석이 실행됐다면(compat_job 존재) 실제 궁합 결과값도 주입.
+        if collected.get("compat_job") and collected.get("saju_id") and not collected.get("_compat_summary"):
+            compat = await self._fetch_compat_summary(collected["saju_id"])
+            if compat:
+                collected["_compat_summary"] = compat
+
         system = render_template(step.system, collected)
-        # collected에서 내부 키(_, session_id, saju_id)를 제외한 내담자 정보를 컨텍스트로 제공
+        # 내담자가 대화에서 고른 정보(내부 키 제외)
         ctx_lines = [
             f"- {k}: {v}"
             for k, v in collected.items()
             if not k.startswith("_") and k not in ("session_id", "saju_id")
         ]
         ctx = "\n".join(ctx_lines) if ctx_lines else "(아직 정보 없음)"
+        saju_block = ""
+        if collected.get("_saju_summary"):
+            saju_block = (
+                f"\n\n[이 사람의 실제 사주 풀이 근거 — 자연스러운 한국어로 녹여 쓰되 "
+                f"숫자·영어·전문용어는 그대로 읊지 말 것]\n{collected['_saju_summary']}"
+            )
+        if collected.get("_compat_summary"):
+            saju_block += (
+                f"\n\n[상대방과의 실제 궁합 분석 결과 — 이 수치를 근거로 비교해 말하되 "
+                f"점수 숫자를 직접 읊기보다 느낌으로 풀 것]\n{collected['_compat_summary']}"
+            )
         user_prompt = (
             f"{render_template(step.prompt, collected)}\n\n"
-            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}\n\n"
+            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}"
+            f"{saju_block}\n\n"
             f"위 지시와 정보를 바탕으로, 캐릭터 톤을 유지한 짧은 메시지만 출력하세요. "
             f"설명·메타발화·따옴표 없이 대사만."
         )
@@ -597,6 +624,88 @@ class WorkflowEngine:
                 error=str(e),
             )
             return fallback
+
+    # 오행 영문 → 한글
+    _ELEMENT_KO = {
+        "Wood": "목", "Fire": "화", "Earth": "토", "Metal": "금", "Water": "수",
+        "wood": "목", "fire": "화", "earth": "토", "metal": "금", "water": "수",
+    }
+
+    async def _fetch_saju_summary(self, saju_id: str) -> str:
+        """saju-backend의 lookup을 호출해 dynamic 통찰용 핵심 사주 결과를 한국어 요약으로 반환."""
+        backend = (
+            os.environ.get("AIP_SAJU_BACKEND_URL")
+            or os.environ.get("SAJU_BACKEND_URL")
+            or "http://localhost:8002"
+        )
+        url = f"{backend}/saju/{saju_id}/lookup"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url, params={"categories": "basic,wonGuk,energy,yongsin"})
+                r.raise_for_status()
+                d = r.json()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("saju_summary_fetch_failed", saju_id=saju_id, error=str(e))
+            return ""
+
+        wg = d.get("wonGuk", {}) or {}
+        en = d.get("energy", {}) or {}
+        ys = d.get("yongsin", {}) or {}
+        ba = d.get("basic", {}) or {}
+        ko = self._ELEMENT_KO
+
+        parts: list[str] = []
+        self_el = wg.get("selfElement")
+        status = wg.get("selfStatus")
+        if self_el:
+            st = "기운이 약한 편(신약)" if status == "weak" else ("기운이 강한 편(신강)" if status == "strong" else "")
+            parts.append(f"타고난 중심 기운은 {ko.get(self_el, self_el)}, {st}".rstrip(", "))
+
+        elems = {"목": en.get("wood"), "화": en.get("fire"), "토": en.get("earth"),
+                 "금": en.get("metal"), "수": en.get("water")}
+        elems = {k: v for k, v in elems.items() if isinstance(v, (int, float))}
+        if elems:
+            strong = max(elems, key=elems.get)
+            weak = min(elems, key=elems.get)
+            parts.append(f"기운 중 {strong}이(가) 가장 강하고 {weak}이(가) 가장 부족함")
+        if ys.get("yongsin"):
+            parts.append(
+                f"채우면 좋은 기운은 {ko.get(ys['yongsin'], ys['yongsin'])}, "
+                f"과하면 탈나는 기운은 {ko.get(ys.get('gisin',''), ys.get('gisin',''))}"
+            )
+        if ba.get("age"):
+            parts.append(f"나이 {ba['age']}세")
+        return " · ".join(p for p in parts if p)
+
+    async def _fetch_compat_summary(self, saju_id: str) -> str:
+        """saju-backend의 궁합 결과를 조회해 통찰용 한국어 요약(점수 등급)으로 반환."""
+        backend = (
+            os.environ.get("AIP_SAJU_BACKEND_URL")
+            or os.environ.get("SAJU_BACKEND_URL")
+            or "http://localhost:8002"
+        )
+        url = f"{backend}/saju/compatibility/{saju_id}/result"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url)
+                r.raise_for_status()
+                data = (r.json() or {}).get("data", {}) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("compat_summary_fetch_failed", saju_id=saju_id, error=str(e))
+            return ""
+
+        score = data.get("score") or data.get("total_score")
+        if not isinstance(score, (int, float)):
+            return ""
+        if score >= 80:
+            grade = "아주 잘 맞는 편(상)"
+        elif score >= 60:
+            grade = "잘 맞는 편(중상)"
+        elif score >= 40:
+            grade = "노력하면 맞춰지는 편(중)"
+        else:
+            grade = "기질 차이가 큰 편(하)"
+        return f"종합 궁합 {grade} (100점 만점 환산 약 {round(score)}점)"
 
     async def _execute_action_step(
         self,

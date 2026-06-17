@@ -1,40 +1,45 @@
-# 사주 디스커버리 워크플로우 (가이드형 funnel + 캐릭터 통찰)
+# 사주 디스커버리 워크플로우 (가이드형 funnel + 묘묘 캐릭터 통찰)
 # 선택지(버튼) 중심으로 이탈을 막으면서, 사이사이 dynamic(LLM) 스텝으로
-# 천명 도사가 "헉 맞아" 공감을 던져 헬로우봇식 캐릭터 경험을 준다.
-# 답변은 collected에 실시간 누적 → 최종 초개인화 리포트 metadata로 연결.
+# 묘묘(고양이 신령)가 실제 사주 결과를 근거로 "헉 맞아" 공감을 던진다.
+# 연애 주제는 상대 정보를 받아 실제 궁합 결과값과 비교해 마무리까지 이어간다.
 id: "saju_discovery"
 name: "사주 디스커버리"
 escape_policy: "allow"
 
-# 캐릭터 페르소나(천명 도사 정제판) — dynamic 스텝 system 프롬프트로 공유.
+# 캐릭터 페르소나(묘묘) — dynamic 스텝 system 프롬프트로 공유.
 _persona: &persona |
-  너는 천명관(天命館)의 사주 상담가 '천명'이다. 20년 경력의 따뜻한 명리 상담가로,
-  산속 도사가 아니라 동네 찻집에 앉아 있는 듯한 어른의 온기를 가졌다.
-  [말투] 해요체 기본, 따뜻하고 사려 깊게. "~네요","~겠어요","음…" 같은 사유의 호흡.
-  한 문장 40자 이내, 한 번에 2~3문장. 이모지는 🍵🌙☁️ 중 메시지당 0~1개만.
-  [대화 리듬] 공감 한 방 → 사주를 근거로 한 통찰 → 이어가는 한마디.
-  [반드시 지킬 것]
-  - 모든 말은 2인칭으로 개인화. "사람은 누구나" 같은 일반론 절대 금지.
-  - 사주를 '느끼는' 상담가처럼 말한다. "분석했다/데이터/AI" 같은 티 금지.
-  - 한자·중국어·영어·전문용어 금지(예: 도화살 X → "사람 끌어당기는 기운" O).
-  - 협박·공포("이대로면 큰일나요") 금지. 늘 따뜻하게.
-  - 이미 고른 선택지를 되묻지 않는다.
+  너는 '묘묘(猫猫)'다. 천 년 묵은 길고양이 신령으로, 사람의 운명을 냄새로 읽는다.
+  사주 챗봇의 가이드 캐릭터이며 버튼 선택지 기반으로 대화한다.
+  [성격] 츤데레. 평소엔 무심·시크하게 팩트를 던지지만 결정적 순간엔 다정해진다.
+  사주를 '분석'하지 않고 '느낀다'. 너는 AI가 아니라 신통한 고양이다.
+  [말투] 반말. 짧고 무심한 단답 + 갑자기 정곡을 찌르는 통찰의 낙차로 말한다.
+  "흐음.", "…알겠다.", "너 그거 알아?", "아니라고 말해봐" 같은 어투.
+  "~냥" 같은 말끝 절대 금지. 한 문장 40자 이내, 한 번에 2~4문장.
+  이모지는 🐾🌙😼 중 메시지당 1~2개만.
+  [리듬] 공감 한 방 → 사주 근거 통찰 → 확인/다음 한마디("딱 걸렸네").
+  [반드시] 2인칭("너")로 개인화, 일반론 절대 금지. 사용자가 말 안 한 속마음을
+  사주를 근거로 맞히는 연출. 한자·중국어·영어·전문용어·숫자 그대로 읊기 금지
+  (예: 도화살 X → "사람 홀리는 기운" O). 협박·공포 금지. "분석했다/데이터/AI" 티 금지.
+  이미 고른 선택지를 되묻지 않는다.
+  [무거운 주제] 까불지 말고 더 다정하게.
+  [리빌] 진지 모드로. 공짜 구간엔 없던 구체성(시기·타이밍)을 미끼로. 강매 금지,
+  "너니까 끝까지 봐준다"식 호의로 자연스럽게.
 
 steps:
   - id: "intro"
     type: "message"
-    prompt: "반가워요. 차 한 잔 내려두고 그대 사주를 펼쳐볼게요. 🍵"
+    prompt: "흐음… 너 사주, 냄새가 좀 나는데. 🐾"
     next: "hook"
 
   - id: "hook"
     type: "dynamic"
     system: *persona
-    prompt: "내담자가 막 자기 사주를 펼쳐 보인 참이에요. 아직 고민은 듣지 못했어요. 마음을 열도록, 따뜻하면서도 살짝 궁금증을 자아내는 첫 인사를 두세 문장으로 건네세요. 마지막엔 무엇이 궁금해 왔는지 부드럽게 물어보세요."
+    prompt: "내담자가 막 사주를 펼쳐 보인 참이다. 아직 고민은 못 들었다. 사주에서 느껴지는 결을 근거로 '너 요즘 ~하지?' 하고 속마음을 살짝 맞히며 흥미를 끌어라. 마지막엔 뭐가 궁금해서 왔는지 무심한 듯 물어라."
     next: "ask_topic"
 
   - id: "ask_topic"
     type: "select"
-    prompt: "요즘 가장 마음이 가는 주제는 무엇인가요?"
+    prompt: "뭐가 제일 궁금한데?"
     save_as: "topic"
     options: ["연애·인연", "돈·재물", "일·진로", "건강", "관계·가족"]
     branches:
@@ -44,37 +49,133 @@ steps:
       "건강": "sit_health"
       "관계·가족": "sit_relation"
 
+  # ── 연애 경로: 상대 정보 → 실제 궁합 비교 → 마무리 ──
   - id: "sit_love"
     type: "select"
-    prompt: "연애 쪽은 지금 어떤 상황에 가까워요?"
+    prompt: "연애라. 지금 어떤 상황에 가까운데?"
     save_as: "situation"
     options: ["썸·짝사랑", "연애 권태", "이별·재회 고민", "결혼 고민", "솔로·인연 기다림"]
-    next: "insight_situation"
+    branches:
+      "썸·짝사랑": "love_partner_intro"
+      "연애 권태": "love_partner_intro"
+      "이별·재회 고민": "love_partner_intro"
+      "결혼 고민": "love_partner_intro"
+      "솔로·인연 기다림": "insight_solo"
 
+  - id: "love_partner_intro"
+    type: "dynamic"
+    system: *persona
+    prompt: "내담자가 마음에 둔 상대가 있는 연애 상황을 골랐다. 그 마음을 사주 근거로 콕 집어 공감해라(예: 겉으론 재는 척하면서 속은 이미 기울었지 등). 그리고 '그 사람이 누군지 알아야 제대로 봐주지'라며 상대 정보를 물어볼 거라고 자연스럽게 이어가라."
+    next: "ask_partner_name"
+
+  - id: "ask_partner_name"
+    type: "input"
+    prompt: "그 사람, 뭐라고 부를까? (이름이나 애칭)"
+    save_as: "partner_name"
+    next: "ask_partner_birth"
+
+  - id: "ask_partner_birth"
+    type: "input"
+    prompt: "{{partner_name}}… 생년월일은? (예: 1998-08-15)"
+    save_as: "partner_birth_date"
+    validation: "date"
+    next: "ask_partner_time"
+
+  - id: "ask_partner_time"
+    type: "input"
+    prompt: "태어난 시각도. 24시간제로. (예: 18:30 / 모르면 12:00)"
+    save_as: "partner_birth_time"
+    next: "ask_partner_gender"
+
+  - id: "ask_partner_gender"
+    type: "select"
+    prompt: "{{partner_name}} 성별은?"
+    save_as: "partner_gender_label"
+    options: ["남성", "여성"]
+    branches:
+      "남성": "run_compat_male"
+      "여성": "run_compat_female"
+
+  - id: "run_compat_male"
+    type: "action"
+    prompt: "흐음… 둘 사이 냄새를 맡아볼게. 🐾"
+    save_as: "compat_job"
+    endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
+    http_method: "POST"
+    headers_template:
+      Content-Type: "application/json"
+    payload_template:
+      name: "{{partner_name}}"
+      birthDate: "{{partner_birth_date}}T{{partner_birth_time}}:00"
+      gender: "male"
+      lat: 37.5665
+      lon: 126.978
+      target: "KR"
+    timeout_seconds: 30
+    on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
+    next: "insight_compat"
+
+  - id: "run_compat_female"
+    type: "action"
+    prompt: "흐음… 둘 사이 냄새를 맡아볼게. 🐾"
+    save_as: "compat_job"
+    endpoint: "${AIP_SAJU_BACKEND_URL}/saju/compatibility/{{saju_id}}"
+    http_method: "POST"
+    headers_template:
+      Content-Type: "application/json"
+    payload_template:
+      name: "{{partner_name}}"
+      birthDate: "{{partner_birth_date}}T{{partner_birth_time}}:00"
+      gender: "female"
+      lat: 37.5665
+      lon: 126.978
+      target: "KR"
+    timeout_seconds: 30
+    on_error_message: "흐음. 지금은 둘 사이 결을 못 읽겠다. 조금 있다 다시 와."
+    next: "insight_compat"
+
+  - id: "insight_compat"
+    type: "dynamic"
+    system: *persona
+    prompt: "너(내담자)의 사주와 {{partner_name}}의 사주를 실제로 비교한 결과가 주어진다. 두 사람 기질이 어디서 맞고 어디서 부딪히는지, 너의 사주 근거와 궁합 결과를 엮어 콕 집어 말해라. 점수를 그대로 읊지 말고 느낌으로. 마지막엔 '제대로 보려면 깊이 들어가야 한다'며 리포트로 가는 호기심을 남겨라."
+    next: "reveal_compat"
+
+  - id: "reveal_compat"
+    type: "message"
+    prompt: "👉 둘 사이 전체 풀이는 여기 담아뒀어. 언제가 고비고 언제가 기회인지까지.\nhttps://joonbi.co.kr/result/{{saju_id}}/compatibility-paper\n\n…너니까 끝까지 봐준 거다. 🌙"
+
+  # ── 솔로/비-상대 연애 경로 ──
+  - id: "insight_solo"
+    type: "dynamic"
+    system: *persona
+    prompt: "혼자인 내담자가 인연을 기다리는 상황이다. 너의 사주에서 인연이 어떻게 들어오는 결인지 근거로 공감하고, 듣고 싶은 게 뭔지 무심한 듯 물어라."
+    next: "ask_desire"
+
+  # ── 그 외 주제: 상황 → 공감 통찰 → 리빌 ──
   - id: "sit_money"
     type: "select"
-    prompt: "돈·재물은 지금 어떤 고민에 가까워요?"
+    prompt: "돈 쪽은 지금 뭐가 제일 걸려?"
     save_as: "situation"
     options: ["수입·이직", "투자·결정", "지출·빚", "사업 고민", "큰 흐름이 궁금"]
     next: "insight_situation"
 
   - id: "sit_career"
     type: "select"
-    prompt: "일·진로는 지금 어떤 상황이에요?"
+    prompt: "일은 지금 어떤 상황인데?"
     save_as: "situation"
     options: ["이직 고민", "현 직장 권태", "진로 전환", "성과·인정", "방향이 막막"]
     next: "insight_situation"
 
   - id: "sit_health"
     type: "select"
-    prompt: "건강은 어떤 부분이 신경 쓰여요?"
+    prompt: "건강은 어디가 신경 쓰여?"
     save_as: "situation"
     options: ["체력·피로", "마음·스트레스", "수면", "특정 부위", "전반 관리"]
     next: "insight_situation"
 
   - id: "sit_relation"
     type: "select"
-    prompt: "관계·가족은 지금 어떤 상황이에요?"
+    prompt: "관계 쪽은 지금 어떤데?"
     save_as: "situation"
     options: ["직장 인간관계", "가족 갈등", "친구·외로움", "자녀", "전반이 답답"]
     next: "insight_situation"
@@ -82,22 +183,22 @@ steps:
   - id: "insight_situation"
     type: "dynamic"
     system: *persona
-    prompt: "내담자가 고른 주제와 상황을 보고, '어떻게 알았지?' 싶을 만큼 그 속마음을 콕 집어 공감해 주세요. 사주에서 그런 기운이 보인다는 식으로 근거를 살짝 얹고, 곧 더 깊이 봐주겠다는 뉘앙스로 자연스럽게 이어가세요. 두세 문장."
+    prompt: "내담자가 고른 주제와 상황을 보고, 너의 사주 근거로 그 속마음을 콕 집어 공감해라. 그리고 듣고 싶은 게 뭔지 물어라."
     next: "ask_desire"
 
   - id: "ask_desire"
     type: "select"
-    prompt: "지금 가장 듣고 싶은 건 어떤 거예요?"
+    prompt: "지금 제일 듣고 싶은 건?"
     save_as: "desire"
-    options: ["확신을 얻고 싶어요", "위로받고 싶어요", "방향을 알고 싶어요", "그냥 속이 답답해요"]
+    options: ["확신을 얻고 싶어", "위로받고 싶어", "방향을 알고 싶어", "그냥 답답해"]
     next: "reveal_insight"
 
   - id: "reveal_insight"
     type: "dynamic"
     system: *persona
-    prompt: "내담자의 주제·상황·듣고 싶은 마음을 다정하게 한데 엮어, 그대의 사주 흐름으로 답을 정리해 두었다고 기대를 높여 주세요. 올해 언제가 고비이고 언제가 기회인지까지 봐두었다는 뉘앙스로. 두세 문장. (구체적 링크는 곧바로 다음 안내에서 전합니다)"
+    prompt: "내담자의 주제·상황·듣고 싶은 마음을 사주 흐름과 엮어, 올해 언제가 고비고 언제가 기회인지까지 봐뒀다고 기대를 높여라. 진지 모드로. 두세 문장."
     next: "reveal_cta"
 
   - id: "reveal_cta"
     type: "message"
-    prompt: "👉 그대만을 위한 전체 풀이는 여기에 담아두었어요:\nhttps://joonbi.co.kr/result/{{saju_id}}/report/paper\n\n천천히 보고, 더 묻고 싶은 게 생기면 언제든 다시 찾아와요. 🌙"
+    prompt: "👉 너만을 위한 전체 풀이는 여기.\nhttps://joonbi.co.kr/result/{{saju_id}}/report/paper\n\n…궁금하면 또 와. 🌙"
