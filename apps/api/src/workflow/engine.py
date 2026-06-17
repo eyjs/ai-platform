@@ -21,6 +21,7 @@ from typing import Optional
 
 from src.common.exceptions import GatewayError
 from src.observability.logging import get_logger
+from src.router.semantic_classifier import Candidate
 from src.workflow.action_client import ActionClient, WorkflowActionError
 from src.workflow.context_adapter import WorkflowContextAdapter
 from src.workflow.definition import WorkflowDefinition, WorkflowStep
@@ -82,6 +83,7 @@ class WorkflowEngine:
         action_client: ActionClient | None = None,
         llm=None,
         context_adapters: dict[str, WorkflowContextAdapter] | None = None,
+        classifier=None,
     ) -> None:
         self._store = store
         self._session_store = session_store
@@ -90,6 +92,8 @@ class WorkflowEngine:
         self._llm = llm
         # 서비스별 컨텍스트 enrichment 플러그인 (이름 → 어댑터). 프로파일이 선택한다.
         self._context_adapters = context_adapters or {}
+        # select 분기 의미 분류용 공통 SemanticClassifier. 없으면 키워드 매칭만(하위호환).
+        self._classifier = classifier
         # 인메모리 폴백 (session_store 미주입 시)
         self._sessions: dict[str, WorkflowSession] = {}
 
@@ -309,8 +313,34 @@ class WorkflowEngine:
         if current_step.save_as:
             session.collected[current_step.save_as] = user_input
 
-        # 다음 스텝 결정
+        # 다음 스텝 결정 (exact/소문자/번호 — 버튼·명시 입력)
         next_step_id = _resolve_next(current_step, user_input)
+
+        # 못 잡은 자유입력 → 공통 의미 분류기로 분기(맥락 기반, 키워드 아님).
+        # 버튼·번호는 위에서 이미 잡히므로 여기 도달 시에만 LLM 호출(지연·비용 가드).
+        if not next_step_id and current_step.branches and self._classifier:
+            candidates = [Candidate(label=k) for k in current_step.branches]
+            ctx = render_template(current_step.prompt, session.collected)
+            ctx_lines = [
+                f"- {k}: {v}" for k, v in session.collected.items()
+                if not k.startswith("_") and k not in ("session_id", "saju_id")
+            ]
+            if ctx_lines:
+                ctx = f"{ctx}\n[지금까지 파악된 정보]\n" + "\n".join(ctx_lines)
+            decision = await self._classifier.classify(
+                user_input, candidates, context=ctx,
+            )
+            if decision.label and decision.label in current_step.branches:
+                next_step_id = current_step.branches[decision.label]
+                if current_step.save_as:
+                    # 원시 자유입력 대신 정규 분기키 저장(다운스트림 dynamic 스텝이 깔끔하게 사용)
+                    session.collected[current_step.save_as] = decision.label
+                logger.info(
+                    "workflow_branch_llm_classified",
+                    layer="WORKFLOW", session_id=session_id,
+                    step_id=current_step.id, label=decision.label,
+                    confidence=decision.confidence,
+                )
 
         # select/branch 스텝에서 입력이 어떤 분기에도 안 맞고 fallback next도 없으면,
         # 워크플로우를 종료하지 말고(자유텍스트 조기종료 버그) 같은 스텝을 다시 안내한다.
@@ -806,11 +836,8 @@ def _resolve_next(step: WorkflowStep, user_input: str) -> str | None:
             keys = list(step.branches.keys())
             if 0 <= idx < len(keys):
                 return step.branches[keys[idx]]
-        # 부분 매칭
-        for key, next_id in step.branches.items():
-            if key in user_input or user_input in key:
-                return next_id
-        # 매칭 실패 시 기본 next
+        # 부분문자열 매칭은 제거(오매칭·맥락 무시 원인) — 자유입력은 advance()에서
+        # 공통 SemanticClassifier가 의미로 분류한다. 여기선 fallback next만 반환.
         return step.next
     return step.next
 

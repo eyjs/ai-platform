@@ -32,6 +32,7 @@ from src.services.feedback_service import FeedbackService
 from src.services.response_cache import ResponseCacheService
 from src.pipeline.ingest import IngestPipeline
 from src.router.ai_router import AIRouter
+from src.router.semantic_classifier import SemanticClassifier
 from src.safety.faithfulness import FaithfulnessGuard
 from src.safety.pii_filter import PIIFilterGuard
 from src.safety.response_policy import ResponsePolicyGuard
@@ -304,6 +305,8 @@ async def create_app_state(settings: Settings) -> AppState:
             # 서비스별 dynamic 스텝 enrichment 플러그인. 프로파일이 이름으로 선택.
             "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
         },
+        # select 자유입력 분기를 의미로 판단하는 공통 분류기(경량 router_llm).
+        classifier=SemanticClassifier(router_llm),
     )
     logger.info("workflows_loaded", count=workflow_store.count)
 

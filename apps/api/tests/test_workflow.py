@@ -6,6 +6,7 @@ async 전환 완료: 모든 엔진 메서드가 async.
 
 import pytest
 
+from src.router.semantic_classifier import SemanticClassifier
 from src.workflow.definition import WorkflowDefinition, WorkflowStep
 from src.workflow.engine import WorkflowEngine, _resolve_next, _validate_input
 from src.workflow.state import WorkflowSession
@@ -21,6 +22,19 @@ def _build_store(*definitions: WorkflowDefinition) -> WorkflowStore:
     for d in definitions:
         store._cache[d.id] = d
     return store
+
+
+class _BranchStubLLM:
+    """SemanticClassifier용 스텁 — 지정 label을 반환(자유입력 분기 테스트). 호출 횟수 기록."""
+
+    def __init__(self, label: str, confidence: float = 0.9) -> None:
+        self._label = label
+        self._confidence = confidence
+        self.calls = 0
+
+    async def generate_json(self, prompt: str, system: str = "") -> dict:
+        self.calls += 1
+        return {"label": self._label, "confidence": self._confidence}
 
 
 def _simple_workflow() -> WorkflowDefinition:
@@ -180,12 +194,47 @@ class TestBranching:
         result = await engine.advance("s1", "2")  # Y
         assert "Y 경로" in result.bot_message
 
-    async def test_branch_partial_match(self):
-        """부분 문자열 매칭."""
+    async def test_branch_freetext_without_classifier_reprompts(self):
+        """분류기 없으면 자유입력은 부분문자열 오매칭 대신 안전하게 재안내(종료 아님)."""
         engine = WorkflowEngine(_build_store(_branching_workflow()))
         await engine.start("test_branch", "s1")
-        result = await engine.advance("s1", "X 선택할게요")
+        result = await engine.advance("s1", "음 글쎄 X 쪽인가")
+        assert not result.completed
+        assert result.step_id == "start"  # 같은 스텝 재안내
+
+    async def test_branch_freetext_classified_by_llm(self):
+        """분류기 주입 시 자유입력을 의미로 분기 + collected를 정규 옵션으로 저장."""
+        engine = WorkflowEngine(
+            _build_store(_branching_workflow()),
+            classifier=SemanticClassifier(_BranchStubLLM("X")),
+        )
+        await engine.start("test_branch", "s1")
+        result = await engine.advance("s1", "고민 끝에 X로 갈래")
         assert "X 경로" in result.bot_message
+        assert result.collected["choice"] == "X"  # 원시 입력 아닌 정규 분기키
+
+    async def test_branch_classifier_none_reprompts(self):
+        """분류기가 NONE이면 재안내(오분류 강행 안 함)."""
+        engine = WorkflowEngine(
+            _build_store(_branching_workflow()),
+            classifier=SemanticClassifier(_BranchStubLLM("NONE")),
+        )
+        await engine.start("test_branch", "s1")
+        result = await engine.advance("s1", "무슨 말인지")
+        assert not result.completed
+        assert result.step_id == "start"
+
+    async def test_branch_button_exact_skips_classifier(self):
+        """정확 옵션(버튼)은 분류기 LLM 미호출 fast-path."""
+        stub = _BranchStubLLM("Y")
+        engine = WorkflowEngine(
+            _build_store(_branching_workflow()),
+            classifier=SemanticClassifier(stub),
+        )
+        await engine.start("test_branch", "s1")
+        result = await engine.advance("s1", "X")  # 정확 옵션
+        assert "X 경로" in result.bot_message
+        assert stub.calls == 0  # 자유입력 아니므로 LLM 미호출
 
     async def test_select_unmatched_freetext_reprompts_not_completed(self):
         """회귀: select 스텝에 분기와 안 맞는 자유텍스트가 오면 워크플로우를 종료하지 않고
