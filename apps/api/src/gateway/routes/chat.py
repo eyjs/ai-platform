@@ -267,6 +267,19 @@ async def chat_stream(req: ChatRequest, request: Request):
                     done_data["orchestrated"] = setup.orchestrated
                     # KMS 프론트 호환: answer, confidence, traversal_path 필드 추가
                     done_data.setdefault("answer", "".join(answer_parts))
+                    # 빈 응답 폴백 — 토큰이 하나도 없거나 공백뿐이면 화면이 빈 채로 끝난다.
+                    # 폴백 발화로 치환하고 token 으로도 흘려 스트리밍 화면을 채운다.
+                    # 문구는 프로필 설정(empty_response_fallback)에서 가져온다(서비스별 톤).
+                    # 특정 서비스 문구를 공용 게이트에 하드코딩하지 않는다.
+                    if not (done_data.get("answer") or "").strip():
+                        fallback = (
+                            (stream_profile and stream_profile.empty_response_fallback)
+                            or "죄송해요, 방금 응답을 만들지 못했어요. 다시 한 번 말씀해 주시겠어요?"
+                        )
+                        done_data["answer"] = fallback
+                        answer_parts.clear()
+                        answer_parts.append(fallback)
+                        yield {"event": "token", "data": json.dumps({"delta": fallback}, ensure_ascii=False)}
                     done_data.setdefault("confidence", None)
                     done_data.setdefault("traversal_path", [])
                     # Task 014: response_id 주입 + faithfulness_score 캡처

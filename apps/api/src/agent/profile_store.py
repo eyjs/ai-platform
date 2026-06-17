@@ -238,6 +238,7 @@ class ProfileStore:
             workflow_action_endpoint=data.get("workflow_action_endpoint"),
             workflow_action_headers=data.get("workflow_action_headers", {}),
             context_adapter=data.get("context_adapter"),
+            empty_response_fallback=data.get("empty_response_fallback"),
         )
 
     @staticmethod
@@ -274,6 +275,7 @@ class ProfileStore:
             "workflow_action_endpoint": profile.workflow_action_endpoint,
             "workflow_action_headers": profile.workflow_action_headers,
             "context_adapter": profile.context_adapter,
+            "empty_response_fallback": profile.empty_response_fallback,
         }
 
     def start_watcher(self) -> None:

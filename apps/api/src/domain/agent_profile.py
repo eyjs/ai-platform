@@ -104,6 +104,8 @@ class AgentProfile:
     workflow_action_endpoint: str | None = None  # action step endpoint 기본값
     workflow_action_headers: dict = field(default_factory=dict)  # action step headers 기본값
     context_adapter: str | None = None  # dynamic 스텝 enrichment 어댑터 이름 (예: "saju")
+    # 토큰이 비어 응답이 빈 채로 끝날 때 대신 발화할 폴백 문구(프로필 톤). None이면 범용 기본값.
+    empty_response_fallback: str | None = None
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)
