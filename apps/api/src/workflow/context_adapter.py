@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 import httpx
@@ -64,9 +65,16 @@ class SajuContextAdapter:
         조회 결과는 collected의 `_saju_summary`/`_compat_summary`에 캐시해
         dynamic 스텝마다 재호출하지 않는다.
         """
+        # 현재 날짜 블록 — saju_id 유무와 무관하게 항상 주입(연도 grounding).
+        today = datetime.now()
+        date_block = (
+            f"\n\n[오늘 날짜] {today.year}년 {today.month}월 {today.day}일. "
+            f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년이다."
+        )
+
         saju_id = collected.get("saju_id")
         if not saju_id:
-            return {}
+            return {"date": date_block}
 
         # 사주 풀이 — 최초 1회 조회 후 캐시.
         if not collected.get("_saju_summary"):
@@ -79,7 +87,7 @@ class SajuContextAdapter:
             if compat:
                 collected["_compat_summary"] = compat
 
-        blocks: dict[str, str] = {}
+        blocks: dict[str, str] = {"date": date_block}
         if collected.get("_saju_summary"):
             blocks["saju"] = (
                 f"\n\n[이 사람의 실제 사주 풀이 근거 — 자연스러운 한국어로 녹여 쓰되 "

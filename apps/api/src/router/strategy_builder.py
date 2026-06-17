@@ -4,6 +4,7 @@ STRATEGY_MATRIX 소유 + SearchScope + tools + system_prompt + guardrails + conv
 """
 
 import logging
+from datetime import datetime
 from typing import List, Optional, Union
 
 from src.config import settings
@@ -112,6 +113,16 @@ class StrategyBuilder:
                 f"{profile.system_prompt}\n\n"
                 f"--- 참고 컨텍스트 ---\n{external_context}"
             ) if profile.system_prompt else f"--- 참고 컨텍스트 ---\n{external_context}"
+
+        # 현재 날짜 주입 — LLM이 "올해"/시기를 정확히 인식하도록 (연도 grounding).
+        # 날짜 미주입 시 학습 시점 기준으로 연도를 추측해 "올해 2025 vs 2026" 모순 발생.
+        if effective_system_prompt:
+            today = datetime.now()
+            effective_system_prompt = (
+                f"[오늘 날짜] {today.year}년 {today.month}월 {today.day}일. "
+                f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년이다.\n\n"
+                f"{effective_system_prompt}"
+            )
 
         # needs_planning 판단
         needs_planning = self._determine_needs_planning(

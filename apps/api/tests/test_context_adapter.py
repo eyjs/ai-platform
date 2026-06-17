@@ -62,9 +62,12 @@ def _dynamic_workflow() -> WorkflowDefinition:
 # --- SajuContextAdapter ---
 
 
-async def test_saju_adapter_no_saju_id_returns_empty():
+async def test_saju_adapter_no_saju_id_returns_date_only():
+    """saju_id가 없어도 날짜 블록(연도 grounding)은 항상 반환한다."""
     adapter = SajuContextAdapter(backend_url="http://x:8002")
-    assert await adapter.enrich({}) == {}
+    blocks = await adapter.enrich({})
+    assert set(blocks) == {"date"}
+    assert "오늘 날짜" in blocks["date"]
 
 
 async def test_saju_adapter_uses_cached_summaries_without_http():
@@ -77,7 +80,7 @@ async def test_saju_adapter_uses_cached_summaries_without_http():
         "_compat_summary": "종합 궁합 잘 맞는 편",
     }
     blocks = await adapter.enrich(collected)
-    assert set(blocks) == {"saju", "compat"}
+    assert set(blocks) == {"saju", "compat", "date"}
     assert "중심 기운은 화, 신약" in blocks["saju"]
     assert "종합 궁합 잘 맞는 편" in blocks["compat"]
 
@@ -87,7 +90,7 @@ async def test_saju_adapter_skips_compat_without_compat_job():
     adapter = SajuContextAdapter(backend_url="http://x:8002")
     collected = {"saju_id": "abc", "_saju_summary": "중심 기운은 토"}
     blocks = await adapter.enrich(collected)
-    assert set(blocks) == {"saju"}
+    assert set(blocks) == {"saju", "date"}
 
 
 def test_saju_adapter_satisfies_protocol():
