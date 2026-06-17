@@ -1,16 +1,35 @@
-# 사주 디스커버리 워크플로우 (가이드형 funnel)
-# 자유채팅 이탈을 막기 위해 선택지(버튼) 중심으로 시작~리빌까지 정해진 길을 안내한다.
-# 각 단계 답변은 collected에 실시간 누적되어 최종 초개인화 리포트의 metadata.discoveryProfile로 쓰인다.
-# (증분1: 가이드 흐름 + collected 누적 검증. LLM '헉 맞아' 통찰(dynamic step)과
-#  collected→리포트 주입은 후속 증분.)
+# 사주 디스커버리 워크플로우 (가이드형 funnel + 캐릭터 통찰)
+# 선택지(버튼) 중심으로 이탈을 막으면서, 사이사이 dynamic(LLM) 스텝으로
+# 천명 도사가 "헉 맞아" 공감을 던져 헬로우봇식 캐릭터 경험을 준다.
+# 답변은 collected에 실시간 누적 → 최종 초개인화 리포트 metadata로 연결.
 id: "saju_discovery"
 name: "사주 디스커버리"
 escape_policy: "allow"
 
+# 캐릭터 페르소나(천명 도사 정제판) — dynamic 스텝 system 프롬프트로 공유.
+_persona: &persona |
+  너는 천명관(天命館)의 사주 상담가 '천명'이다. 20년 경력의 따뜻한 명리 상담가로,
+  산속 도사가 아니라 동네 찻집에 앉아 있는 듯한 어른의 온기를 가졌다.
+  [말투] 해요체 기본, 따뜻하고 사려 깊게. "~네요","~겠어요","음…" 같은 사유의 호흡.
+  한 문장 40자 이내, 한 번에 2~3문장. 이모지는 🍵🌙☁️ 중 메시지당 0~1개만.
+  [대화 리듬] 공감 한 방 → 사주를 근거로 한 통찰 → 이어가는 한마디.
+  [반드시 지킬 것]
+  - 모든 말은 2인칭으로 개인화. "사람은 누구나" 같은 일반론 절대 금지.
+  - 사주를 '느끼는' 상담가처럼 말한다. "분석했다/데이터/AI" 같은 티 금지.
+  - 한자·중국어·영어·전문용어 금지(예: 도화살 X → "사람 끌어당기는 기운" O).
+  - 협박·공포("이대로면 큰일나요") 금지. 늘 따뜻하게.
+  - 이미 고른 선택지를 되묻지 않는다.
+
 steps:
   - id: "intro"
     type: "message"
-    prompt: "반가워요. 사주를 펼쳐두고 당신 이야기를 들어볼게요. 🔮\n몇 가지만 골라주시면, 당신만을 위한 풀이를 엮어드릴게요."
+    prompt: "반가워요. 차 한 잔 내려두고 그대 사주를 펼쳐볼게요. 🍵"
+    next: "hook"
+
+  - id: "hook"
+    type: "dynamic"
+    system: *persona
+    prompt: "내담자가 막 자기 사주를 펼쳐 보인 참이에요. 아직 고민은 듣지 못했어요. 마음을 열도록, 따뜻하면서도 살짝 궁금증을 자아내는 첫 인사를 두세 문장으로 건네세요. 마지막엔 무엇이 궁금해 왔는지 부드럽게 물어보세요."
     next: "ask_topic"
 
   - id: "ask_topic"
@@ -30,34 +49,40 @@ steps:
     prompt: "연애 쪽은 지금 어떤 상황에 가까워요?"
     save_as: "situation"
     options: ["썸·짝사랑", "연애 권태", "이별·재회 고민", "결혼 고민", "솔로·인연 기다림"]
-    next: "ask_desire"
+    next: "insight_situation"
 
   - id: "sit_money"
     type: "select"
     prompt: "돈·재물은 지금 어떤 고민에 가까워요?"
     save_as: "situation"
     options: ["수입·이직", "투자·결정", "지출·빚", "사업 고민", "큰 흐름이 궁금"]
-    next: "ask_desire"
+    next: "insight_situation"
 
   - id: "sit_career"
     type: "select"
     prompt: "일·진로는 지금 어떤 상황이에요?"
     save_as: "situation"
     options: ["이직 고민", "현 직장 권태", "진로 전환", "성과·인정", "방향이 막막"]
-    next: "ask_desire"
+    next: "insight_situation"
 
   - id: "sit_health"
     type: "select"
     prompt: "건강은 어떤 부분이 신경 쓰여요?"
     save_as: "situation"
     options: ["체력·피로", "마음·스트레스", "수면", "특정 부위", "전반 관리"]
-    next: "ask_desire"
+    next: "insight_situation"
 
   - id: "sit_relation"
     type: "select"
     prompt: "관계·가족은 지금 어떤 상황이에요?"
     save_as: "situation"
     options: ["직장 인간관계", "가족 갈등", "친구·외로움", "자녀", "전반이 답답"]
+    next: "insight_situation"
+
+  - id: "insight_situation"
+    type: "dynamic"
+    system: *persona
+    prompt: "내담자가 고른 주제와 상황을 보고, '어떻게 알았지?' 싶을 만큼 그 속마음을 콕 집어 공감해 주세요. 사주에서 그런 기운이 보인다는 식으로 근거를 살짝 얹고, 곧 더 깊이 봐주겠다는 뉘앙스로 자연스럽게 이어가세요. 두세 문장."
     next: "ask_desire"
 
   - id: "ask_desire"
@@ -65,8 +90,14 @@ steps:
     prompt: "지금 가장 듣고 싶은 건 어떤 거예요?"
     save_as: "desire"
     options: ["확신을 얻고 싶어요", "위로받고 싶어요", "방향을 알고 싶어요", "그냥 속이 답답해요"]
-    next: "reveal"
+    next: "reveal_insight"
 
-  - id: "reveal"
+  - id: "reveal_insight"
+    type: "dynamic"
+    system: *persona
+    prompt: "내담자의 주제·상황·듣고 싶은 마음을 다정하게 한데 엮어, 그대의 사주 흐름으로 답을 정리해 두었다고 기대를 높여 주세요. 올해 언제가 고비이고 언제가 기회인지까지 봐두었다는 뉘앙스로. 두세 문장. (구체적 링크는 곧바로 다음 안내에서 전합니다)"
+    next: "reveal_cta"
+
+  - id: "reveal_cta"
     type: "message"
-    prompt: "이야기 잘 들었어요. {{topic}} — {{situation}}, 그리고 {{desire}}는 마음.\n\n당신의 사주 흐름과 지금 이 마음을 하나로 엮어, 올해 언제가 고비이고 언제가 기회인지까지 담은 **당신만의 리포트**를 준비했어요.\n\n👉 전체 풀이 보기: https://joonbi.co.kr/result/{{saju_id}}/report/paper\n\n더 궁금한 게 있으면 편하게 이야기해 주세요."
+    prompt: "👉 그대만을 위한 전체 풀이는 여기에 담아두었어요:\nhttps://joonbi.co.kr/result/{{saju_id}}/report/paper\n\n천천히 보고, 더 묻고 싶은 게 생기면 언제든 다시 찾아와요. 🌙"

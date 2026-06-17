@@ -298,6 +298,7 @@ async def create_app_state(settings: Settings) -> AppState:
         workflow_store,
         session_store=workflow_session_store,
         action_client=action_client,
+        llm=main_llm,  # dynamic 스텝(캐릭터 통찰)용
     )
     logger.info("workflows_loaded", count=workflow_store.count)
 

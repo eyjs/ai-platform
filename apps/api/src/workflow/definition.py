@@ -21,8 +21,9 @@ class WorkflowStep:
     """워크플로우 단계 정의."""
 
     id: str
-    type: str  # "message" | "input" | "select" | "confirm" | "action"
+    type: str  # "message" | "input" | "select" | "confirm" | "action" | "dynamic"
     prompt: str = ""
+    system: str = ""  # dynamic 타입용 LLM 시스템 프롬프트(캐릭터 페르소나)
     save_as: str = ""  # 수집한 답변을 저장할 필드명
     options: list[str] = field(default_factory=list)  # select용 선택지
     branches: dict[str, str] = field(default_factory=dict)  # 선택지 → 다음 step id

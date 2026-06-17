@@ -202,6 +202,7 @@ def _parse_step(data: dict) -> WorkflowStep:
         id=data["id"],
         type=data.get("type", "message"),
         prompt=data.get("prompt", ""),
+        system=data.get("system", ""),
         save_as=data.get("save_as", ""),
         options=data.get("options", []),
         branches=data.get("branches", {}),
@@ -226,6 +227,8 @@ def _steps_to_list(steps: list[WorkflowStep]) -> list[dict]:
         d = {"id": s.id, "type": s.type}
         if s.prompt:
             d["prompt"] = s.prompt
+        if s.system:
+            d["system"] = s.system
         if s.save_as:
             d["save_as"] = s.save_as
         if s.options:

@@ -78,10 +78,13 @@ class WorkflowEngine:
         store: WorkflowStore,
         session_store: WorkflowSessionStore | None = None,
         action_client: ActionClient | None = None,
+        llm=None,
     ) -> None:
         self._store = store
         self._session_store = session_store
         self._action_client = action_client
+        # dynamic 스텝(LLM 캐릭터 통찰)용 LLMProvider. 없으면 dynamic은 정적 폴백.
+        self._llm = llm
         # 인메모리 폴백 (session_store 미주입 시)
         self._sessions: dict[str, WorkflowSession] = {}
 
@@ -469,6 +472,23 @@ class WorkflowEngine:
 
             rendered = render_template(step.prompt, session.collected)
 
+            # dynamic 타입: LLM이 collected 컨텍스트로 캐릭터 통찰을 생성 → message처럼 자동 진행
+            if step.type == "dynamic":
+                insight = await self._generate_dynamic(step, session.collected)
+                if insight:
+                    message_parts.append(insight)
+                if not step.next or not definition.get_step(step.next):
+                    session.completed = True
+                    return StepResult(
+                        bot_message="\n\n".join(message_parts),
+                        completed=True,
+                        collected=dict(session.collected),
+                        step_id=step.id,
+                        step_type=step.type,
+                    )
+                session.current_step_id = step.next
+                continue
+
             # action 타입: 외부 API 호출 후 자동 진행
             if step.type == "action":
                 action_result = await self._execute_action_step(
@@ -541,6 +561,42 @@ class WorkflowEngine:
             completed=True,
             collected=dict(session.collected),
         )
+
+    async def _generate_dynamic(self, step, collected: dict) -> str:
+        """dynamic 스텝: LLM이 캐릭터 페르소나(step.system)로 collected 기반 통찰을 생성한다.
+
+        LLM 미주입/실패 시 step.prompt 템플릿을 정적 폴백으로 사용(워크플로우 진행 보장).
+        """
+        fallback = render_template(step.prompt, collected)
+        if not self._llm:
+            return fallback
+
+        system = render_template(step.system, collected)
+        # collected에서 내부 키(_, session_id, saju_id)를 제외한 내담자 정보를 컨텍스트로 제공
+        ctx_lines = [
+            f"- {k}: {v}"
+            for k, v in collected.items()
+            if not k.startswith("_") and k not in ("session_id", "saju_id")
+        ]
+        ctx = "\n".join(ctx_lines) if ctx_lines else "(아직 정보 없음)"
+        user_prompt = (
+            f"{render_template(step.prompt, collected)}\n\n"
+            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}\n\n"
+            f"위 지시와 정보를 바탕으로, 캐릭터 톤을 유지한 짧은 메시지만 출력하세요. "
+            f"설명·메타발화·따옴표 없이 대사만."
+        )
+        try:
+            text = await self._llm.generate(user_prompt, system)
+            text = (text or "").strip()
+            return text or fallback
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "dynamic_step_llm_failed",
+                layer="WORKFLOW",
+                step_id=step.id,
+                error=str(e),
+            )
+            return fallback
 
     async def _execute_action_step(
         self,
