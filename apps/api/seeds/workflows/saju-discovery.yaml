@@ -187,7 +187,7 @@ steps:
   - id: "insight_situation"
     type: "dynamic"
     system: *persona
-    prompt: "내담자가 고른 주제와 상황을 보고, 너의 사주 근거로 그 속마음을 콕 집어 공감해라. 그리고 듣고 싶은 게 뭔지 물어라."
+    prompt: "내담자가 고른 주제와 상황을 보고, 너의 사주 근거로 그 속마음을 콕 집어 공감해라. 아직 리포트 얘기는 절대 꺼내지 마라. 공감 끝에 지금 제일 듣고 싶은 게 뭔지 자연스럽게 물어라."
     next: "ask_desire"
 
   - id: "ask_desire"
@@ -195,12 +195,27 @@ steps:
     prompt: "지금 제일 듣고 싶은 건?"
     save_as: "desire"
     options: ["확신을 얻고 싶어", "위로받고 싶어", "방향을 알고 싶어", "그냥 답답해"]
+    next: "deepen"
+
+  # 고심/심화 비트 — 무료 통찰을 한 번 더 주고, 짧은 반응을 받아 한 턴 더 대화한 뒤 추천.
+  # (dynamic은 자동 연쇄되므로, 추천 전에 select로 턴을 끊어 급해 보이지 않게 한다)
+  - id: "deepen"
+    type: "dynamic"
+    system: *persona
+    prompt: "내담자가 듣고 싶어하는 것(desire)에 맞춰, 사주를 한참 더 들여다보는 듯 고심하며 구체적인 통찰 하나를 무료로 더 풀어줘라(타고난 기질의 결, 또는 올해 흐름의 한 조각). 아직 리포트는 절대 언급하지 마라. 마지막엔 방금 풀어준 게 네 얘기 같은지 가볍게 되물어라('어때, 좀 맞아?')."
+    next: "ask_resonate"
+
+  - id: "ask_resonate"
+    type: "select"
+    prompt: ""
+    save_as: "resonate"
+    options: ["어… 소름 돋게 맞아", "그런 것 같기도", "반신반의야", "더 자세히 듣고 싶어"]
     next: "reveal_insight"
 
   - id: "reveal_insight"
     type: "dynamic"
     system: *persona
-    prompt: "내담자의 주제·상황·듣고 싶은 마음을 사주 흐름과 엮어, 올해 언제가 고비고 언제가 기회인지까지 봐뒀다고 기대를 높여라. 마지막엔 '너랑 얘기해보니, 너는 이걸 봐야겠다'며 상세 리포트를 추천하는 흐름으로 자연스럽게 이어라(광고 아닌 추천 톤). 진지 모드로, 두세 문장."
+    prompt: "내담자의 반응(resonate)을 받아 한마디 공감/응수한 뒤, 비로소 '너랑 한참 얘기해보니 알겠다 — 너는 이걸 제대로 봐야겠다'며 상세 리포트를 추천해라. 올해 언제가 고비고 기회인지까지 두루마리에 정리해뒀다고 기대를 높이되, 광고가 아니라 너니까 골라주는 추천 톤으로. 두세 문장."
     next: "reveal_cta"
 
   - id: "reveal_cta"
