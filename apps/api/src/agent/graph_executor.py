@@ -261,7 +261,8 @@ class GraphExecutor:
         if not step_result.completed and not step_result.escaped:
             message += '\n\n_(\"나가기\" 또는 \"취소\"를 입력하면 워크플로우를 종료합니다)_'
         yield {"type": "token", "data": message}
-        yield {"type": "done", "data": {
+        # 워크플로우 경로 usage: StepResult에 usage 정보가 있으면 포함 (best-effort)
+        workflow_done_data: dict = {
             "tools_called": [],
             "sources": [],
             "workflow": {
@@ -277,7 +278,11 @@ class GraphExecutor:
                 "collection": step_result.collection or None,  # 수집스텝: 빌더가 채움. 빈dict→None
                 "concluded": step_result.concluded,
             },
-        }}
+        }
+        _wf_usage = getattr(step_result, "usage", None)
+        if _wf_usage and isinstance(_wf_usage, dict) and any(_wf_usage.values()):
+            workflow_done_data["usage"] = _wf_usage
+        yield {"type": "done", "data": workflow_done_data}
 
     async def _run_workflow_step(
         self,
@@ -660,6 +665,12 @@ class GraphExecutor:
         tools_called = []
         answer = ""
 
+        # usage 집계 (input/output/cache_read_input_tokens)
+        _usage_input: int = 0
+        _usage_output: int = 0
+        _usage_cache_read: int = 0
+        _usage_cache_creation: int = 0
+
         async for event in agent_app.astream_events(
             {"messages": [{"role": "user", "content": effective_question}]},
             version="v2",
@@ -689,6 +700,34 @@ class GraphExecutor:
                         if text:
                             yield {"type": "token", "data": text}
                             answer += text
+                # 스트리밍 청크에서 usage_metadata 집계 (LangChain usage_metadata)
+                if chunk:
+                    um = getattr(chunk, "usage_metadata", None)
+                    if um:
+                        _usage_input += um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
+                        _usage_output += um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
+                        _usage_cache_read += um.get("input_token_details", {}).get("cache_read", 0) if isinstance(um, dict) else getattr(getattr(um, "input_token_details", None) or {}, "get", lambda k, d=0: d)("cache_read", 0)
+
+            elif kind == "on_chat_model_end":
+                # on_chat_model_end: response_metadata 또는 usage_metadata 확인
+                data = event.get("data", {})
+                output = data.get("output")
+                if output:
+                    # LangChain AIMessage response_metadata (Anthropic: usage)
+                    rm = getattr(output, "response_metadata", None)
+                    if rm and isinstance(rm, dict):
+                        usage_rm = rm.get("usage", {}) or {}
+                        _usage_input = max(_usage_input, usage_rm.get("input_tokens", 0) or 0)
+                        _usage_output = max(_usage_output, usage_rm.get("output_tokens", 0) or 0)
+                        _usage_cache_read = max(_usage_cache_read, usage_rm.get("cache_read_input_tokens", 0) or 0)
+                        _usage_cache_creation = max(_usage_cache_creation, usage_rm.get("cache_creation_input_tokens", 0) or 0)
+                    # LangChain usage_metadata (표준 필드)
+                    um = getattr(output, "usage_metadata", None)
+                    if um:
+                        _in = um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
+                        _out = um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
+                        _usage_input = max(_usage_input, _in)
+                        _usage_output = max(_usage_output, _out)
 
         # Guardrail
         faithfulness_score: Optional[float] = None
@@ -713,6 +752,19 @@ class GraphExecutor:
         }
         if faithfulness_score is not None:
             done_data["faithfulness_score"] = faithfulness_score
+
+        # usage 집계 결과 → done 봉투 최상위 필드 (task-205 인터페이스)
+        # 값이 있거나 0이어도 포함 (backend가 graceful 처리)
+        # 단, 모두 0이고 집계된 정보가 없을 때는 생략하지 않고 0값으로 포함
+        # (SSE 수신부가 존재 여부만 보는 경우 대비)
+        done_data["usage"] = {
+            "input_tokens": _usage_input,
+            "output_tokens": _usage_output,
+            "cache_read_input_tokens": _usage_cache_read,
+        }
+        if _usage_cache_creation > 0:
+            done_data["usage"]["cache_creation_input_tokens"] = _usage_cache_creation
+
         yield {
             "type": "done",
             "data": done_data,

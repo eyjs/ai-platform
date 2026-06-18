@@ -152,16 +152,43 @@ class AnthropicLLMProvider(LLMProvider):
 
         return {"system": blocks} if blocks else {}
 
-    def _log_cache_usage(self, usage) -> None:
+    def _extract_usage(self, usage) -> dict:
+        """Anthropic usage 객체를 표준 dict로 추출한다.
+
+        - 로그 유지 (기존 _log_cache_usage 동작 보존)
+        - dict 반환 → done 봉투에 usage 필드로 실어 보낼 수 있도록
+
+        반환 필드:
+            input_tokens: int
+            output_tokens: int
+            cache_read_input_tokens: int (0 허용)
+            cache_creation_input_tokens: int (0 허용, optional)
+        """
         if not usage:
-            return
-        cached = getattr(usage, "cache_read_input_tokens", 0) or 0
-        if cached > 0:
-            total = getattr(usage, "input_tokens", 0) or 0
+            return {}
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+
+        if cache_read > 0:
             logger.debug(
                 "anthropic_prompt_cache_hit",
-                extra={"cache_read_tokens": cached, "input_tokens": total},
+                extra={"cache_read_tokens": cache_read, "input_tokens": input_tokens},
             )
+
+        result: dict = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read,
+        }
+        if cache_creation > 0:
+            result["cache_creation_input_tokens"] = cache_creation
+        return result
+
+    def _log_cache_usage(self, usage) -> None:
+        """하위호환 래퍼 — _extract_usage 호출 후 반환값 무시."""
+        self._extract_usage(usage)
 
     async def generate(
         self,
@@ -229,7 +256,7 @@ class AnthropicLLMProvider(LLMProvider):
             async for text in stream.text_stream:
                 yield text
             final = await stream.get_final_message()
-            self._log_cache_usage(getattr(final, "usage", None))
+            self._extract_usage(getattr(final, "usage", None))
 
     async def generate_stream_typed(
         self,
