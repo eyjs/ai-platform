@@ -272,6 +272,10 @@ class GraphExecutor:
                 "completed": step_result.completed,
                 "escaped": step_result.escaped,
                 "report": step_result.report,
+                # ── 신규(v2): 구조 신호 (saju 구조-우선 매핑) ──
+                "intent_confirm": step_result.intent_confirm or None,
+                "collection": step_result.collection or None,  # 수집스텝: 빌더가 채움. 빈dict→None
+                "concluded": step_result.concluded,
             },
         }}
 
