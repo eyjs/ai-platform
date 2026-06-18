@@ -284,14 +284,24 @@ def create_regenerate(llm: LLMProvider) -> Callable:
         prompt_results = results[:max_chunks]
         prompt = build_prompt(question, plan, prompt_results)
 
-        enhanced_system = (
-            f"{plan.system_prompt}\n\n"
+        # guardrail 피드백은 per-turn 지시 → volatile 로 분리.
+        # plan.system_prompt 는 cacheable(persona+grounding), 피드백은 volatile_system 에 추가.
+        guardrail_feedback = (
             f"[IMPORTANT] 이전 답변이 품질 검증에서 부족한 평가를 받았습니다 "
             f"({warning_text}). "
             f"참고 문서에 충실하게 답변하세요. 근거 없는 내용은 포함하지 마세요."
         )
+        volatile_extra = (
+            f"{plan.volatile_system_prompt}\n\n{guardrail_feedback}"
+            if plan.volatile_system_prompt
+            else guardrail_feedback
+        )
 
-        answer = await llm.generate(prompt, system=enhanced_system)
+        answer = await llm.generate(
+            prompt,
+            cacheable_system=plan.system_prompt,
+            volatile_system=volatile_extra,
+        )
         logger.info("regenerate_answer", answer_len=len(answer), warnings=warning_text)
 
         # _regen_count 증가하여 재생성 루프 방지
@@ -319,7 +329,12 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
         prompt_results = results[:max_chunks]
 
         prompt = build_prompt(question, plan, prompt_results)
-        answer = await llm.generate(prompt, system=plan.system_prompt)
+        # plan.system_prompt = cacheable(persona+grounding), plan.volatile_system_prompt = 날짜.
+        answer = await llm.generate(
+            prompt,
+            cacheable_system=plan.system_prompt,
+            volatile_system=plan.volatile_system_prompt,
+        )
 
         logger.info("llm_generate", answer_len=len(answer), context_chunks=len(prompt_results))
         return {"answer": answer}
@@ -333,7 +348,12 @@ def create_direct_generate(llm: LLMProvider) -> Callable:
     async def direct_generate(state: AgentState) -> dict:
         question = state["question"]
         plan = state["plan"]
-        answer = await llm.generate(question, system=plan.system_prompt)
+        # plan.system_prompt = cacheable(persona), plan.volatile_system_prompt = 날짜.
+        answer = await llm.generate(
+            question,
+            cacheable_system=plan.system_prompt,
+            volatile_system=plan.volatile_system_prompt,
+        )
         logger.info("direct_generate", answer_len=len(answer))
         return {"answer": answer}
 

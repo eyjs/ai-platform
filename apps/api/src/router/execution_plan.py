@@ -61,3 +61,7 @@ class ExecutionPlan:
     direct_answer: str | None = None  # Orchestrator 직접 응답 (인사/잡담)
     external_context: str = ""  # 외부에서 주입된 컨텍스트 (사주 분석 등). system_prompt에 추가
     needs_planning: bool = False  # Planner 실행 여부 (Plan-and-Execute)
+    # Prompt Caching 분리 필드 (task-101)
+    # volatile_system_prompt: 날짜/per-turn 등 캐시 경계 밖 지시.
+    # system_prompt 는 cacheable(persona+grounding) 로 취급, volatile_system_prompt 는 캐시 밖.
+    volatile_system_prompt: str = ""

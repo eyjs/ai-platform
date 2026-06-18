@@ -106,22 +106,24 @@ class StrategyBuilder:
         else:
             tool_groups = self._build_tool_groups(query, tools, strategy)
 
-        # external_context가 있으면 system_prompt에 추가하여 LLM이 참조하도록 함
-        effective_system_prompt = profile.system_prompt
+        # cacheable_system_prompt: persona + external_context (세션 내 안정 바이트 → 캐시 경계).
+        # volatile_system_prompt: 날짜/per-turn 지시 (매 요청 변동 → 캐시 경계 밖).
+        cacheable_system_prompt = profile.system_prompt
         if external_context:
-            effective_system_prompt = (
+            cacheable_system_prompt = (
                 f"{profile.system_prompt}\n\n"
                 f"--- 참고 컨텍스트 ---\n{external_context}"
             ) if profile.system_prompt else f"--- 참고 컨텍스트 ---\n{external_context}"
 
-        # 현재 날짜 주입 — LLM이 "올해"/시기를 정확히 인식하도록 (연도 grounding).
-        # 날짜 미주입 시 학습 시점 기준으로 연도를 추측해 "올해 2025 vs 2026" 모순 발생.
-        if effective_system_prompt:
+        # 날짜 주입 — volatile_system_prompt 로 분리해 cacheable 경계를 보호한다.
+        # LLM이 "올해"/시기를 정확히 인식하도록 (연도 grounding).
+        # 날짜가 cacheable 에 포함되면 날짜가 바뀔 때마다 캐시 무효화 발생.
+        volatile_system_prompt = ""
+        if cacheable_system_prompt:
             today = datetime.now()
-            effective_system_prompt = (
+            volatile_system_prompt = (
                 f"[오늘 날짜] {today.year}년 {today.month}월 {today.day}일. "
-                f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년이다.\n\n"
-                f"{effective_system_prompt}"
+                f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년이다."
             )
 
         # needs_planning 판단
@@ -133,7 +135,8 @@ class StrategyBuilder:
             mode=mode,
             scope=scope,
             tool_groups=tool_groups,
-            system_prompt=effective_system_prompt,
+            system_prompt=cacheable_system_prompt,
+            volatile_system_prompt=volatile_system_prompt,
             guardrail_chain=profile.guardrails,
             question_type=question_type,
             strategy=strategy,
