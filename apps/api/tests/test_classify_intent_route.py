@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from src.gateway.models import UserContext
 from src.gateway.routes.classify import router as classify_router
+from src.router.semantic_classifier import SemanticClassifier
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +55,10 @@ def _create_app(router_llm=None, auth_fail: bool = False) -> FastAPI:
 
     # --- app.state mock ---
     mock_state = MagicMock()
-    mock_state.router_llm = router_llm
+    # 실제 AppState처럼 classifier 필드에 SemanticClassifier 인스턴스를 주입.
+    # router_llm=None 이어도 SemanticClassifier(llm=None)으로 생성 → fast-path(정확매칭)는 동작.
+    # LLM 없는 자유입력은 SemanticClassifier 내부에서 None 반환.
+    mock_state.classifier = SemanticClassifier(llm=router_llm)
 
     # auth_service mock
     mock_auth = AsyncMock()

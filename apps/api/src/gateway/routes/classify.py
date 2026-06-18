@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 
 from src.gateway.models import ClassifyIntentRequest, ClassifyIntentResponse
 from src.gateway.routes.helpers import _authenticate, _check_rate_limit, _get_app_state, logger
-from src.router.semantic_classifier import Candidate, SemanticClassifier
+from src.router.semantic_classifier import Candidate
 
 router = APIRouter()
 
@@ -45,15 +45,17 @@ async def classify_intent(req: ClassifyIntentRequest, request: Request):
     if not req.candidates:
         return ClassifyIntentResponse(intent=None, confidence=0.0)
 
-    # app_state에서 경량 분류 LLM 획득 (router_llm → None이어도 fast-path 동작)
-    router_llm = getattr(state, "router_llm", None)
+    # app_state에서 공유 분류기 획득 (bootstrap에서 SemanticClassifier(router_llm)로 생성됨)
+    classifier = getattr(state, "classifier", None)
+    if classifier is None:
+        # 분류기 미주입 시 graceful fallback (흐름 차단 금지)
+        return ClassifyIntentResponse(intent=None, confidence=0.0)
 
     # history → context 문자열
     context_text = _flatten_history(req.history)
 
-    # SemanticClassifier 구성 및 분류
+    # 공유 SemanticClassifier로 분류
     try:
-        classifier = SemanticClassifier(llm=router_llm)
         candidates = [Candidate(label=c.label, description=c.description) for c in req.candidates]
         result = await classifier.classify(
             query=req.message,
