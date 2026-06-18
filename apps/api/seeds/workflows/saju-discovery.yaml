@@ -73,6 +73,9 @@ steps:
     type: "input"
     prompt: "그 사람, 뭐라고 부를까? (이름이나 애칭)"
     save_as: "partner_name"
+    collection_target: "partner"
+    collection_field: "name"
+    collection_label: "이름"
     next: "ask_partner_birth"
 
   - id: "ask_partner_birth"
@@ -80,12 +83,18 @@ steps:
     prompt: "{{partner_name}}… 생년월일은? (예: 1998-08-15)"
     save_as: "partner_birth_date"
     validation: "date"
+    collection_target: "partner"
+    collection_field: "birthDate"
+    collection_label: "생년월일"
     next: "ask_partner_time"
 
   - id: "ask_partner_time"
     type: "input"
     prompt: "태어난 시각도. 24시간제로. (예: 18:30 / 모르면 12:00)"
     save_as: "partner_birth_time"
+    collection_target: "partner"
+    collection_field: "birthTime"
+    collection_label: "태어난 시각"
     next: "ask_partner_gender"
 
   - id: "ask_partner_gender"
@@ -93,6 +102,9 @@ steps:
     prompt: "{{partner_name}} 성별은?"
     save_as: "partner_gender_label"
     options: ["남성", "여성"]
+    collection_target: "partner"
+    collection_field: "gender"
+    collection_label: "성별"
     branches:
       "남성": "run_compat_male"
       "여성": "run_compat_female"

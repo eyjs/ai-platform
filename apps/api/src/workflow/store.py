@@ -211,6 +211,13 @@ def _parse_step(data: dict) -> WorkflowStep:
         tool_params=data.get("tool_params", {}),
         validation=data.get("validation", ""),
         report=data.get("report", ""),
+        # ── 신규(v2) 구조 메타 ──
+        intent=data.get("intent", ""),
+        confirm_yes_label=data.get("confirm_yes_label", ""),
+        confirm_no_label=data.get("confirm_no_label", ""),
+        collection_target=data.get("collection_target", ""),
+        collection_field=data.get("collection_field", ""),
+        collection_label=data.get("collection_label", ""),
         # action step 전용 필드
         endpoint=data.get("endpoint", ""),
         http_method=data.get("http_method", "POST"),
@@ -259,6 +266,21 @@ def _steps_to_list(steps: list[WorkflowStep]) -> list[dict]:
             d["on_success_message"] = s.on_success_message
         if s.on_error_message:
             d["on_error_message"] = s.on_error_message
+        # ── 신규(v2) 구조 메타 (round-trip 일관성) ──
+        if s.report:
+            d["report"] = s.report
+        if s.intent:
+            d["intent"] = s.intent
+        if s.confirm_yes_label:
+            d["confirm_yes_label"] = s.confirm_yes_label
+        if s.confirm_no_label:
+            d["confirm_no_label"] = s.confirm_no_label
+        if s.collection_target:
+            d["collection_target"] = s.collection_target
+        if s.collection_field:
+            d["collection_field"] = s.collection_field
+        if s.collection_label:
+            d["collection_label"] = s.collection_label
         result.append(d)
     return result
 

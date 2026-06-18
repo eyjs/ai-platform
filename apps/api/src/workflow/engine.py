@@ -55,6 +55,21 @@ class StepResult:
     escaped: bool = False  # 사용자가 이탈(취소)했는지
     action_result: dict = field(default_factory=dict)  # action 타입 결과
     report: str = ""  # 추천 리포트 제품 CTA (예: "paper"|"compatibility") — 프론트 버튼
+    # ── 신규(v2): saju 백엔드 구조-우선 매핑 소스 ──
+    intent_confirm: dict = field(default_factory=dict)  # {intent, yes_label, no_label} — confirm-류 되묻기
+    collection: dict = field(default_factory=dict)      # {target, fields[], parse_preview} — compat 수집 스텝
+    concluded: bool = False                             # 종료 명시 신호(completed와 정합)
+
+
+def _collection_steps(definition, target: str) -> list:
+    """워크플로우 정의에서 collection_target이 일치하는 수집 스텝 목록을 순서대로 반환한다.
+
+    엔진은 도메인을 알지 않는다 — yaml 메타(collection_field/target)에서 기계적으로 조립.
+    """
+    return [
+        s for s in definition.steps
+        if s.collection_field and s.collection_target == target
+    ]
 
 
 # 입력 검증 패턴
@@ -210,6 +225,7 @@ class WorkflowEngine:
             return StepResult(
                 bot_message="이미 완료된 워크플로우입니다.",
                 completed=True,
+                concluded=True,
                 collected=dict(session.collected),
             )
 
@@ -299,6 +315,7 @@ class WorkflowEngine:
                     bot_message="입력이 지연되어 진행을 취소합니다. 다른 도움이 필요하시면 말씀해주세요.",
                     completed=True,
                     escaped=True,
+                    concluded=True,
                     collected=dict(session.collected),
                 )
             return StepResult(
@@ -362,6 +379,7 @@ class WorkflowEngine:
                     bot_message="여러 번 이해하지 못했어요. 잠시 후 다시 시도해 주세요.",
                     completed=True,
                     escaped=True,
+                    concluded=True,
                     collected=dict(session.collected),
                     step_id=current_step.id,
                     step_type=current_step.type,
@@ -397,6 +415,7 @@ class WorkflowEngine:
             return StepResult(
                 bot_message="워크플로우가 완료되었습니다.",
                 completed=True,
+                concluded=True,
                 collected=dict(session.collected),
                 step_id=current_step.id,
                 step_type="complete",
@@ -408,6 +427,7 @@ class WorkflowEngine:
             return StepResult(
                 bot_message=f"다음 스텝({next_step_id})을 찾을 수 없습니다.",
                 completed=True,
+                concluded=True,
                 collected=dict(session.collected),
             )
 
@@ -512,6 +532,7 @@ class WorkflowEngine:
             bot_message="워크플로우가 취소되었습니다. 다른 질문이 있으시면 말씀해주세요.",
             completed=True,
             escaped=True,
+            concluded=True,
             collected=dict(session.collected),
         )
 
@@ -549,7 +570,7 @@ class WorkflowEngine:
             step = definition.get_step(session.current_step_id)
             if not step:
                 session.completed = True
-                return StepResult(bot_message="스텝 오류", completed=True)
+                return StepResult(bot_message="스텝 오류", completed=True, concluded=True)
 
             if step.report:
                 report_hint = step.report
@@ -566,6 +587,7 @@ class WorkflowEngine:
                     return StepResult(
                         bot_message="\n\n".join(message_parts),
                         completed=True,
+                        concluded=True,
                         collected=dict(session.collected),
                         step_id=step.id,
                         step_type=step.type,
@@ -595,6 +617,7 @@ class WorkflowEngine:
                         step_type=action_result.step_type,
                         collected=action_result.collected,
                         completed=True,
+                        concluded=True,
                         action_result=action_result.action_result,
                         report=report_hint,
                     )
@@ -607,10 +630,49 @@ class WorkflowEngine:
 
             # message 이외 타입: 메시지 축적 후 반환
             if step.type != "message":
+                # ── confirm: 수집 요약 추가 + intent_confirm 구성 ──
+                intent_confirm_meta: dict = {}
                 if step.type == "confirm":
                     summary_lines = [f"- {k}: {v}" for k, v in session.collected.items()]
-                    summary = "\n".join(summary_lines)
-                    rendered = f"{rendered}\n\n{summary}"
+                    rendered = f"{rendered}\n\n" + "\n".join(summary_lines)
+                    intent_confirm_meta = {
+                        "intent": step.intent or "",
+                        "yes_label": step.confirm_yes_label or "응",
+                        "no_label": step.confirm_no_label or "아니",
+                    }
+
+                # ── input/select 수집 스텝: collection 구성 ──
+                collection_meta: dict = {}
+                if step.collection_field:
+                    collection_steps = _collection_steps(definition, step.collection_target)
+                    if collection_steps:
+                        fields = []
+                        for cs in collection_steps:
+                            collected_value = session.collected.get(cs.save_as)
+                            fields.append({
+                                "key": cs.collection_field,
+                                "label": cs.collection_label or cs.collection_field,
+                                "value": collected_value,
+                                "status": "filled" if collected_value not in (None, "") else "pending",
+                            })
+                        collection_meta = {
+                            "target": step.collection_target or "partner",
+                            "fields": fields,
+                            "parse_preview": None,  # 골격: 정규화는 백엔드 범위
+                        }
+                    else:
+                        # graceful fallback: 현 스텝의 단일 필드만 emit
+                        collected_value = session.collected.get(step.save_as)
+                        collection_meta = {
+                            "target": step.collection_target or "partner",
+                            "fields": [{
+                                "key": step.collection_field,
+                                "label": step.collection_label or step.collection_field,
+                                "value": collected_value,
+                                "status": "filled" if collected_value not in (None, "") else "pending",
+                            }],
+                            "parse_preview": None,
+                        }
 
                 message_parts.append(rendered)
                 return StepResult(
@@ -620,6 +682,8 @@ class WorkflowEngine:
                     step_type=step.type,
                     collected=dict(session.collected),
                     report=report_hint,
+                    intent_confirm=intent_confirm_meta,
+                    collection=collection_meta,
                 )
 
             # message 타입: 축적하고 다음 스텝으로 자동 진행
@@ -629,6 +693,7 @@ class WorkflowEngine:
                 return StepResult(
                     bot_message="\n\n".join(message_parts),
                     completed=True,
+                    concluded=True,
                     collected=dict(session.collected),
                     step_id=step.id,
                     step_type=step.type,
@@ -647,6 +712,7 @@ class WorkflowEngine:
         return StepResult(
             bot_message="\n\n".join(message_parts),
             completed=True,
+            concluded=True,
             collected=dict(session.collected),
         )
 

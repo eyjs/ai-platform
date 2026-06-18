@@ -35,6 +35,14 @@ class WorkflowStep:
     # 값 예: "paper"(상세 리포트) | "compatibility"(궁합 리포트)
     report: str = ""
 
+    # ── 신규(v2): 구조 신호 carry 메타 ──
+    intent: str = ""               # confirm 스텝의 intent-config 키 (예: "compat")
+    confirm_yes_label: str = ""    # 되묻기 yes 라벨 (기본 "응")
+    confirm_no_label: str = ""     # 되묻기 no 라벨 (기본 "아니")
+    collection_target: str = ""    # 수집 대상 (예: "partner") — collection 빌더가 사용
+    collection_field: str = ""     # 이 input/select 스텝이 채우는 필드 key (예: "name"|"birthDate"|"birthTime"|"gender")
+    collection_label: str = ""     # 필드 라벨 (예: "이름") — 없으면 collection_field 폴백
+
     # action step 전용 필드
     endpoint: str = ""  # 외부 API URL (빈 문자열이면 Profile 기본값 사용)
     http_method: str = "POST"  # HTTP 메서드
