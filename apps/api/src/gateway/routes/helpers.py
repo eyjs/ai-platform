@@ -357,6 +357,9 @@ async def _prepare_chat(
         )
         trace = RequestTrace(request_id=request_id)
 
+        # directive 주입: per-turn 가변 지시문 → volatile system_prompt 위치 (캐시 불가 영역)
+        _inject_directive(plan, req.directive)
+
         return _ChatSetup(
             session_id=session_id,
             plan=plan,
@@ -494,6 +497,9 @@ async def _prepare_chat_fast(
         )
         trace = RequestTrace(request_id=request_id)
 
+        # directive 주입: per-turn 가변 지시문 → volatile system_prompt 위치 (캐시 불가 영역)
+        _inject_directive(plan, req.directive)
+
         return _ChatSetup(
             session_id=session_id,
             plan=plan,
@@ -507,6 +513,27 @@ async def _prepare_chat_fast(
     except Exception:
         request_context.reset(ctx_token)
         raise
+
+
+def _inject_directive(plan: ExecutionPlan, directive: str | None) -> None:
+    """directive를 ExecutionPlan.system_prompt의 volatile(per-turn) 위치에 append한다.
+
+    directive는 이 턴에만 유효한 묘묘 행동 지시문 (예: "의도 되묻기 단계").
+    strategy_builder가 빌드한 system_prompt(cacheable 부분) 뒤에 붙여 LLM 행동을 유도한다.
+    directive 미전달 시 plan 무변경 → 하위호환 보장.
+
+    캐싱 정합:
+      - context(grounding)는 strategy_builder external_context 경로 → cacheable 영역.
+      - directive는 이 함수에서 plan.system_prompt 끝에 append → volatile(per-turn) 영역.
+      실제 캐시 키 분리는 task-101(strategy_builder/engine)의 책임이며,
+      이 함수는 directive가 volatile 위치에 흐르도록 라우팅만 책임진다.
+    """
+    if not directive or not directive.strip():
+        return
+    separator = "\n\n--- 이 턴 지시 ---\n"
+    plan.system_prompt = (plan.system_prompt + separator + directive.strip()
+                          if plan.system_prompt
+                          else directive.strip())
 
 
 def _step_to_response(result: StepResult) -> dict:
