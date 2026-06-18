@@ -76,6 +76,8 @@ class AppState:
     rate_limiter: PGRateLimiter
     tenant_service: Optional[TenantService] = None
     orchestrator: Optional[MasterOrchestrator] = None
+    # classify-intent 라우트가 재사용하는 공유 분류기 (router_llm 기반)
+    classifier: Optional[SemanticClassifier] = None
 
     # Task 009: 통합 서비스
     provider_registry: Optional[ProviderRegistry] = None
@@ -296,6 +298,8 @@ async def create_app_state(settings: Settings) -> AppState:
     await workflow_store.load_seeds()
     workflow_session_store = WorkflowSessionStore(pool=pool)
     action_client = ActionClient()
+    # 공유 분류기 — WorkflowEngine과 classify-intent 라우트가 동일 인스턴스 재사용.
+    classifier = SemanticClassifier(router_llm)
     workflow_engine = WorkflowEngine(
         workflow_store,
         session_store=workflow_session_store,
@@ -306,7 +310,7 @@ async def create_app_state(settings: Settings) -> AppState:
             "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
         },
         # select 자유입력 분기를 의미로 판단하는 공통 분류기(경량 router_llm).
-        classifier=SemanticClassifier(router_llm),
+        classifier=classifier,
     )
     logger.info("workflows_loaded", count=workflow_store.count)
 
@@ -483,6 +487,7 @@ async def create_app_state(settings: Settings) -> AppState:
         action_client=action_client,
         workflow_session_store=workflow_session_store,
         providers=providers,
+        classifier=classifier,
     )
 
 
