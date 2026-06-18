@@ -116,6 +116,31 @@ class GraphExecutor:
             return self._graph_cache.invalidate_all()
         return self._graph_cache.invalidate(profile_id)
 
+    async def _suppress_completed_workflow_reentry(
+        self, plan: ExecutionPlan, session_id: str,
+    ) -> None:
+        """완료된 동일 워크플로우의 자동 재진입을 막는다.
+
+        디스커버리 펀넬은 리포트 추천(reveal_cta 완료)으로 끝나는 일회성 리드인이다.
+        완료 후 들어온 후속 메시지가 같은 워크플로우로 다시 분류되면(라우터는 세션
+        상태를 모른다) `_run_workflow_step`이 완료 세션을 보고 처음부터 재시작 →
+        주제·상황·이름·생일을 또 묻는 루프가 생긴다. 완료 세션이 이미 있으면
+        워크플로우를 재실행하지 말고 일반 대화(AGENTIC)로 응답한다 — 묘묘와
+        자유롭게 이어가고 리포트 CTA는 유지된다.
+        """
+        if plan.mode != AgentMode.WORKFLOW or not session_id or not self._workflow_engine:
+            return
+        session = await self._workflow_engine.get_session(session_id)
+        if session and session.completed and session.workflow_id == plan.workflow_id:
+            logger.info(
+                "workflow_reentry_suppressed",
+                layer="AGENT",
+                workflow_id=plan.workflow_id,
+                session_id=session_id,
+            )
+            plan.mode = AgentMode.AGENTIC
+            plan.workflow_id = None
+
     async def execute(
         self,
         question: str,
@@ -134,6 +159,7 @@ class GraphExecutor:
             )
 
         start_time = time.time()
+        await self._suppress_completed_workflow_reentry(plan, session_id)
 
         if plan.mode == AgentMode.WORKFLOW:
             response = await self._execute_workflow(question, plan, session_id)
@@ -166,6 +192,7 @@ class GraphExecutor:
             return
 
         start_time = time.time()
+        await self._suppress_completed_workflow_reentry(plan, session_id)
 
         if plan.mode == AgentMode.WORKFLOW:
             async for event in self._stream_workflow(question, plan, session_id):
