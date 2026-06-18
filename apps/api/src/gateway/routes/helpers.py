@@ -305,9 +305,14 @@ async def _prepare_chat(
             meta.pop("paused_workflow", None)
             await state.session_memory.save_orchestrator_metadata(session_id, meta)
 
-        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
+        # directive가 있으면 backend 오케스트레이터의 generate_turn 호출 →
+        # ai-platform 워크플로우를 우회하고 강제 agentic grounded 대화로 처리한다.
+        # (플로우 회수: 비즈니스 플로우는 saju 백엔드가 소유, ai-platform은 추론만.)
+        force_agentic = bool(req.directive and req.directive.strip())
+
+        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스 (force_agentic이면 무시)
         active_wf = await state.workflow_engine.get_session(session_id)
-        if active_wf and not active_wf.completed:
+        if active_wf and not active_wf.completed and not force_agentic:
             logger.info(
                 "workflow_session_active",
                 session_id=session_id,
@@ -356,6 +361,11 @@ async def _prepare_chat(
             tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
         trace = RequestTrace(request_id=request_id)
+
+        # force_agentic: mode_selector가 워크플로우를 골랐어도 강제 agentic으로 (플로우 회수)
+        if force_agentic and plan.mode != AgentMode.AGENTIC:
+            plan.mode = AgentMode.AGENTIC
+            logger.info("force_agentic_for_directive", session_id=session_id)
 
         # directive 주입: per-turn 가변 지시문 → volatile system_prompt 위치 (캐시 불가 영역)
         _inject_directive(plan, req.directive)
@@ -451,9 +461,14 @@ async def _prepare_chat_fast(
             tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
 
-        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스
+        # directive가 있으면 backend 오케스트레이터의 generate_turn 호출 →
+        # ai-platform 워크플로우를 우회하고 강제 agentic grounded 대화로 처리한다.
+        # (플로우 회수: 비즈니스 플로우는 saju 백엔드가 소유, ai-platform은 추론만.)
+        force_agentic = bool(req.directive and req.directive.strip())
+
+        # 활성 워크플로우 세션이 있으면 Router + history 로드 바이패스 (force_agentic이면 무시)
         active_wf = await state.workflow_engine.get_session(session_id)
-        if active_wf and not active_wf.completed:
+        if active_wf and not active_wf.completed and not force_agentic:
             logger.info(
                 "workflow_session_active",
                 session_id=session_id,
@@ -496,6 +511,11 @@ async def _prepare_chat_fast(
             tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
         )
         trace = RequestTrace(request_id=request_id)
+
+        # force_agentic: mode_selector가 워크플로우를 골랐어도 강제 agentic으로 (플로우 회수)
+        if force_agentic and plan.mode != AgentMode.AGENTIC:
+            plan.mode = AgentMode.AGENTIC
+            logger.info("force_agentic_for_directive", session_id=session_id)
 
         # directive 주입: per-turn 가변 지시문 → volatile system_prompt 위치 (캐시 불가 영역)
         _inject_directive(plan, req.directive)
