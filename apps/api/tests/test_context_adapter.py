@@ -16,9 +16,24 @@ from src.workflow.store import WorkflowStore
 
 
 class _EchoLLM:
-    """generate가 받은 user_prompt를 그대로 돌려주는 가짜 LLM (프롬프트 주입 검증용)."""
+    """generate가 받은 인자를 기록하고 prompt를 그대로 돌려주는 가짜 LLM (주입 검증용).
 
-    async def generate(self, prompt: str, system: str = "") -> str:
+    task-101 이후 cacheable_system/volatile_system 키워드 인자를 기록한다.
+    """
+
+    def __init__(self) -> None:
+        self.last_cacheable: str = ""
+        self.last_volatile: str = ""
+
+    async def generate(
+        self,
+        prompt: str,
+        system: str = "",
+        cacheable_system: str = "",
+        volatile_system: str = "",
+    ) -> str:
+        self.last_cacheable = cacheable_system
+        self.last_volatile = volatile_system
         return prompt
 
 
@@ -108,15 +123,21 @@ async def test_start_binds_adapter_name_to_session():
 
 
 async def test_dynamic_step_injects_adapter_block():
-    """바인딩된 어댑터의 enrich 블록이 LLM 프롬프트(=EchoLLM 출력)에 주입된다."""
+    """바인딩된 어댑터의 enrich 블록이 cacheable_system 에 주입된다 (task-101).
+
+    task-101 이후 grounding 은 user_prompt 가 아니라 cacheable_system 으로 이동했다.
+    EchoLLM 이 기록한 last_cacheable 에 STUB-BLOCK 이 있으면 주입 성공.
+    """
     stub = _StubAdapter()
+    echo_llm = _EchoLLM()
     engine = WorkflowEngine(
-        _build_store(_dynamic_workflow()), llm=_EchoLLM(),
+        _build_store(_dynamic_workflow()), llm=echo_llm,
         context_adapters={"stub": stub},
     )
     result = await engine.start("wf_dynamic", "sess-stub", context_adapter="stub")
     assert stub.calls == 1
-    assert "[STUB-BLOCK]" in result.bot_message
+    # grounding 이 cacheable_system 에 포함됐는지 확인 (task-101 변경점)
+    assert "[STUB-BLOCK]" in echo_llm.last_cacheable
 
 
 async def test_dynamic_step_without_adapter_has_no_block():

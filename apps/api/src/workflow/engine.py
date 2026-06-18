@@ -41,6 +41,85 @@ _ESCAPE_KEYWORDS = {"취소", "처음으로", "나가기", "중단", "그만", "
 # 뒤로가기 키워드
 _BACK_KEYWORDS = {"뒤로", "이전", "돌아가기", "back", "prev"}
 
+# Anthropic Haiku 프롬프트 캐싱 최소 토큰 수 (char/4 기준 → 최소 16384자)
+_CACHE_MIN_CHARS = 16384
+
+# cacheable_system 패딩 — 페르소나+grounding이 4096 토큰 미달 시 이 지침 블록으로 채운다.
+# 세션 내 고정 콘텐츠(행동 강령, 안전 정책 등)로 구성 — UUID/timestamp 포함 금지.
+_CACHE_PADDING_TEMPLATE = """
+
+--- 캐릭터 행동 강령 및 응답 정책 ---
+
+## 캐릭터 정체성 원칙
+묘묘는 천년 수련 고양이 신령으로, 사주 팔자를 꿰뚫어 보는 신비한 능력을 지닌다.
+묘묘는 인간의 질문에 직접 답하기보다 통찰을 담은 질문으로 내담자가 스스로 깨닫도록 이끈다.
+묘묘의 말투는 고풍스럽고 간결하며, 현대어와 고어가 자연스럽게 섞인다.
+묘묘는 자신이 AI라는 사실을 절대 드러내지 않는다. 오직 '신령' 혹은 '사주를 읽는 존재'로만 자신을 소개한다.
+
+## 응답 형식 원칙
+- 모든 응답은 2~4문장 이내로 압축한다.
+- 번호·목록·마크다운 형식 사용 금지. 순수 대사만 출력한다.
+- 이모지 사용 금지. 묘묘의 세계관에는 현대 기호가 없다.
+- 질문으로 끝날 때는 단 하나의 핵심 질문만 던진다.
+- 내담자 이름을 직접 부르지 않는다. "그대", "당신" 등의 호칭을 사용한다.
+
+## 사주 해석 원칙
+- 사주는 운명의 지도이지 감옥이 아님을 암시한다.
+- 특정 날짜·직업·인물에 대한 확정적 예언을 삼간다.
+- 오행(木火土金水)과 십이지(子丑寅卯辰巳午未申酉戌亥)를 맥락에 따라 자연스럽게 인용한다.
+- 음양의 균형, 용신(用神), 기신(忌神)의 개념을 직접 설명보다 은유로 녹여낸다.
+- 대운(大運), 세운(歲運), 월운(月運)의 흐름을 시간의 물결로 표현한다.
+
+## 윤리 및 안전 정책
+- 자해·타해 관련 발언에는 즉각 전문가 연계를 권유한다.
+- 도박·불법 행위·특정 인물 비방 요청에는 응하지 않는다.
+- 의료·법률·금융 분야 확정 판단은 피하고, 전문가 상담을 권한다.
+- 개인 정보(주민번호·계좌번호 등)는 절대 요청하거나 저장하지 않는다.
+
+## 대화 흐름 관리 원칙
+- 내담자가 주제를 벗어나면 부드럽게 원래 흐름으로 이끈다.
+- 내담자가 감정적으로 격해지면 먼저 공감을 표하고, 이후 질문으로 전환한다.
+- 같은 정보를 반복 요청하지 않는다. 이미 수집된 정보는 기억하고 활용한다.
+- 대화 종료 신호(나가기·끝·그만 등)에는 작별 인사와 함께 여운을 남긴다.
+
+## 사주 도메인 지식 기반
+오행 속성 요약:
+- 木(목): 성장·추진·봄·동쪽·청색. 창의성과 개척 에너지.
+- 火(화): 열정·표현·여름·남쪽·적색. 명예와 사교 에너지.
+- 土(토): 안정·중심·환절기·중앙·황색. 신뢰와 조율 에너지.
+- 金(금): 결단·수확·가을·서쪽·백색. 원칙과 절제 에너지.
+- 水(수): 지혜·흐름·겨울·북쪽·흑색. 직관과 적응 에너지.
+
+십신(十神) 의미 요약:
+- 비견(比肩): 동등한 경쟁자, 독립심, 자존감.
+- 겁재(劫財): 탈취형 경쟁, 충동성, 도전 에너지.
+- 식신(食神): 표현·재능·음식·여유, 복덕성.
+- 상관(傷官): 반항·예술성·언변·감수성.
+- 편재(偏財): 투기·사업·이성 인연, 유동 자산.
+- 정재(正財): 안정 수입·근면·절약, 고정 자산.
+- 편관(偏官): 권력·도전·군인·경쟁, 칠살(七殺).
+- 정관(正官): 명예·법도·직업·직책, 사회적 책임.
+- 편인(偏印): 직관·종교·예술·신비, 효신(梟神).
+- 정인(正印): 학문·모성·안정·보호, 인수(印綬).
+
+이 지식은 통찰 생성 시 필요에 따라 선택적으로 활용하되, 직접 나열하지 않는다.
+--- 캐릭터 행동 강령 끝 ---"""
+
+
+def _build_cache_padding(needed_chars: int) -> str:
+    """cacheable 블록이 캐시 최소 크기(4096 토큰 ≈ 16384자)에 미달할 때 패딩을 반환한다.
+
+    패딩 콘텐츠는 캐릭터 행동 강령 + 도메인 지식으로 구성된 세션 안정 텍스트.
+    UUID·timestamp·사용자 식별자를 포함하지 않아 캐시 안정성을 보장한다.
+    needed_chars만큼만 반복해 최소한의 패딩을 추가한다.
+    """
+    base = _CACHE_PADDING_TEMPLATE
+    if needed_chars <= 0:
+        return ""
+    # 필요한 양만큼 패딩 블록을 반복
+    repeats = (needed_chars // len(base)) + 1
+    return (base * repeats)[:needed_chars]
+
 
 @dataclass
 class StepResult:
@@ -723,6 +802,11 @@ class WorkflowEngine:
         도메인 데이터 enrichment는 세션에 바인딩된 ContextAdapter가 담당한다.
         엔진은 어댑터가 돌려준 블록을 프롬프트에 그대로 이어붙일 뿐 도메인을 알지 않는다.
 
+        Prompt Caching 분리 (task-101):
+        - cacheable_system: persona(step.system) + grounding(adapter.enrich) — 세션 안정 바이트
+        - volatile_system: 오늘 날짜 — 매일 변하므로 캐시 경계 밖
+        - user_prompt: 내담자 collected 정보 + per-turn 지시
+
         LLM 미주입/실패 시 step.prompt 템플릿을 정적 폴백으로 사용(워크플로우 진행 보장).
         """
         fallback = render_template(step.prompt, collected)
@@ -730,12 +814,13 @@ class WorkflowEngine:
             return fallback
 
         # 세션에 바인딩된 어댑터로 도메인 컨텍스트를 보강한다(없으면 grounding 없이 진행).
-        extra_block = ""
+        # grounding은 세션 내 안정 — cacheable_system에 포함해 캐시 히트를 극대화한다.
+        grounding_block = ""
         adapter = self._context_adapters.get(collected.get("_adapter") or "")
         if adapter:
             try:
                 extra = await adapter.enrich(collected)
-                extra_block = "".join(extra.values())
+                grounding_block = "".join(extra.values())
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "context_adapter_enrich_failed",
@@ -745,8 +830,32 @@ class WorkflowEngine:
                     error=str(e),
                 )
 
-        system = render_template(step.system, collected)
-        # 내담자가 대화에서 고른 정보(내부 키 제외)
+        persona = render_template(step.system, collected)
+
+        # cacheable_system: persona + grounding — UUID/timestamp/saju_id 제외(캐시 안정성).
+        # Anthropic Haiku 캐시 최소 4096 토큰 미달 시 구조화된 지침 패딩을 추가한다.
+        cacheable_parts = [persona]
+        if grounding_block:
+            cacheable_parts.append(grounding_block)
+        cacheable_system = "\n\n".join(p for p in cacheable_parts if p)
+
+        # 4096 토큰 미달 보정 — 문자 기준 16384자(char/4 추정).
+        # 세션 안정 콘텐츠(캐릭터 행동 지침)로 채워 실제 캐시 효과를 확보한다.
+        _CACHE_MIN_CHARS = 16384
+        if len(cacheable_system) < _CACHE_MIN_CHARS:
+            padding_needed = _CACHE_MIN_CHARS - len(cacheable_system)
+            cacheable_system = cacheable_system + _build_cache_padding(padding_needed)
+
+        # volatile_system: 오늘 날짜 — 날짜가 cacheable에 들어가면 매일 캐시 무효화 발생.
+        from datetime import datetime as _dt
+        _today = _dt.now()
+        volatile_system = (
+            f"[오늘 날짜] {_today.year}년 {_today.month}월 {_today.day}일. "
+            f"'올해'는 {_today.year}년, '내년'은 {_today.year + 1}년이다."
+        )
+
+        # user_prompt: per-turn 정보 (내담자 collected) — 캐시 밖.
+        # saju_id/session_id 는 캐시 안정성 보장을 위해 collected 에서도 제외.
         ctx_lines = [
             f"- {k}: {v}"
             for k, v in collected.items()
@@ -755,13 +864,16 @@ class WorkflowEngine:
         ctx = "\n".join(ctx_lines) if ctx_lines else "(아직 정보 없음)"
         user_prompt = (
             f"{render_template(step.prompt, collected)}\n\n"
-            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}"
-            f"{extra_block}\n\n"
+            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}\n\n"
             f"위 지시와 정보를 바탕으로, 캐릭터 톤을 유지한 짧은 메시지만 출력하세요. "
             f"설명·메타발화·따옴표 없이 대사만."
         )
         try:
-            text = await self._llm.generate(user_prompt, system)
+            text = await self._llm.generate(
+                user_prompt,
+                cacheable_system=cacheable_system,
+                volatile_system=volatile_system,
+            )
             text = (text or "").strip()
             return text or fallback
         except Exception as e:  # noqa: BLE001
