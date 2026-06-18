@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from src.gateway.routes import (
     admin,
     chat,
+    classify,
     feedback,
     ingest,
     public,
@@ -27,6 +28,7 @@ gateway_router = APIRouter()
 # 분할 전 router.py 정의 순서를 그대로 보존한다(라우트 인벤토리 불변).
 gateway_router.include_router(public.router)
 gateway_router.include_router(chat.router)
+gateway_router.include_router(classify.router)
 gateway_router.include_router(ingest.router)
 gateway_router.include_router(workflow.router)
 gateway_router.include_router(admin.router)

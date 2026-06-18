@@ -105,6 +105,36 @@ class SessionHistoryResponse(BaseModel):
     updated_at: str
 
 
+class ClassifyCandidate(BaseModel):
+    """의도 분류 후보."""
+
+    label: str
+    description: str = ""
+
+
+class ClassifyIntentRequest(BaseModel):
+    """의도 분류 요청."""
+
+    history: list[dict] | str = Field(default_factory=list)  # [{role, content}] 또는 문자열
+    message: str
+    candidates: list[ClassifyCandidate]
+    threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("message must not be empty")
+        return v
+
+
+class ClassifyIntentResponse(BaseModel):
+    """의도 분류 응답."""
+
+    intent: str | None = None  # ClassifyResult.label (candidates의 label 값 또는 None)
+    confidence: float = 0.0
+
+
 @dataclass
 class UserContext:
     """인증 후 생성되는 사용자 맥락."""
