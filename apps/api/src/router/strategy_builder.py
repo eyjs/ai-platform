@@ -121,9 +121,13 @@ class StrategyBuilder:
         volatile_system_prompt = ""
         if cacheable_system_prompt:
             today = datetime.now()
+            # 명령형 강제 — 수동 진술("~이다")은 LLM이 학습 prior로 무시하므로
+            # 반드시 준수할 시스템 사실로 못박고 다른 연도를 금지한다.
             volatile_system_prompt = (
-                f"[오늘 날짜] {today.year}년 {today.month}월 {today.day}일. "
-                f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년이다."
+                f"[필수 준수·시스템 사실] 현재 시각은 정확히 {today.year}년 {today.month}월 {today.day}일이다. "
+                f"운세·시기·연도·나이를 말할 때 반드시 이 날짜를 기준으로 하라. "
+                f"'올해'={today.year}년, '내년'={today.year + 1}년, '작년'={today.year - 1}년. "
+                f"절대 {today.year - 1}년이나 다른 연도를 '올해'·'현재'로 말하지 마라."
             )
 
         # needs_planning 판단
