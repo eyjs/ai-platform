@@ -70,6 +70,23 @@ def _extract_faithfulness_score(guardrail_results: dict) -> Optional[float]:
     return None
 
 
+def _build_agentic_user_turn(question: str, plan: "ExecutionPlan") -> str:
+    """에이전틱 user 턴 봉투를 구성한다.
+
+    volatile(날짜+directive)과 이전 대화 기록을 user 턴에 주입한다.
+    캐시된 system prefix(페르소나+grounding) 뒤에 붙으므로 prefix 캐시를 깨지 않으면서
+    매턴 최신 날짜/지시를 전달한다(컴파일 그래프엔 volatile 미포함 → byte-stable).
+    """
+    prefix_parts: list[str] = []
+    if plan.volatile_system_prompt:
+        prefix_parts.append(f"[지침]\n{plan.volatile_system_prompt}")
+    if plan.conversation_context:
+        prefix_parts.append(f"[이전 대화 기록]\n{plan.conversation_context}")
+    if not prefix_parts:
+        return question
+    return "\n\n".join(prefix_parts + [f"[현재 질문]\n{question}"])
+
+
 class GraphExecutor:
     """모드별 LangGraph 그래프를 선택하여 실행한다.
 
@@ -566,12 +583,7 @@ class GraphExecutor:
         else:
             agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
-        effective_question = question
-        if plan.conversation_context:
-            effective_question = (
-                f"[이전 대화 기록]\n{plan.conversation_context}\n\n"
-                f"[현재 질문]\n{question}"
-            )
+        effective_question = _build_agentic_user_turn(question, plan)
 
         result = await agent_app.ainvoke(
             {"messages": [{"role": "user", "content": effective_question}]},
@@ -653,12 +665,7 @@ class GraphExecutor:
         else:
             agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
 
-        effective_question = question
-        if plan.conversation_context:
-            effective_question = (
-                f"[이전 대화 기록]\n{plan.conversation_context}\n\n"
-                f"[현재 질문]\n{question}"
-            )
+        effective_question = _build_agentic_user_turn(question, plan)
 
         yield {"type": "trace", "data": {"step": "agentic_start", "mode": "agentic"}}
 

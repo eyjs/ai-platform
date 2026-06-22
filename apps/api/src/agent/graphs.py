@@ -4,12 +4,14 @@
 """
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from typing import Optional
 
+from src.agent.cache_padding import pad_to_min
 from src.agent.graph_enrich import create_graph_enrich
 from src.agent.nodes import (
     create_build_response,
@@ -144,16 +146,23 @@ def build_agentic_graph(
     chat_model: BaseChatModel,
     tools: list[BaseTool],
     system_prompt: str = "",
+    *,
+    enable_prompt_cache: bool = True,
 ):
     """에이전틱 ReAct 그래프.
 
     create_react_agent로 LLM이 도구를 자율 선택한다.
     Guardrail은 GraphExecutor에서 에이전트 실행 후 적용.
 
+    프롬프트 캐싱: ChatAnthropic 백엔드면 system_prompt(cacheable: 페르소나+grounding)를
+    `cache_control: ephemeral` content-block으로 감싼다. 날짜/directive 등 volatile은
+    여기 굽지 않고 호출부가 user 턴에 주입한다(컴파일 그래프 byte-stable 유지 → prefix 캐시 워밍).
+
     Args:
         chat_model: LangChain ChatModel (tool calling 지원)
         tools: LangChain 도구 목록
-        system_prompt: 시스템 프롬프트
+        system_prompt: 캐시 가능 시스템 프롬프트(페르소나+grounding)
+        enable_prompt_cache: Anthropic 프롬프트 캐싱 적용 여부
 
     Returns:
         CompiledGraph (ainvoke/astream 가능)
@@ -161,8 +170,26 @@ def build_agentic_graph(
     if not tools:
         raise ValueError("에이전틱 모드에는 최소 1개 이상의 도구가 필요합니다.")
 
+    # 캐시 경계: ChatAnthropic 일 때만 content-block + cache_control 적용.
+    # Haiku 캐시 최소 4096토큰 미달 시 세션 안정 콘텐츠로 패딩(deterministic 경로와 동일).
+    cacheable_text = pad_to_min(system_prompt) if system_prompt else ""
+    use_cache = (
+        enable_prompt_cache
+        and cacheable_text
+        and type(chat_model).__name__ == "ChatAnthropic"
+    )
+
+    if use_cache:
+        prompt = SystemMessage(content=[{
+            "type": "text",
+            "text": cacheable_text,
+            "cache_control": {"type": "ephemeral"},
+        }])
+    else:
+        prompt = system_prompt or None
+
     return create_react_agent(
         model=chat_model,
         tools=tools,
-        prompt=system_prompt if system_prompt else None,
+        prompt=prompt,
     )

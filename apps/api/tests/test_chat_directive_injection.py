@@ -1,7 +1,7 @@
 """directive 주입 경로 테스트 (task-130).
 
 검증 항목:
-  (1) directive가 system_prompt에 합류 (volatile 위치 — plan.system_prompt 끝에 append)
+  (1) directive가 volatile_system_prompt(캐시 밖, per-turn)로 라우팅 — cacheable(system_prompt) 미오염
   (2) context(grounding)가 external_context 경로로 흐름 (strategy_builder L107-114)
   (3) directive 미지정 시 기존 거동 유지 (하위호환)
 """
@@ -17,47 +17,48 @@ from src.router.execution_plan import ExecutionPlan
 
 
 # ---------------------------------------------------------------------------
-# (1) directive → system_prompt volatile append
+# (1) directive → volatile_system_prompt (캐시 밖, per-turn)
 # ---------------------------------------------------------------------------
 
 class TestInjectDirective:
     """_inject_directive 단위 테스트."""
 
-    def test_directive_appended_to_existing_system_prompt(self):
-        """directive가 있으면 plan.system_prompt 끝 volatile 위치에 append된다."""
+    def test_directive_routed_to_volatile_not_cacheable(self):
+        """directive는 cacheable(system_prompt)이 아니라 volatile_system_prompt로 라우팅된다."""
         plan = ExecutionPlan(
             mode=AgentMode.AGENTIC,
             scope=SearchScope(),
             system_prompt="너는 묘묘, 츤데레 고양이 신령이다.",
         )
         _inject_directive(plan, "지금은 사용자 의도를 되묻는 단계야.")
-        assert "너는 묘묘" in plan.system_prompt
-        assert "이 턴 지시" in plan.system_prompt
-        assert "사용자 의도를 되묻는 단계" in plan.system_prompt
-        # directive는 base prompt 뒤에 와야 한다 (volatile = 끝 위치)
-        assert plan.system_prompt.index("너는 묘묘") < plan.system_prompt.index("이 턴 지시")
+        # cacheable(system_prompt)은 byte-stable 유지 — directive 미오염
+        assert plan.system_prompt == "너는 묘묘, 츤데레 고양이 신령이다."
+        # directive는 volatile에 흐른다
+        assert "사용자 의도를 되묻는 단계" in plan.volatile_system_prompt
 
-    def test_directive_only_when_no_base_system_prompt(self):
-        """base system_prompt가 없을 때 directive만으로 system_prompt가 구성된다."""
+    def test_directive_only_when_no_base_volatile(self):
+        """base volatile이 없을 때 directive만으로 volatile_system_prompt가 구성된다(구분자 없음)."""
         plan = ExecutionPlan(mode=AgentMode.AGENTIC, scope=SearchScope(), system_prompt="")
         _inject_directive(plan, "결과 상담 단계.")
-        assert plan.system_prompt == "결과 상담 단계."
+        assert plan.volatile_system_prompt == "결과 상담 단계."
 
-    def test_directive_separator_present(self):
-        """volatile 구분자 '--- 이 턴 지시 ---'가 삽입된다."""
+    def test_directive_separator_present_when_volatile_exists(self):
+        """기존 volatile(날짜 등)이 있으면 '--- 이 턴 지시 ---' 구분자로 directive가 append된다."""
         plan = ExecutionPlan(
             mode=AgentMode.AGENTIC,
             scope=SearchScope(),
             system_prompt="base",
+            volatile_system_prompt="[오늘 날짜] 2026년",
         )
         _inject_directive(plan, "수집 안내 단계.")
-        assert "--- 이 턴 지시 ---" in plan.system_prompt
+        assert "--- 이 턴 지시 ---" in plan.volatile_system_prompt
+        assert plan.volatile_system_prompt.startswith("[오늘 날짜] 2026년")
 
     def test_directive_is_stripped(self):
-        """directive 앞뒤 공백이 제거된다."""
+        """directive 앞뒤 공백이 제거되어 volatile에 들어간다."""
         plan = ExecutionPlan(mode=AgentMode.AGENTIC, scope=SearchScope(), system_prompt="base")
         _inject_directive(plan, "  hello directive  ")
-        assert plan.system_prompt.endswith("hello directive")
+        assert plan.volatile_system_prompt == "hello directive"
 
 
 # ---------------------------------------------------------------------------
@@ -220,13 +221,13 @@ class TestContextFlowsToExternalContext:
 # ---------------------------------------------------------------------------
 
 class TestCachingPositionSeparation:
-    """directive=volatile vs context=cacheable 위치 분리 검증."""
+    """directive=volatile vs context=cacheable 채널 분리 검증."""
 
-    def test_context_precedes_directive_in_final_system_prompt(self):
-        """최종 system_prompt에서 context(참고 컨텍스트)는 directive(이 턴 지시)보다 앞에 온다.
+    def test_context_cacheable_directive_volatile_separated(self):
+        """context는 cacheable(system_prompt), directive는 volatile(volatile_system_prompt)로 분리된다.
 
-        context → strategy_builder (cacheable 영역, system_prompt 중간)
-        directive → _inject_directive (volatile 영역, system_prompt 끝)
+        context → strategy_builder external_context (cacheable system_prompt)
+        directive → _inject_directive (volatile_system_prompt, 캐시 밖)
         """
         from src.router.strategy_builder import StrategyBuilder
         from src.router.execution_plan import QuestionType, QuestionStrategy
@@ -254,7 +255,9 @@ class TestCachingPositionSeparation:
         # directive(volatile) 주입
         _inject_directive(plan, "의도 되묻기 단계 — 짧게 질문해.")
 
+        # context(grounding)는 cacheable system_prompt에 있다
         assert "참고 컨텍스트" in plan.system_prompt
-        assert "이 턴 지시" in plan.system_prompt
-        # cacheable(참고 컨텍스트) < volatile(이 턴 지시)
-        assert plan.system_prompt.index("참고 컨텍스트") < plan.system_prompt.index("이 턴 지시")
+        assert "갑자년생" in plan.system_prompt
+        # directive는 cacheable을 오염시키지 않고 volatile에만 있다
+        assert "되묻기" not in plan.system_prompt
+        assert "되묻기" in plan.volatile_system_prompt
