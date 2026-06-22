@@ -53,10 +53,8 @@ class _BoomAdapter:
         raise RuntimeError("enrich 실패")
 
 
-class _BindPadAdapter:
-    """bind hook + 도메인 패딩 텍스트를 제공하는 가짜 어댑터(V2/V3 검증용)."""
-
-    cache_padding_text = "ZZ-DOMAIN-PADDING-BLOCK "
+class _BindAdapter:
+    """bind hook을 제공하는 가짜 어댑터(V3 검증용)."""
 
     def bind(self, session_id: str, collected: dict) -> None:
         # 도메인 규약: "svc-{id}" → collected["entity_id"]
@@ -198,7 +196,7 @@ async def test_start_calls_adapter_bind_for_domain_id():
     """엔진은 바인딩된 어댑터의 bind()를 호출해 도메인 식별자를 collected에 채운다."""
     engine = WorkflowEngine(
         _build_store(_dynamic_workflow()), llm=_EchoLLM(),
-        context_adapters={"svc": _BindPadAdapter()},
+        context_adapters={"svc": _BindAdapter()},
     )
     await engine.start("wf_dynamic", "svc-ABC123", context_adapter="svc")
     session = await engine.get_session("svc-ABC123")
@@ -213,23 +211,22 @@ async def test_saju_adapter_bind_extracts_uuid_from_product_session():
     assert collected["saju_id"] == "550e8400-e29b-41d4-a716-446655440000"
 
 
-# --- V2: 캐시 패딩 도메인 텍스트는 어댑터가 제공, 없으면 중립 여백 ---
+# --- V2: 캐시 패딩 도메인 텍스트는 Profile(cache_padding_text)이 제공, 없으면 중립 여백 ---
 
 
-async def test_padding_uses_adapter_domain_text():
-    """어댑터가 cache_padding_text를 주면 그 텍스트로 cacheable_system을 채운다."""
+async def test_padding_uses_profile_domain_text():
+    """start(cache_padding_text=...)로 받은 도메인 텍스트로 cacheable_system을 채운다."""
     echo_llm = _EchoLLM()
-    engine = WorkflowEngine(
-        _build_store(_dynamic_workflow()), llm=echo_llm,
-        context_adapters={"svc": _BindPadAdapter()},
+    engine = WorkflowEngine(_build_store(_dynamic_workflow()), llm=echo_llm)
+    await engine.start(
+        "wf_dynamic", "sess-pad", cache_padding_text="ZZ-DOMAIN-PADDING-BLOCK ",
     )
-    await engine.start("wf_dynamic", "svc-1", context_adapter="svc")
     assert "ZZ-DOMAIN-PADDING-BLOCK" in echo_llm.last_cacheable
     assert len(echo_llm.last_cacheable) >= 16384  # 캐시 최소 크기 도달
 
 
-async def test_padding_neutral_when_no_adapter():
-    """어댑터 미바인딩이면 도메인 무지 중립 여백으로 패딩한다(도메인 누수 없음)."""
+async def test_padding_neutral_when_no_text():
+    """패딩 텍스트 미지정이면 도메인 무지 중립 여백으로 패딩한다(도메인 누수 없음)."""
     echo_llm = _EchoLLM()
     engine = WorkflowEngine(_build_store(_dynamic_workflow()), llm=echo_llm)
     await engine.start("wf_dynamic", "sess-neutral")

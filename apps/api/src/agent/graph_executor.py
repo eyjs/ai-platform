@@ -326,7 +326,9 @@ class GraphExecutor:
                 session_id=session_id,
             )
             return await engine.start(
-                workflow_id, session_id, context_adapter=plan.context_adapter,
+                workflow_id, session_id,
+                context_adapter=plan.context_adapter,
+                cache_padding_text=plan.cache_padding_text,
             )
 
         # 기존 세션 진행
@@ -524,7 +526,7 @@ class GraphExecutor:
     def _get_or_build_agentic_graph(self, lc_tools: list, plan: ExecutionPlan):
         """캐시된 agentic graph를 반환하거나 새로 빌드한다."""
         tool_names = [t.name for t in lc_tools]
-        cache_key = GraphCache.make_key(plan.system_prompt, tool_names)
+        cache_key = GraphCache.make_key(plan.system_prompt, tool_names, plan.cache_padding_text)
 
         cached = self._graph_cache.get(cache_key)
         if cached is not None:
@@ -538,6 +540,7 @@ class GraphExecutor:
             chat_model=self._chat_model,
             tools=lc_tools,
             system_prompt=plan.system_prompt,
+            cache_padding_text=plan.cache_padding_text,
         )
 
         # profile_id는 plan에서 추출 (무효화 연동용)
@@ -579,6 +582,7 @@ class GraphExecutor:
             agent_app = build_agentic_graph(
                 chat_model=self._chat_model, tools=lc_tools,
                 system_prompt=plan.system_prompt,
+                cache_padding_text=plan.cache_padding_text,
             )
         else:
             agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
@@ -661,6 +665,7 @@ class GraphExecutor:
             agent_app = build_agentic_graph(
                 chat_model=self._chat_model, tools=lc_tools,
                 system_prompt=plan.system_prompt,
+                cache_padding_text=plan.cache_padding_text,
             )
         else:
             agent_app = self._get_or_build_agentic_graph(lc_tools, plan)

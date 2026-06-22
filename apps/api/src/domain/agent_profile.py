@@ -107,6 +107,9 @@ class AgentProfile:
     workflow_action_endpoint: str | None = None  # action step endpoint 기본값
     workflow_action_headers: dict = field(default_factory=dict)  # action step headers 기본값
     context_adapter: str | None = None  # dynamic 스텝 enrichment 어댑터 이름 (예: "saju")
+    # 프롬프트 캐시 최소 크기 미달 시 채울 도메인 배경 텍스트(세션 안정). 비면 도메인 중립
+    # 여백. agentic·workflow 양쪽 경로가 이 값을 filler로 공유한다(도메인 텍스트의 단일 출처).
+    cache_padding_text: str = ""
     # 토큰이 비어 응답이 빈 채로 끝날 때 대신 발화할 폴백 문구(프로필 톤). None이면 범용 기본값.
     empty_response_fallback: str | None = None
 

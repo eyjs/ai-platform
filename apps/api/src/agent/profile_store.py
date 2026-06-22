@@ -239,6 +239,7 @@ class ProfileStore:
             workflow_action_endpoint=data.get("workflow_action_endpoint"),
             workflow_action_headers=data.get("workflow_action_headers", {}),
             context_adapter=data.get("context_adapter"),
+            cache_padding_text=data.get("cache_padding_text", ""),
             empty_response_fallback=data.get("empty_response_fallback"),
         )
 
@@ -276,6 +277,7 @@ class ProfileStore:
             "workflow_action_endpoint": profile.workflow_action_endpoint,
             "workflow_action_headers": profile.workflow_action_headers,
             "context_adapter": profile.context_adapter,
+            "cache_padding_text": profile.cache_padding_text,
             "empty_response_fallback": profile.empty_response_fallback,
         }
 

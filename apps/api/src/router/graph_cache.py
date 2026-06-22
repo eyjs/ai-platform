@@ -57,10 +57,14 @@ class GraphCache:
         self._lock = threading.Lock()
 
     @staticmethod
-    def make_key(system_prompt: str, tool_names: list[str]) -> CacheKey:
-        """캐시 키를 생성한다."""
+    def make_key(system_prompt: str, tool_names: list[str], cache_padding_text: str = "") -> CacheKey:
+        """캐시 키를 생성한다.
+
+        cache_padding_text는 컴파일된 그래프의 cacheable 시스템 바이트에 영향을 주므로
+        키에 포함한다(동일 system_prompt·다른 패딩 프로필 간 캐시 충돌 방지).
+        """
         prompt_hash = hashlib.sha256(
-            system_prompt.encode("utf-8"),
+            f"{system_prompt}\x00{cache_padding_text}".encode("utf-8"),
         ).hexdigest()[:16]
         return CacheKey(
             system_prompt_hash=prompt_hash,

@@ -54,6 +54,7 @@ class ExecutionPlan:
     workflow_id: str | None = None
     workflow_step: str | None = None
     context_adapter: str | None = None  # dynamic 스텝 enrichment 어댑터 이름 (Profile 지정)
+    cache_padding_text: str = ""  # 캐시 패딩 도메인 배경 텍스트 (Profile 지정, 양 경로 공유)
     conversation_context: str = ""
     response_policy: str = ResponsePolicy.BALANCED
     max_tool_calls: int = 5

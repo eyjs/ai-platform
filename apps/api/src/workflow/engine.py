@@ -139,6 +139,7 @@ class WorkflowEngine:
         action_endpoint: str | None = None,
         action_headers: dict | None = None,
         context_adapter: str | None = None,
+        cache_padding_text: str = "",
     ) -> StepResult:
         """워크플로우를 시작하고, 첫 번째 스텝의 봇 메시지를 반환한다.
 
@@ -147,6 +148,8 @@ class WorkflowEngine:
             session_id: 대화 세션 ID
             action_endpoint: Profile 기본 action 엔드포인트 (step에 미지정 시 사용)
             action_headers: Profile 기본 action 헤더 (step에 미지정 시 사용)
+            cache_padding_text: 캐시 패딩용 도메인 배경 텍스트 (Profile이 지정). dynamic 스텝
+                cacheable_system 패딩에 쓰인다. 비면 도메인 중립 여백.
             context_adapter: dynamic 스텝 enrichment에 쓸 어댑터 이름 (Profile이 지정).
                 세션에 바인딩되어 이후 advance/dynamic 스텝에서 재사용된다.
         """
@@ -175,6 +178,10 @@ class WorkflowEngine:
         # 세션 컨텍스트를 워크플로우 변수로 주입한다(범용 — session_id만).
         # action 엔드포인트/템플릿에서 {{session_id}}로 참조 가능.
         session.collected["session_id"] = session_id
+
+        # 캐시 패딩 도메인 텍스트를 세션에 바인딩(영속/복원됨). dynamic 스텝에서 filler로 사용.
+        if cache_padding_text:
+            session.collected["_pad_text"] = cache_padding_text
 
         # dynamic 스텝 enrichment 어댑터를 세션에 바인딩 (collected에 저장 → 영속/복원됨).
         if context_adapter:
@@ -763,11 +770,11 @@ class WorkflowEngine:
             cacheable_parts.append(grounding_block)
         cacheable_system = "\n\n".join(p for p in cacheable_parts if p)
 
-        # 4096 토큰 미달 보정 — 캐시 효과 확보. 도메인 배경 텍스트가 필요하면 바인딩된
-        # 어댑터가 제공한다(엔진은 도메인 무지 — filler가 없으면 중립 여백으로 채운다).
-        padding_filler = getattr(adapter, "cache_padding_text", "") if adapter else ""
+        # 4096 토큰 미달 보정 — 캐시 효과 확보. 도메인 배경 텍스트(Profile.cache_padding_text)가
+        # 세션에 바인딩돼 있으면 filler로, 없으면 도메인 중립 여백으로 채운다(엔진 도메인 무지).
+        padding_filler = collected.get("_pad_text") or ""
         if not isinstance(padding_filler, str):
-            padding_filler = ""  # 어댑터가 문자열로 제공하지 않으면 중립 여백 사용
+            padding_filler = ""
         cacheable_system = pad_to_min(cacheable_system, filler=padding_filler)
 
         # volatile_system: 오늘 날짜 — 날짜가 cacheable에 들어가면 매일 캐시 무효화 발생.

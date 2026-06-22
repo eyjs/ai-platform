@@ -148,6 +148,7 @@ def build_agentic_graph(
     system_prompt: str = "",
     *,
     enable_prompt_cache: bool = True,
+    cache_padding_text: str = "",
 ):
     """에이전틱 ReAct 그래프.
 
@@ -172,7 +173,7 @@ def build_agentic_graph(
 
     # 캐시 경계: ChatAnthropic 일 때만 content-block + cache_control 적용.
     # Haiku 캐시 최소 4096토큰 미달 시 세션 안정 콘텐츠로 패딩(deterministic 경로와 동일).
-    cacheable_text = pad_to_min(system_prompt) if system_prompt else ""
+    cacheable_text = pad_to_min(system_prompt, filler=cache_padding_text) if system_prompt else ""
     use_cache = (
         enable_prompt_cache
         and cacheable_text

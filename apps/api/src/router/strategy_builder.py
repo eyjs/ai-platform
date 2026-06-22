@@ -145,6 +145,7 @@ class StrategyBuilder:
             workflow_id=workflow_id,
             workflow_step=workflow_step,
             context_adapter=profile.context_adapter,
+            cache_padding_text=profile.cache_padding_text,
             conversation_context=conversation_context,
             response_policy=profile.response_policy,
             max_tool_calls=profile.max_tool_calls,

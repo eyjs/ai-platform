@@ -55,6 +55,7 @@ class ProfileCreateRequest(BaseModel):
     agent_timeout_seconds: int = Field(30, ge=5, le=300)
     intent_hints: list[dict] = []
     context_adapter: str | None = None
+    cache_padding_text: str = ""
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -79,6 +80,7 @@ class ProfileUpdateRequest(BaseModel):
     agent_timeout_seconds: int | None = Field(None, ge=5, le=300)
     intent_hints: list[dict] | None = None
     context_adapter: str | None = None
+    cache_padding_text: str | None = None
 
 
 class WorkflowStepModel(BaseModel):
@@ -627,6 +629,7 @@ def _profile_to_response(profile: Any) -> dict:
             for h in profile.intent_hints
         ],
         "context_adapter": profile.context_adapter,
+        "cache_padding_text": profile.cache_padding_text,
     }
 
 
