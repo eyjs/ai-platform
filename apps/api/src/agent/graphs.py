@@ -11,7 +11,7 @@ from langgraph.prebuilt import create_react_agent
 
 from typing import Optional
 
-from src.agent.cache_padding import pad_to_min
+from src.common.cache_padding import pad_to_min
 from src.agent.graph_enrich import create_graph_enrich
 from src.agent.nodes import (
     create_build_response,

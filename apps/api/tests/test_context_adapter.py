@@ -53,6 +53,20 @@ class _BoomAdapter:
         raise RuntimeError("enrich 실패")
 
 
+class _BindPadAdapter:
+    """bind hook + 도메인 패딩 텍스트를 제공하는 가짜 어댑터(V2/V3 검증용)."""
+
+    cache_padding_text = "ZZ-DOMAIN-PADDING-BLOCK "
+
+    def bind(self, session_id: str, collected: dict) -> None:
+        # 도메인 규약: "svc-{id}" → collected["entity_id"]
+        if session_id.startswith("svc-"):
+            collected["entity_id"] = session_id[len("svc-"):]
+
+    async def enrich(self, collected: dict) -> dict:
+        return {}
+
+
 def _build_store(*definitions: WorkflowDefinition) -> WorkflowStore:
     store = WorkflowStore()
     for d in definitions:
@@ -160,3 +174,64 @@ async def test_dynamic_step_adapter_failure_falls_back():
     # LLM 폴백 없이 정상 통찰 생성(EchoLLM)되고 종료
     assert result.completed
     assert result.bot_message
+
+
+# --- V3: 도메인 식별자 추출은 어댑터(bind)가 소유 ---
+
+
+async def test_engine_does_not_parse_domain_id_without_adapter():
+    """범용 엔진은 session_id에서 도메인 식별자를 직접 파싱하지 않는다.
+
+    어댑터 미바인딩이면 'saju-...' 형태 세션이라도 saju_id를 주입하지 않는다.
+    (엔진 도메인 무지 — 회귀 방지)
+    """
+    engine = WorkflowEngine(_build_store(_dynamic_workflow()), llm=_EchoLLM())
+    await engine.start(
+        "wf_dynamic", "saju-550e8400-e29b-41d4-a716-446655440000-discovery",
+    )
+    session = await engine.get_session("saju-550e8400-e29b-41d4-a716-446655440000-discovery")
+    assert "saju_id" not in session.collected
+    assert session.collected["session_id"].startswith("saju-")
+
+
+async def test_start_calls_adapter_bind_for_domain_id():
+    """엔진은 바인딩된 어댑터의 bind()를 호출해 도메인 식별자를 collected에 채운다."""
+    engine = WorkflowEngine(
+        _build_store(_dynamic_workflow()), llm=_EchoLLM(),
+        context_adapters={"svc": _BindPadAdapter()},
+    )
+    await engine.start("wf_dynamic", "svc-ABC123", context_adapter="svc")
+    session = await engine.get_session("svc-ABC123")
+    assert session.collected["entity_id"] == "ABC123"
+
+
+async def test_saju_adapter_bind_extracts_uuid_from_product_session():
+    """SajuContextAdapter.bind: 'saju-{uuid}-{product}' 포맷에서 UUID만 추출."""
+    adapter = SajuContextAdapter(backend_url="http://x:8002")
+    collected: dict = {}
+    adapter.bind("saju-550e8400-e29b-41d4-a716-446655440000-discovery", collected)
+    assert collected["saju_id"] == "550e8400-e29b-41d4-a716-446655440000"
+
+
+# --- V2: 캐시 패딩 도메인 텍스트는 어댑터가 제공, 없으면 중립 여백 ---
+
+
+async def test_padding_uses_adapter_domain_text():
+    """어댑터가 cache_padding_text를 주면 그 텍스트로 cacheable_system을 채운다."""
+    echo_llm = _EchoLLM()
+    engine = WorkflowEngine(
+        _build_store(_dynamic_workflow()), llm=echo_llm,
+        context_adapters={"svc": _BindPadAdapter()},
+    )
+    await engine.start("wf_dynamic", "svc-1", context_adapter="svc")
+    assert "ZZ-DOMAIN-PADDING-BLOCK" in echo_llm.last_cacheable
+    assert len(echo_llm.last_cacheable) >= 16384  # 캐시 최소 크기 도달
+
+
+async def test_padding_neutral_when_no_adapter():
+    """어댑터 미바인딩이면 도메인 무지 중립 여백으로 패딩한다(도메인 누수 없음)."""
+    echo_llm = _EchoLLM()
+    engine = WorkflowEngine(_build_store(_dynamic_workflow()), llm=echo_llm)
+    await engine.start("wf_dynamic", "sess-neutral")
+    assert "캐시 안정용 여백" in echo_llm.last_cacheable
+    assert "오행" not in echo_llm.last_cacheable  # 사주 도메인 텍스트 누수 없음

@@ -14,27 +14,16 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from src.config import settings
+from src.domain.classifier import Candidate, ClassifyResult
 from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-
-@dataclass
-class Candidate:
-    """분류 후보. label은 반환 식별자(workflow_id/intent/branch 옵션), description은 의미판단용."""
-
-    label: str
-    description: str = ""
-
-
-@dataclass
-class ClassifyResult:
-    label: Optional[str]
-    confidence: float = 0.0
+# Candidate/ClassifyResult는 도메인 레이어로 이전됨. 기존 import 경로 호환을 위해 재노출한다.
+__all__ = ["Candidate", "ClassifyResult", "SemanticClassifier"]
 
 
 class SemanticClassifier:

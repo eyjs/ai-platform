@@ -19,10 +19,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.agent.cache_padding import pad_to_min
+from src.common.cache_padding import pad_to_min
 from src.common.exceptions import GatewayError
+from src.domain.classifier import Candidate
 from src.observability.logging import get_logger
-from src.router.semantic_classifier import Candidate
 from src.workflow.action_client import ActionClient, WorkflowActionError
 from src.workflow.context_adapter import WorkflowContextAdapter
 from src.workflow.definition import WorkflowDefinition, WorkflowStep
@@ -172,22 +172,19 @@ class WorkflowEngine:
             current_step_id=entry_id,
         )
 
-        # 세션 컨텍스트를 워크플로우 변수로 주입한다.
-        # 예: 사주 챗의 session_id "saju-{uuid}" → collected["saju_id"]="{uuid}"
-        #     워크플로우 action 엔드포인트에서 {{saju_id}}로 참조 가능.
+        # 세션 컨텍스트를 워크플로우 변수로 주입한다(범용 — session_id만).
+        # action 엔드포인트/템플릿에서 {{session_id}}로 참조 가능.
         session.collected["session_id"] = session_id
-        # "saju-{uuid}" 및 "saju-{uuid}-{product}"(제품별 세션) 모두에서 UUID만 추출.
-        _uuid_m = re.search(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", session_id
-        )
-        if _uuid_m:
-            session.collected["saju_id"] = _uuid_m.group(0)
-        elif session_id.startswith("saju-"):
-            session.collected["saju_id"] = session_id[len("saju-"):]
 
         # dynamic 스텝 enrichment 어댑터를 세션에 바인딩 (collected에 저장 → 영속/복원됨).
         if context_adapter:
             session.collected["_adapter"] = context_adapter
+            # 도메인 식별자 추출은 어댑터가 소유한다(예: "saju-{uuid}-{product}" → saju_id).
+            # 엔진은 도메인별 session_id 규약을 모른다.
+            adapter = self._context_adapters.get(context_adapter)
+            bind = getattr(adapter, "bind", None)
+            if callable(bind):
+                bind(session_id, session.collected)
 
         logger.info(
             "workflow_start",
@@ -766,8 +763,12 @@ class WorkflowEngine:
             cacheable_parts.append(grounding_block)
         cacheable_system = "\n\n".join(p for p in cacheable_parts if p)
 
-        # 4096 토큰 미달 보정 — 세션 안정 콘텐츠(캐릭터 행동 지침)로 채워 캐시 효과를 확보한다.
-        cacheable_system = pad_to_min(cacheable_system)
+        # 4096 토큰 미달 보정 — 캐시 효과 확보. 도메인 배경 텍스트가 필요하면 바인딩된
+        # 어댑터가 제공한다(엔진은 도메인 무지 — filler가 없으면 중립 여백으로 채운다).
+        padding_filler = getattr(adapter, "cache_padding_text", "") if adapter else ""
+        if not isinstance(padding_filler, str):
+            padding_filler = ""  # 어댑터가 문자열로 제공하지 않으면 중립 여백 사용
+        cacheable_system = pad_to_min(cacheable_system, filler=padding_filler)
 
         # volatile_system: 오늘 날짜 — 날짜가 cacheable에 들어가면 매일 캐시 무효화 발생.
         from datetime import datetime as _dt
