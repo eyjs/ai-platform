@@ -53,6 +53,16 @@ class _BoomAdapter:
         raise RuntimeError("enrich 실패")
 
 
+class _BindBoomAdapter:
+    """bind가 던지는 어댑터 — start()가 크래시 없이 graceful 진행하는지 검증."""
+
+    def bind(self, session_id: str, collected: dict) -> None:
+        raise RuntimeError("bind 실패")
+
+    async def enrich(self, collected: dict) -> dict:
+        return {}
+
+
 class _BindAdapter:
     """bind hook을 제공하는 가짜 어댑터(V3 검증용). 식별자를 _hidden_keys에 등록."""
 
@@ -202,6 +212,17 @@ async def test_start_calls_adapter_bind_for_domain_id():
     await engine.start("wf_dynamic", "svc-ABC123", context_adapter="svc")
     session = await engine.get_session("svc-ABC123")
     assert session.collected["entity_id"] == "ABC123"
+
+
+async def test_start_survives_adapter_bind_failure():
+    """bind가 예외를 던져도 start()는 크래시 없이 워크플로우를 진행한다(enrich와 동일 graceful)."""
+    engine = WorkflowEngine(
+        _build_store(_dynamic_workflow()), llm=_EchoLLM(),
+        context_adapters={"boom": _BindBoomAdapter()},
+    )
+    result = await engine.start("wf_dynamic", "sess-bindboom", context_adapter="boom")
+    assert result.completed
+    assert result.bot_message
 
 
 async def test_saju_adapter_bind_extracts_uuid_from_product_session():

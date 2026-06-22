@@ -161,7 +161,17 @@ class WorkflowEngine:
             adapter = self._context_adapters.get(context_adapter)
             bind = getattr(adapter, "bind", None)
             if callable(bind):
-                bind(session_id, session.collected)
+                # enrich와 동일하게 graceful — bind가 던져도 워크플로우 시작은 진행한다
+                # (식별자 미주입 시 grounding/템플릿이 일부 비는 정도, 크래시 방지).
+                try:
+                    bind(session_id, session.collected)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "context_adapter_bind_failed",
+                        layer="WORKFLOW",
+                        adapter=context_adapter,
+                        error=str(e),
+                    )
 
         logger.info(
             "workflow_start",

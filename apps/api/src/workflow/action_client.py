@@ -47,11 +47,21 @@ class WorkflowActionError(Exception):
 def _resolve_env_vars(value: str) -> str:
     """문자열 내 ${ENV_VAR} 패턴을 환경변수 값으로 치환한다.
 
-    환경변수가 설정되지 않은 경우 빈 문자열로 치환한다.
+    환경변수가 설정되지 않은 경우 빈 문자열로 치환하되, 조용히 삼키지 않고
+    경고 로그를 남긴다(엔드포인트/헤더가 빈 값으로 망가지는 설정 오류를 조기 진단).
     """
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
-        return os.environ.get(var_name, "")
+        env_value = os.environ.get(var_name)
+        if env_value is None:
+            logger.warning(
+                "action_env_var_unset",
+                layer="WORKFLOW",
+                var_name=var_name,
+                hint="action endpoint/header의 ${%s}가 빈 값으로 치환됨" % var_name,
+            )
+            return ""
+        return env_value
 
     return _ENV_VAR_PATTERN.sub(replacer, value)
 
