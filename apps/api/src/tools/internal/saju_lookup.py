@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
+
+# session_id에서 사주 UUID 추출 — "saju-{uuid}" 및 "saju-{uuid}-{product}" 둘 다 지원.
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 from src.tools.base import ToolResult
 
@@ -86,9 +90,11 @@ class SajuLookupTool:
                 error=f"유효하지 않은 카테고리: {invalid}. 허용된 값: {VALID_CATEGORIES}",
             )
 
-        # session_id에서 saju_id 추출 (format: "saju-{uuid}")
+        # session_id에서 saju_id(UUID) 추출 — "saju-{uuid}" 및 "saju-{uuid}-{product}" 호환.
+        # (제품별 세션 분리로 sessionId 뒤에 ::product/-product가 붙어도 UUID만 정확히 뽑는다.)
         session_id: str = getattr(context, "session_id", "") or ""
-        saju_id = session_id.removeprefix("saju-") if session_id.startswith("saju-") else ""
+        _m = _UUID_RE.search(session_id)
+        saju_id = _m.group(0) if _m else (session_id.removeprefix("saju-") if session_id.startswith("saju-") else "")
 
         if not saju_id:
             return ToolResult(

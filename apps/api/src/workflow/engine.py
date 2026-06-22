@@ -255,7 +255,13 @@ class WorkflowEngine:
         # 예: 사주 챗의 session_id "saju-{uuid}" → collected["saju_id"]="{uuid}"
         #     워크플로우 action 엔드포인트에서 {{saju_id}}로 참조 가능.
         session.collected["session_id"] = session_id
-        if session_id.startswith("saju-"):
+        # "saju-{uuid}" 및 "saju-{uuid}-{product}"(제품별 세션) 모두에서 UUID만 추출.
+        _uuid_m = re.search(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", session_id
+        )
+        if _uuid_m:
+            session.collected["saju_id"] = _uuid_m.group(0)
+        elif session_id.startswith("saju-"):
             session.collected["saju_id"] = session_id[len("saju-"):]
 
         # dynamic 스텝 enrichment 어댑터를 세션에 바인딩 (collected에 저장 → 영속/복원됨).

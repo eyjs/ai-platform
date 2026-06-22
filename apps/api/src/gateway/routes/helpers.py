@@ -569,9 +569,13 @@ def _inject_directive(plan: ExecutionPlan, directive: str | None) -> None:
     if not directive or not directive.strip():
         return
     separator = "\n\n--- 이 턴 지시 ---\n"
-    plan.system_prompt = (plan.system_prompt + separator + directive.strip()
-                          if plan.system_prompt
-                          else directive.strip())
+    # volatile(per-turn, 캐시 밖)에 append — cacheable(페르소나+grounding)을 byte-stable로 유지.
+    # (이전엔 plan.system_prompt(cacheable)에 붙여 매턴 캐시 prefix가 깨지고 페르소나가 희석됐음.)
+    plan.volatile_system_prompt = (
+        plan.volatile_system_prompt + separator + directive.strip()
+        if plan.volatile_system_prompt
+        else directive.strip()
+    )
 
 
 def _step_to_response(result: StepResult) -> dict:
