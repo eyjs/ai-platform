@@ -54,11 +54,26 @@ class StepResult:
     completed: bool = False  # 워크플로우 종료 여부
     escaped: bool = False  # 사용자가 이탈(취소)했는지
     action_result: dict = field(default_factory=dict)  # action 타입 결과
-    report: str = ""  # 추천 리포트 제품 CTA (예: "paper"|"compatibility") — 프론트 버튼
-    # ── 신규(v2): saju 백엔드 구조-우선 매핑 소스 ──
+    report: str = ""  # 워크플로우 YAML step.report에서 지정하는 CTA 키 (프론트 버튼용 힌트)
+    # ── 구조신호 필드(YAML 메타에서 조립, 프론트/consumer가 소비) ──
     intent_confirm: dict = field(default_factory=dict)  # {intent, yes_label, no_label} — confirm-류 되묻기
-    collection: dict = field(default_factory=dict)      # {target, fields[], parse_preview} — compat 수집 스텝
+    collection: dict = field(default_factory=dict)      # {target, fields[], parse_preview} — 수집 스텝 메타
     concluded: bool = False                             # 종료 명시 신호(completed와 정합)
+
+
+def _visible_ctx_lines(collected: dict) -> list[str]:
+    """LLM 컨텍스트에 표시할 collected 항목을 'key: value' 라인으로 만든다.
+
+    제외: `_`-prefix 내부 키, 범용 `session_id`, 그리고 어댑터가 등록한 식별자 키
+    (`_hidden_keys`). 엔진은 도메인 식별자 이름(예: saju_id)을 직접 알지 않는다 —
+    어댑터가 bind 시 자신의 식별자를 `_hidden_keys`에 등록한다.
+    """
+    hidden = {"session_id"} | set(collected.get("_hidden_keys") or [])
+    return [
+        f"- {k}: {v}"
+        for k, v in collected.items()
+        if not k.startswith("_") and k not in hidden
+    ]
 
 
 def _collection_steps(definition, target: str) -> list:
@@ -348,10 +363,7 @@ class WorkflowEngine:
         if not next_step_id and current_step.branches and self._classifier:
             candidates = [Candidate(label=k) for k in current_step.branches]
             ctx = render_template(current_step.prompt, session.collected)
-            ctx_lines = [
-                f"- {k}: {v}" for k, v in session.collected.items()
-                if not k.startswith("_") and k not in ("session_id", "saju_id")
-            ]
+            ctx_lines = _visible_ctx_lines(session.collected)
             if ctx_lines:
                 ctx = f"{ctx}\n[지금까지 파악된 정보]\n" + "\n".join(ctx_lines)
             decision = await self._classifier.classify(
@@ -785,13 +797,9 @@ class WorkflowEngine:
             f"'올해'는 {_today.year}년, '내년'은 {_today.year + 1}년이다."
         )
 
-        # user_prompt: per-turn 정보 (내담자 collected) — 캐시 밖.
-        # saju_id/session_id 는 캐시 안정성 보장을 위해 collected 에서도 제외.
-        ctx_lines = [
-            f"- {k}: {v}"
-            for k, v in collected.items()
-            if not k.startswith("_") and k not in ("session_id", "saju_id")
-        ]
+        # user_prompt: per-turn 정보 (collected) — 캐시 밖.
+        # 식별자/내부 키는 표시에서 제외(session_id + 어댑터 등록 _hidden_keys + _-prefix).
+        ctx_lines = _visible_ctx_lines(collected)
         ctx = "\n".join(ctx_lines) if ctx_lines else "(아직 정보 없음)"
         user_prompt = (
             f"{render_template(step.prompt, collected)}\n\n"

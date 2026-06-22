@@ -86,6 +86,12 @@ class SajuContextAdapter:
         elif session_id.startswith("saju-"):
             collected["saju_id"] = session_id[len("saju-"):]
 
+        # 엔진이 도메인 식별자 이름을 모르도록, 표시 제외 키를 어댑터가 등록한다.
+        if collected.get("saju_id"):
+            hidden = collected.setdefault("_hidden_keys", [])
+            if "saju_id" not in hidden:
+                hidden.append("saju_id")
+
     async def enrich(self, collected: dict) -> dict[str, str]:
         """사주 풀이 근거 + (있으면) 궁합 결과 블록을 반환한다.
 

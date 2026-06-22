@@ -54,12 +54,13 @@ class _BoomAdapter:
 
 
 class _BindAdapter:
-    """bind hook을 제공하는 가짜 어댑터(V3 검증용)."""
+    """bind hook을 제공하는 가짜 어댑터(V3 검증용). 식별자를 _hidden_keys에 등록."""
 
     def bind(self, session_id: str, collected: dict) -> None:
-        # 도메인 규약: "svc-{id}" → collected["entity_id"]
+        # 도메인 규약: "svc-{id}" → collected["entity_id"] (식별자라 표시 제외 등록)
         if session_id.startswith("svc-"):
             collected["entity_id"] = session_id[len("svc-"):]
+            collected.setdefault("_hidden_keys", []).append("entity_id")
 
     async def enrich(self, collected: dict) -> dict:
         return {}
@@ -204,11 +205,49 @@ async def test_start_calls_adapter_bind_for_domain_id():
 
 
 async def test_saju_adapter_bind_extracts_uuid_from_product_session():
-    """SajuContextAdapter.bind: 'saju-{uuid}-{product}' 포맷에서 UUID만 추출."""
+    """SajuContextAdapter.bind: 'saju-{uuid}-{product}' 포맷에서 UUID 추출 + hidden 등록."""
     adapter = SajuContextAdapter(backend_url="http://x:8002")
     collected: dict = {}
     adapter.bind("saju-550e8400-e29b-41d4-a716-446655440000-discovery", collected)
     assert collected["saju_id"] == "550e8400-e29b-41d4-a716-446655440000"
+    # 도메인 식별자는 어댑터가 _hidden_keys에 등록 → 엔진은 도메인 키 이름을 모른다.
+    assert "saju_id" in collected["_hidden_keys"]
+
+
+# --- 컨텍스트 표시 필터 일반화 (엔진 도메인-무지) ---
+
+
+def test_visible_ctx_lines_excludes_internal_and_hidden():
+    """_visible_ctx_lines: _-prefix·session_id·어댑터 등록(_hidden_keys) 키를 제외, 나머지는 포함."""
+    from src.workflow.engine import _visible_ctx_lines
+
+    collected = {
+        "session_id": "svc-1",
+        "saju_id": "uuid-xyz",          # 어댑터가 hidden 등록한 식별자
+        "_adapter": "saju",             # 내부 키
+        "_hidden_keys": ["saju_id"],
+        "topic": "연애",                 # 표시 대상
+        "partner_name": "지민",          # 표시 대상
+    }
+    lines = _visible_ctx_lines(collected)
+    joined = "\n".join(lines)
+    assert "topic: 연애" in joined
+    assert "partner_name: 지민" in joined
+    assert "saju_id" not in joined
+    assert "session_id" not in joined
+    assert "_adapter" not in joined
+
+
+async def test_dynamic_user_ctx_excludes_adapter_hidden_id():
+    """dynamic 스텝 user_prompt에 어댑터가 hidden 등록한 식별자가 노출되지 않는다."""
+    echo_llm = _EchoLLM()
+    engine = WorkflowEngine(
+        _build_store(_dynamic_workflow()), llm=echo_llm,
+        context_adapters={"svc": _BindAdapter()},
+    )
+    result = await engine.start("wf_dynamic", "svc-ABC123", context_adapter="svc")
+    # entity_id(=ABC123)는 식별자라 user_prompt(EchoLLM이 echo)에 들어가면 안 됨
+    assert "ABC123" not in result.bot_message
 
 
 # --- V2: 캐시 패딩 도메인 텍스트는 Profile(cache_padding_text)이 제공, 없으면 중립 여백 ---
