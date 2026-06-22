@@ -18,6 +18,13 @@ from src.services.fortune_prompts import (
     build_tojeong_prompt,
     build_yearly_prompt,
 )
+from src.services.myo_play_prompts import (
+    MYO_PLAY_SYSTEM,
+    build_charm_prompt,
+    build_dream_prompt,
+    build_name_prompt,
+    build_tarot_prompt,
+)
 
 logger = get_logger(__name__)
 
@@ -25,7 +32,15 @@ _PROMPT_BUILDERS = {
     "today": build_today_prompt,
     "yearly": build_yearly_prompt,
     "tojeong": build_tojeong_prompt,
+    # 묘묘 놀이 기능 — 묘묘 보이스(반말)
+    "tarot": build_tarot_prompt,
+    "dream": build_dream_prompt,
+    "name": build_name_prompt,
+    "charm": build_charm_prompt,
 }
+
+# 타입별 시스템 프롬프트 — 운세=천명관 해요체, 놀이=묘묘 반말
+_MYO_PLAY_TYPES = {"tarot", "dream", "name", "charm"}
 
 _LINEBREAK_PATTERN = re.compile(r"([다요죠][\.!]) ")
 
@@ -47,14 +62,17 @@ class FortuneService:
             raise ValueError(f"지원하지 않는 운세 타입: {fortune_type}")
 
         prompt = builder(saju_context)
+        system = MYO_PLAY_SYSTEM if fortune_type in _MYO_PLAY_TYPES else FORTUNE_SYSTEM_PROMPT
 
         logger.info("fortune_interpret_start", fortune_type=fortune_type)
 
-        raw = await self._llm.generate(prompt, system=FORTUNE_SYSTEM_PROMPT)
+        raw = await self._llm.generate(prompt, system=system)
 
         cleaned = _recover_truncated_json(raw)
         data = json.loads(cleaned)
-        data = _add_line_breaks(data)
+        # 묘묘 보이스(반말)는 줄바꿈 강제 삽입(해요체 종결 패턴) 대상 아님
+        if fortune_type not in _MYO_PLAY_TYPES:
+            data = _add_line_breaks(data)
 
         logger.info("fortune_interpret_done", fortune_type=fortune_type)
         return data
