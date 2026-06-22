@@ -22,7 +22,7 @@ fortune_router = APIRouter()
 class FortuneInterpretRequest(BaseModel):
     """운세 해석 요청."""
 
-    type: str = Field(..., description="운세/놀이 타입", pattern=r"^(today|yearly|tojeong|tarot|dream|name|charm)$")
+    type: str = Field(..., description="운세/놀이 타입", pattern=r"^(today|yearly|tojeong|tarot|dream|name|charm|compare)$")
     saju_context: str = Field(..., description="컨텍스트 (사전 포맷팅 완료)", min_length=10)
     tojeong_data: Optional[Dict[str, Any]] = Field(None, description="토정비결 괘 데이터 (tojeong 타입일 때)")
 

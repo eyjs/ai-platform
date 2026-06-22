@@ -21,6 +21,7 @@ from src.services.fortune_prompts import (
 from src.services.myo_play_prompts import (
     MYO_PLAY_SYSTEM,
     build_charm_prompt,
+    build_compare_prompt,
     build_dream_prompt,
     build_name_prompt,
     build_tarot_prompt,
@@ -37,10 +38,11 @@ _PROMPT_BUILDERS = {
     "dream": build_dream_prompt,
     "name": build_name_prompt,
     "charm": build_charm_prompt,
+    "compare": build_compare_prompt,
 }
 
 # 타입별 시스템 프롬프트 — 운세=천명관 해요체, 놀이=묘묘 반말
-_MYO_PLAY_TYPES = {"tarot", "dream", "name", "charm"}
+_MYO_PLAY_TYPES = {"tarot", "dream", "name", "charm", "compare"}
 
 _LINEBREAK_PATTERN = re.compile(r"([다요죠][\.!]) ")
 
