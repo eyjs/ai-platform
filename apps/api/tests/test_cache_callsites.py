@@ -246,7 +246,7 @@ def _make_step(system: str = "묘묘 페르소나", prompt: str = "어떻게 생
 @pytest.mark.asyncio
 async def test_engine_generate_dynamic_grounding_goes_to_cacheable():
     """_generate_dynamic: adapter.enrich 결과가 cacheable_system 에 포함된다."""
-    from src.workflow.engine import WorkflowEngine
+    from src.workflow.step_executors import generate_dynamic
 
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="묘묘 통찰")
@@ -255,14 +255,12 @@ async def test_engine_generate_dynamic_grounding_goes_to_cacheable():
     mock_adapter = AsyncMock()
     mock_adapter.enrich = AsyncMock(return_value={"saju_block": "사주 그라운딩 데이터"})
 
-    engine = WorkflowEngine.__new__(WorkflowEngine)
-    engine._llm = mock_llm
-    engine._context_adapters = {"saju": mock_adapter}
-
     step = _make_step(system="묘묘 페르소나 시스템")
     collected = {"_adapter": "saju", "topic": "연애"}
 
-    await engine._generate_dynamic(step, collected)
+    await generate_dynamic(
+        step, collected, llm=mock_llm, context_adapters={"saju": mock_adapter},
+    )
 
     mock_llm.generate.assert_called_once()
     _, kwargs = mock_llm.generate.call_args
@@ -284,19 +282,15 @@ async def test_engine_generate_dynamic_grounding_goes_to_cacheable():
 @pytest.mark.asyncio
 async def test_engine_generate_dynamic_date_in_volatile_not_cacheable():
     """_generate_dynamic: 날짜가 volatile_system 에 있고 cacheable_system 에는 없다."""
-    from src.workflow.engine import WorkflowEngine
+    from src.workflow.step_executors import generate_dynamic
 
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="답변")
 
-    engine = WorkflowEngine.__new__(WorkflowEngine)
-    engine._llm = mock_llm
-    engine._context_adapters = {}
-
     step = _make_step(system="고정 페르소나")
     collected = {}
 
-    await engine._generate_dynamic(step, collected)
+    await generate_dynamic(step, collected, llm=mock_llm, context_adapters={})
 
     _, kwargs = mock_llm.generate.call_args
     cacheable = kwargs.get("cacheable_system", "")
@@ -312,20 +306,16 @@ async def test_engine_generate_dynamic_date_in_volatile_not_cacheable():
 @pytest.mark.asyncio
 async def test_engine_generate_dynamic_cacheable_min_4096_tokens():
     """_generate_dynamic: cacheable_system 이 4096 토큰 이상(≈16384자)이 됨을 확인."""
-    from src.workflow.engine import WorkflowEngine
+    from src.workflow.step_executors import generate_dynamic
 
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="답변")
-
-    engine = WorkflowEngine.__new__(WorkflowEngine)
-    engine._llm = mock_llm
-    engine._context_adapters = {}
 
     # 짧은 페르소나(패딩 필요)
     step = _make_step(system="짧은 페르소나")
     collected = {}
 
-    await engine._generate_dynamic(step, collected)
+    await generate_dynamic(step, collected, llm=mock_llm, context_adapters={})
 
     _, kwargs = mock_llm.generate.call_args
     cacheable = kwargs.get("cacheable_system", "")
@@ -339,23 +329,20 @@ async def test_engine_generate_dynamic_cacheable_min_4096_tokens():
 @pytest.mark.asyncio
 async def test_engine_generate_dynamic_no_uuid_in_cacheable():
     """cacheable_system 에 session_id / saju_id 가 포함되지 않는다."""
-    from src.workflow.engine import WorkflowEngine
+    from src.workflow.step_executors import generate_dynamic
 
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="답변")
-
-    engine = WorkflowEngine.__new__(WorkflowEngine)
-    engine._llm = mock_llm
-    engine._context_adapters = {}
 
     step = _make_step(system="페르소나")
     collected = {
         "session_id": "sess-abc-123",
         "saju_id": "saju-xyz-456",
+        "_hidden_keys": ["saju_id"],
         "topic": "직업",
     }
 
-    await engine._generate_dynamic(step, collected)
+    await generate_dynamic(step, collected, llm=mock_llm, context_adapters={})
 
     _, kwargs = mock_llm.generate.call_args
     cacheable = kwargs.get("cacheable_system", "")
@@ -367,17 +354,12 @@ async def test_engine_generate_dynamic_no_uuid_in_cacheable():
 @pytest.mark.asyncio
 async def test_engine_generate_dynamic_no_llm_returns_fallback():
     """LLM 미주입 시 step.prompt 폴백 반환 (기존 동작 유지)."""
-    from src.workflow.engine import WorkflowEngine
-    from src.workflow.template import render_template
-
-    engine = WorkflowEngine.__new__(WorkflowEngine)
-    engine._llm = None
-    engine._context_adapters = {}
+    from src.workflow.step_executors import generate_dynamic
 
     step = _make_step(prompt="폴백 메시지")
     collected = {}
 
-    result = await engine._generate_dynamic(step, collected)
+    result = await generate_dynamic(step, collected, llm=None, context_adapters={})
     assert result == "폴백 메시지"
 
 

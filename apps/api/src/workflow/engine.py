@@ -14,22 +14,28 @@
 
 from __future__ import annotations
 
-import re
 import time
-from dataclasses import dataclass, field
 from typing import Optional
 
-from src.common.cache_padding import pad_to_min
 from src.common.exceptions import GatewayError
 from src.domain.classifier import Candidate
 from src.observability.logging import get_logger
-from src.workflow.action_client import ActionClient, WorkflowActionError
+from src.workflow.action_client import ActionClient
 from src.workflow.context_adapter import WorkflowContextAdapter
 from src.workflow.definition import WorkflowDefinition, WorkflowStep
 from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.state import WorkflowSession
+from src.workflow.step_executors import execute_action_step, generate_dynamic
+from src.workflow.step_result import StepResult
 from src.workflow.store import WorkflowStore
 from src.workflow.template import render_template
+# step 순수 로직(re-export 포함 — 기존 `from src.workflow.engine import _resolve_next` 등 호환)
+from src.workflow.step_logic import (
+    _collection_steps,
+    _resolve_next,
+    _validate_input,
+    _visible_ctx_lines,
+)
 
 logger = get_logger(__name__)
 
@@ -42,58 +48,7 @@ _ESCAPE_KEYWORDS = {"취소", "처음으로", "나가기", "중단", "그만", "
 # 뒤로가기 키워드
 _BACK_KEYWORDS = {"뒤로", "이전", "돌아가기", "back", "prev"}
 
-@dataclass
-class StepResult:
-    """엔진이 반환하는 스텝 처리 결과."""
-
-    bot_message: str
-    options: list[str] = field(default_factory=list)  # select 타입일 때 선택지
-    step_id: str = ""
-    step_type: str = ""
-    collected: dict = field(default_factory=dict)  # 지금까지 수집된 데이터
-    completed: bool = False  # 워크플로우 종료 여부
-    escaped: bool = False  # 사용자가 이탈(취소)했는지
-    action_result: dict = field(default_factory=dict)  # action 타입 결과
-    report: str = ""  # 워크플로우 YAML step.report에서 지정하는 CTA 키 (프론트 버튼용 힌트)
-    # ── 구조신호 필드(YAML 메타에서 조립, 프론트/consumer가 소비) ──
-    intent_confirm: dict = field(default_factory=dict)  # {intent, yes_label, no_label} — confirm-류 되묻기
-    collection: dict = field(default_factory=dict)      # {target, fields[], parse_preview} — 수집 스텝 메타
-    concluded: bool = False                             # 종료 명시 신호(completed와 정합)
-
-
-def _visible_ctx_lines(collected: dict) -> list[str]:
-    """LLM 컨텍스트에 표시할 collected 항목을 'key: value' 라인으로 만든다.
-
-    제외: `_`-prefix 내부 키, 범용 `session_id`, 그리고 어댑터가 등록한 식별자 키
-    (`_hidden_keys`). 엔진은 도메인 식별자 이름(예: saju_id)을 직접 알지 않는다 —
-    어댑터가 bind 시 자신의 식별자를 `_hidden_keys`에 등록한다.
-    """
-    hidden = {"session_id"} | set(collected.get("_hidden_keys") or [])
-    return [
-        f"- {k}: {v}"
-        for k, v in collected.items()
-        if not k.startswith("_") and k not in hidden
-    ]
-
-
-def _collection_steps(definition, target: str) -> list:
-    """워크플로우 정의에서 collection_target이 일치하는 수집 스텝 목록을 순서대로 반환한다.
-
-    엔진은 도메인을 알지 않는다 — yaml 메타(collection_field/target)에서 기계적으로 조립.
-    """
-    return [
-        s for s in definition.steps
-        if s.collection_field and s.collection_target == target
-    ]
-
-
-# 입력 검증 패턴
-_VALIDATORS: dict[str, re.Pattern] = {
-    "phone": re.compile(r"^01[016789]-?\d{3,4}-?\d{4}$"),
-    "email": re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
-    "number": re.compile(r"^\d+$"),
-    "date": re.compile(r"^\d{4}-\d{2}-\d{2}$"),
-}
+__all__ = ["WorkflowEngine", "StepResult"]
 
 
 class WorkflowEngine:
@@ -601,7 +556,10 @@ class WorkflowEngine:
 
             # dynamic 타입: LLM이 collected 컨텍스트로 캐릭터 통찰을 생성 → message처럼 자동 진행
             if step.type == "dynamic":
-                insight = await self._generate_dynamic(step, session.collected)
+                insight = await generate_dynamic(
+                    step, session.collected,
+                    llm=self._llm, context_adapters=self._context_adapters,
+                )
                 if insight:
                     message_parts.append(insight)
                 if not step.next or not definition.get_step(step.next):
@@ -620,8 +578,8 @@ class WorkflowEngine:
 
             # action 타입: 외부 API 호출 후 자동 진행
             if step.type == "action":
-                action_result = await self._execute_action_step(
-                    step, session, action_endpoint, action_headers,
+                action_result = await execute_action_step(
+                    step, session, self._action_client, action_endpoint, action_headers,
                 )
                 if action_result.completed or not step.next:
                     # 액션 실패 또는 다음 스텝 없음 -> 워크플로우 종료.
@@ -737,256 +695,3 @@ class WorkflowEngine:
             concluded=True,
             collected=dict(session.collected),
         )
-
-    async def _generate_dynamic(self, step, collected: dict) -> str:
-        """dynamic 스텝: LLM이 캐릭터 페르소나(step.system)로 collected + (어댑터가
-        제공하는) 도메인 컨텍스트를 근거로 통찰을 생성한다.
-
-        도메인 데이터 enrichment는 세션에 바인딩된 ContextAdapter가 담당한다.
-        엔진은 어댑터가 돌려준 블록을 프롬프트에 그대로 이어붙일 뿐 도메인을 알지 않는다.
-
-        Prompt Caching 분리 (task-101):
-        - cacheable_system: persona(step.system) + grounding(adapter.enrich) — 세션 안정 바이트
-        - volatile_system: 오늘 날짜 — 매일 변하므로 캐시 경계 밖
-        - user_prompt: 내담자 collected 정보 + per-turn 지시
-
-        LLM 미주입/실패 시 step.prompt 템플릿을 정적 폴백으로 사용(워크플로우 진행 보장).
-        """
-        fallback = render_template(step.prompt, collected)
-        if not self._llm:
-            return fallback
-
-        # 세션에 바인딩된 어댑터로 도메인 컨텍스트를 보강한다(없으면 grounding 없이 진행).
-        # grounding은 세션 내 안정 — cacheable_system에 포함해 캐시 히트를 극대화한다.
-        grounding_block = ""
-        adapter = self._context_adapters.get(collected.get("_adapter") or "")
-        if adapter:
-            try:
-                extra = await adapter.enrich(collected)
-                grounding_block = "".join(extra.values())
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "context_adapter_enrich_failed",
-                    layer="WORKFLOW",
-                    step_id=step.id,
-                    adapter=collected.get("_adapter"),
-                    error=str(e),
-                )
-
-        persona = render_template(step.system, collected)
-
-        # cacheable_system: persona + grounding — UUID/timestamp/saju_id 제외(캐시 안정성).
-        # Anthropic Haiku 캐시 최소 4096 토큰 미달 시 구조화된 지침 패딩을 추가한다.
-        cacheable_parts = [persona]
-        if grounding_block:
-            cacheable_parts.append(grounding_block)
-        cacheable_system = "\n\n".join(p for p in cacheable_parts if p)
-
-        # 4096 토큰 미달 보정 — 캐시 효과 확보. 도메인 배경 텍스트(Profile.cache_padding_text)가
-        # 세션에 바인딩돼 있으면 filler로, 없으면 도메인 중립 여백으로 채운다(엔진 도메인 무지).
-        padding_filler = collected.get("_pad_text") or ""
-        if not isinstance(padding_filler, str):
-            padding_filler = ""
-        cacheable_system = pad_to_min(cacheable_system, filler=padding_filler)
-
-        # volatile_system: 오늘 날짜 — 날짜가 cacheable에 들어가면 매일 캐시 무효화 발생.
-        from datetime import datetime as _dt
-        _today = _dt.now()
-        volatile_system = (
-            f"[오늘 날짜] {_today.year}년 {_today.month}월 {_today.day}일. "
-            f"'올해'는 {_today.year}년, '내년'은 {_today.year + 1}년이다."
-        )
-
-        # user_prompt: per-turn 정보 (collected) — 캐시 밖.
-        # 식별자/내부 키는 표시에서 제외(session_id + 어댑터 등록 _hidden_keys + _-prefix).
-        ctx_lines = _visible_ctx_lines(collected)
-        ctx = "\n".join(ctx_lines) if ctx_lines else "(아직 정보 없음)"
-        user_prompt = (
-            f"{render_template(step.prompt, collected)}\n\n"
-            f"[지금까지 대화에서 파악된 내담자 정보]\n{ctx}\n\n"
-            f"위 지시와 정보를 바탕으로, 캐릭터 톤을 유지한 짧은 메시지만 출력하세요. "
-            f"설명·메타발화·따옴표 없이 대사만."
-        )
-        try:
-            text = await self._llm.generate(
-                user_prompt,
-                cacheable_system=cacheable_system,
-                volatile_system=volatile_system,
-            )
-            text = (text or "").strip()
-            return text or fallback
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "dynamic_step_llm_failed",
-                layer="WORKFLOW",
-                step_id=step.id,
-                error=str(e),
-            )
-            return fallback
-
-    async def _execute_action_step(
-        self,
-        step: WorkflowStep,
-        session: WorkflowSession,
-        profile_endpoint: str | None = None,
-        profile_headers: dict | None = None,
-    ) -> StepResult:
-        """action step을 실행한다.
-
-        1. endpoint: step.endpoint > profile_endpoint (둘 다 없으면 에러)
-        2. headers: step.headers_template + profile_headers 병합
-        3. payload: step.payload_template
-        4. 호출 성공 -> on_success_message + 다음 스텝 진행
-        5. 호출 실패 -> on_error_message + 워크플로우 종료
-        """
-        if not self._action_client:
-            logger.error(
-                "action_step_no_client",
-                layer="WORKFLOW",
-                step_id=step.id,
-            )
-            return StepResult(
-                bot_message=step.on_error_message or "외부 연동 기능이 비활성화되어 있습니다.",
-                step_id=step.id,
-                step_type="action",
-                collected=dict(session.collected),
-                completed=True,
-            )
-
-        # 엔드포인트 결정: step > profile
-        endpoint = step.endpoint or profile_endpoint
-        if not endpoint:
-            logger.error(
-                "action_step_no_endpoint",
-                layer="WORKFLOW",
-                step_id=step.id,
-            )
-            return StepResult(
-                bot_message=step.on_error_message or "외부 API 엔드포인트가 설정되지 않았습니다.",
-                step_id=step.id,
-                step_type="action",
-                collected=dict(session.collected),
-                completed=True,
-            )
-
-        # 헤더 병합: profile 기본값 + step 오버라이드
-        merged_headers = dict(profile_headers or {})
-        if step.headers_template:
-            merged_headers.update(step.headers_template)
-
-        try:
-            response_data = await self._action_client.call(
-                endpoint=endpoint,
-                method=step.http_method,
-                headers=merged_headers if merged_headers else None,
-                payload=step.payload_template if step.payload_template else None,
-                timeout=step.timeout_seconds,
-                collected=session.collected,
-            )
-
-            # 응답 데이터를 세션에 저장 (save_as가 있으면)
-            if step.save_as:
-                session.collected[step.save_as] = response_data
-
-            # 콜백 응답도 세션에 기록
-            session.callback_response = response_data
-
-            success_message = render_template(
-                step.on_success_message or "처리가 완료되었습니다.",
-                session.collected,
-            )
-
-            logger.info(
-                "action_step_success",
-                layer="WORKFLOW",
-                step_id=step.id,
-                endpoint=endpoint[:100],
-            )
-
-            return StepResult(
-                bot_message=success_message,
-                step_id=step.id,
-                step_type="action",
-                collected=dict(session.collected),
-                action_result=response_data,
-            )
-
-        except WorkflowActionError as e:
-            logger.warning(
-                "action_step_failed",
-                layer="WORKFLOW",
-                step_id=step.id,
-                endpoint=endpoint[:100],
-                status_code=e.status_code,
-                error=str(e),
-            )
-
-            error_message = render_template(
-                step.on_error_message or "외부 시스템 연동 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-                session.collected,
-            )
-
-            return StepResult(
-                bot_message=error_message,
-                step_id=step.id,
-                step_type="action",
-                collected=dict(session.collected),
-                completed=True,
-                action_result={"error": str(e), "status_code": e.status_code},
-            )
-
-
-def _resolve_next(step: WorkflowStep, user_input: str) -> str | None:
-    """사용자 입력에 따라 다음 스텝 ID를 결정한다."""
-    if step.branches:
-        # 정확한 매칭 시도
-        if user_input in step.branches:
-            return step.branches[user_input]
-        # 대소문자 무시 매칭
-        input_lower = user_input.strip().lower()
-        for key, next_id in step.branches.items():
-            if key.lower() == input_lower:
-                return next_id
-        # 번호 매칭 (1, 2, 3...)
-        if user_input.strip().isdigit():
-            idx = int(user_input.strip()) - 1
-            keys = list(step.branches.keys())
-            if 0 <= idx < len(keys):
-                return step.branches[keys[idx]]
-        # 부분문자열 매칭은 제거(오매칭·맥락 무시 원인) — 자유입력은 advance()에서
-        # 공통 SemanticClassifier가 의미로 분류한다. 여기선 fallback next만 반환.
-        return step.next
-    return step.next
-
-
-def _validate_input(step: WorkflowStep, user_input: str) -> str:
-    """입력 검증. 실패 시 에러 메시지, 성공 시 빈 문자열."""
-    if not step.validation:
-        return ""
-
-    # select 타입: options 중 하나여야 함
-    if step.type == "select" and step.options:
-        input_lower = user_input.strip().lower()
-        # 정확 매칭
-        if any(opt.lower() == input_lower for opt in step.options):
-            return ""
-        # 번호 매칭
-        if user_input.strip().isdigit():
-            idx = int(user_input.strip()) - 1
-            if 0 <= idx < len(step.options):
-                return ""
-        options_str = ", ".join(f"{i+1}. {opt}" for i, opt in enumerate(step.options))
-        return f"다음 중 하나를 선택해주세요:\n{options_str}"
-
-    # 패턴 검증
-    pattern = _VALIDATORS.get(step.validation)
-    if pattern and not pattern.match(user_input.strip()):
-        hints = {
-            "phone": "전화번호 형식이 올바르지 않습니다. (예: 010-1234-5678)",
-            "email": "이메일 형식이 올바르지 않습니다. (예: user@example.com)",
-            "number": "숫자만 입력해주세요.",
-            "date": "날짜 형식이 올바르지 않습니다. (예: 2026-03-13)",
-        }
-        return hints.get(step.validation, f"입력 형식이 올바르지 않습니다. ({step.validation})")
-
-    return ""
