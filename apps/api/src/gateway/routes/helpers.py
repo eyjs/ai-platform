@@ -334,7 +334,16 @@ async def _prepare_chat(
                     ttl_seconds=profile.memory_ttl_seconds,
                     tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
                 )
-            history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
+            # 호출자(백엔드)가 history를 주면 그것을 신뢰원천으로 사용(멀티턴 고아/유실 방지).
+            # 없을 때만 session_memory 폴백.
+            if req.history:
+                history = [
+                    {"role": h.get("role"), "content": h.get("content")}
+                    for h in req.history
+                    if h.get("role") and h.get("content")
+                ]
+            else:
+                history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
 
             skip_context_resolve = req.chatbot_id is not None
 
@@ -482,7 +491,16 @@ async def _prepare_chat_fast(
             )
             history = []
         else:
-            history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
+            # 호출자(백엔드)가 history를 주면 그것을 신뢰원천으로 사용(멀티턴 고아/유실 방지).
+            # 없을 때만 session_memory 폴백.
+            if req.history:
+                history = [
+                    {"role": h.get("role"), "content": h.get("content")}
+                    for h in req.history
+                    if h.get("role") and h.get("content")
+                ]
+            else:
+                history = await state.session_memory.get_turns(session_id, max_turns=profile.memory_max_turns)
 
             # chatbot_id가 명시적으로 전달된 경우: L0 ContextResolver를 건너뛴다
             # 이미 특정 챗봇을 지정했으므로 대명사 해소/질문 재작성이 불필요

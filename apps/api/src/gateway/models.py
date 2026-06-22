@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     context: str | None = None  # 외부 컨텍스트 (사주 분석 등). question과 분리하여 system prompt에 주입
     directive: str | None = None  # 이 턴의 지시문 (묘묘 행동 스티어링). system_prompt 끝 volatile 위치에 append. per-turn 가변 → 캐시 불가
+    history: list[dict] = Field(default_factory=list)  # 호출자(백엔드)가 주는 대화 기록 [{role, content}]. 있으면 session_memory보다 우선 — 멀티턴 컨텍스트 신뢰원천(고아/유실 방지)
     metadata: dict = Field(default_factory=dict)  # 외부 시스템 메타데이터 (company_id 등). AgentContext.metadata로 전달
 
     @field_validator("question")
