@@ -39,9 +39,11 @@ services:
       # 임베딩/리랭커는 모드와 무관하게 항상 MLX (Anthropic 임베딩 없음 + 기존 코퍼스 동일 모델)
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
-      # ── development(MLX) 복귀 시: PROVIDER_MODE=development + 아래 4줄 주석 해제 ──
+      # 하이브리드: 무료 콘텐츠용 로컬 MLX(saju 전용 8106=Qwen3.5-9B). get_local_llm이 사용.
+      # (anthropic 모드라 main_llm은 Haiku 유지 — 이 URL은 get_local_llm만 소비)
+      AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8106
+      # ── development(MLX) 복귀 시: PROVIDER_MODE=development + 아래 주석 해제 ──
       # AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105
-      # AIP_MAIN_LLM_SERVER_URL: http://host.docker.internal:8104
       # AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-8B-4bit
       # AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105
       # 인증
