@@ -35,6 +35,7 @@ class FortuneInterpretRequest(BaseModel):
     type: str = Field(..., description="운세/놀이 타입", pattern=r"^(today|yearly|tojeong|tarot|dream|name|charm|compare)$")
     saju_context: str = Field(..., description="컨텍스트 (사전 포맷팅 완료)", min_length=10)
     tojeong_data: Optional[Dict[str, Any]] = Field(None, description="토정비결 괘 데이터 (tojeong 타입일 때)")
+    route: Optional[str] = Field(None, description="LLM 라우팅: local(기본)|commercial")
 
 
 class FortuneInterpretResponse(BaseModel):
@@ -72,21 +73,28 @@ async def interpret_fortune(
         fortune_service = request.app.state.fortune_service
         cache = getattr(request.app.state, "response_cache_service", None)
 
-        # 캐시 키: 타입+컨텍스트(+괘). 같은 입력이면 로컬 LLM 재호출 없이 즉답.
+        # 캐시 키: 타입+route+컨텍스트(+괘). route 포함 — provider별 결과 혼선 방지.
+        route = request_data.route or "local"
         normalized = normalize_input(
-            f"{request_data.type}|{request_data.saju_context}|{request_data.tojeong_data or ''}"
+            f"{request_data.type}|{route}|{request_data.saju_context}|{request_data.tojeong_data or ''}"
         )
 
         if cache is not None:
             hit = await cache.get(_CACHE_PROFILE, _CACHE_MODE, normalized)
             if hit is not None:
-                logger.info("fortune_cache_hit", fortune_type=request_data.type)
-                return FortuneInterpretResponse(fortune_data=json.loads(hit.response_text))
+                try:
+                    cached_data = json.loads(hit.response_text)
+                    logger.info("fortune_cache_hit", fortune_type=request_data.type)
+                    return FortuneInterpretResponse(fortune_data=cached_data)
+                except (ValueError, TypeError):
+                    # 손상 캐시 엔트리 — 무시하고 재생성.
+                    logger.warning("fortune_cache_corrupt fortune_type=%s", request_data.type)
 
         fortune_data = await fortune_service.interpret(
             fortune_type=request_data.type,
             saju_context=request_data.saju_context,
             tojeong_data=request_data.tojeong_data,
+            route=request_data.route,
         )
 
         if cache is not None:

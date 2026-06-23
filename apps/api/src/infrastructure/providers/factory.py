@@ -115,7 +115,7 @@ class ProviderFactory:
         from .llm.http_llm import HttpLLMProvider
 
         system_prefix = get_locale().prompt("llm_system_prefix")
-        # MLX HTTP 서버(8104). 컨테이너→호스트는 host.docker.internal.
+        # MLX HTTP 서버 — 운영은 env(AIP_MAIN_LLM_SERVER_URL=8106 전용서버), 미설정 시 8104 폴백.
         url = self._settings.main_llm_server_url or "http://host.docker.internal:8104"
         logger.info("Using LOCAL MLX LLM (GPU): %s", url)
         return HttpLLMProvider(
@@ -125,6 +125,7 @@ class ProviderFactory:
     def get_commercial_llm(self) -> LLMProvider:
         """고난도 추론용 상용 LLM(Anthropic Haiku). 키 없으면 로컬 폴백. mode 무시."""
         if not self._settings.anthropic_api_key:
+            logger.warning("anthropic_api_key 미설정 — commercial 요청이 로컬 LLM으로 폴백(품질 저하 가능)")
             return self.get_local_llm()
         from .llm.anthropic import AnthropicLLMProvider
 
