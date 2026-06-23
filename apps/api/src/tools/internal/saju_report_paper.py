@@ -87,6 +87,17 @@ class SajuReportPaperTool:
 
         context_str = format_single_person_context(saju_data, "사용자")
 
+        # 챗 맥락 주입(killing point) — 이 사람이 묘묘와 나눈 질답(실제 고민·관심사)을
+        # 리포트에 녹여 초개인화한다. 데이터만 보던 풀이를 "너 아까 ~ 했지" 수준으로.
+        chat_ctx = saju_data.get("_chatContext") if isinstance(saju_data, dict) else None
+        if chat_ctx:
+            context_str += (
+                "\n\n[이 사람이 방금 묘묘에게 직접 한 말·고민 — 가장 중요한 단서]\n"
+                f"{chat_ctx}\n"
+                "→ 이 사람이 진짜 궁금해하고 걱정하는 걸 사주 근거로 콕 짚어 답해줘. "
+                "리포트가 '내 얘기'처럼 느껴지게."
+            )
+
         report_json: dict[str, Any] = {"$schema": "report.v2/paper"}
         failed_sections: list[str] = []
         completed_count = 0
