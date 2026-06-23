@@ -447,7 +447,7 @@ async def create_app_state(settings: Settings) -> AppState:
         handler=saju_report_service.process_report_job,
         worker_id=f"saju-report-{getattr(settings, 'server_id', None) or 'default'}",
         poll_interval=2.0,
-        max_concurrent=2,
+        max_concurrent=4,  # 유료 리포트 동시 처리 — Haiku 클라우드 스케일(레이트리밋은 SDK 백오프)
     )
 
     logger.info(

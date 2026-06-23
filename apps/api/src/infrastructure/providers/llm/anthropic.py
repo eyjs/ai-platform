@@ -82,7 +82,8 @@ class AnthropicLLMProvider(LLMProvider):
                 'anthropic 패키지 미설치 — pip install -e ".[anthropic]"',
             ) from e
 
-        self._client = AsyncAnthropic(api_key=api_key)
+        # max_retries=4 — 429(rate limit)·5xx 지수 백오프(SDK 내장). 동시 폭주 시 안정성.
+        self._client = AsyncAnthropic(api_key=api_key, max_retries=4)
         self._model = model
         self._system_prefix = system_prefix
         self._max_tokens = max_tokens

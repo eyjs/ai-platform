@@ -5,6 +5,7 @@ POST /api/fortune/interpret — 동기 운세 해석 (단일 LLM 호출)
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Dict, Optional
 
@@ -29,6 +30,10 @@ _FORTUNE_TTL = {
 }
 # 타입별 필수 키 — 있어야 캐시(절단/빈 응답을 TTL 동안 고정하는 것 방지). 놀이류는 미지정→비빈 검사만.
 _FORTUNE_REQUIRED_KEY = {"today": "hero", "yearly": "yearTheme", "tojeong": "yearSummary"}
+
+# single-flight — 동일 캐시키 동시 미스를 1회 생성으로 합쳐 GPU thundering herd 방지.
+# (단일 ai-platform 인스턴스·단일 이벤트루프 가정 — dict 접근은 await 사이 원자적)
+_inflight: dict[str, asyncio.Future] = {}
 
 
 class FortuneInterpretRequest(BaseModel):
@@ -92,14 +97,30 @@ async def interpret_fortune(
                     # 손상 캐시 엔트리 — 무시하고 재생성.
                     logger.warning("fortune_cache_corrupt fortune_type=%s", request_data.type)
 
-        fortune_data = await fortune_service.interpret(
-            fortune_type=request_data.type,
-            saju_context=request_data.saju_context,
-            tojeong_data=request_data.tojeong_data,
-            route=request_data.route,
-        )
+        # single-flight: 동일 키가 이미 생성 중이면 그 결과에 합류(추가 GPU 호출 없음).
+        existing = _inflight.get(normalized)
+        if existing is not None:
+            logger.info("fortune_inflight_join", fortune_type=request_data.type)
+            return FortuneInterpretResponse(fortune_data=await existing)
 
-        # 절단/빈 응답은 캐시하지 않음(TTL 동안 불량 응답 고정 방지).
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        _inflight[normalized] = fut
+        try:
+            fortune_data = await fortune_service.interpret(
+                fortune_type=request_data.type,
+                saju_context=request_data.saju_context,
+                tojeong_data=request_data.tojeong_data,
+                route=request_data.route,
+            )
+            fut.set_result(fortune_data)
+        except Exception as e:
+            if not fut.done():
+                fut.set_exception(e)
+            raise
+        finally:
+            _inflight.pop(normalized, None)
+
+        # 캐시 put — 생성자만 수행(합류자는 Future로 이미 받음). 절단/빈 응답은 거부.
         required_key = _FORTUNE_REQUIRED_KEY.get(request_data.type)
         cacheable = (
             isinstance(fortune_data, dict)
