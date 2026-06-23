@@ -97,3 +97,38 @@ async def test_mode_selector_no_classifier_miss_agentic():
     mode, wf_id = await ModeSelector().select("날씨 어때?", _hybrid_profile())
     assert mode == "agentic"
     assert wf_id is None
+
+
+# --- W3: 라우터 폴백 예외 좁히기 (LLM 결함만 폴백, 버그는 전파) ---
+
+
+async def test_run_l0_recovers_aierror():
+    """L0: AIError(LLM 결함)는 passthrough 폴백으로 복구된다(기존 동작)."""
+    from unittest.mock import AsyncMock, MagicMock
+    import pytest
+    from src.router.ai_router import AIRouter
+    from src.common.exceptions import AIError
+
+    router = AIRouter.__new__(AIRouter)  # __init__ 우회(실 LLM 컴포넌트 빌드 방지)
+    router._resolver = MagicMock()
+    router._resolver.resolve = AsyncMock(
+        side_effect=AIError("llm parse 실패", layer="ROUTER", error_code="ERR_ROUTER_L0"),
+    )
+
+    resolved, resolution = await router._run_l0("내 질문", [])
+    assert resolved == "내 질문"
+    assert resolution.method == "fallback"
+
+
+async def test_run_l0_propagates_programming_bug():
+    """L0: TypeError 등 비-LLM 버그는 폴백으로 가리지 않고 전파한다(W3)."""
+    from unittest.mock import AsyncMock, MagicMock
+    import pytest
+    from src.router.ai_router import AIRouter
+
+    router = AIRouter.__new__(AIRouter)
+    router._resolver = MagicMock()
+    router._resolver.resolve = AsyncMock(side_effect=TypeError("코드 버그"))
+
+    with pytest.raises(TypeError):
+        await router._run_l0("내 질문", [])

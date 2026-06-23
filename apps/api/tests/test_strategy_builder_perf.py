@@ -84,6 +84,28 @@ class TestStrategyBuilderBuild:
         assert plan.conversation_context != ""
         assert "면책 사항은" in plan.conversation_context
 
+    def test_build_populates_profile_id(self):
+        """build()가 plan.profile_id를 profile.id로 채운다 (그래프 캐시 targeted invalidation 연동).
+
+        회귀 방지: 이 필드가 비면 그래프 캐시 엔트리가 profile_id=None으로 태깅되어
+        프로필 변경 시 invalidate(profile_id)가 아무것도 못 지운다(stale 그래프).
+        """
+        builder = StrategyBuilder()
+        profile = self._make_profile()  # id="test"
+        strategy = STRATEGY_MATRIX[QuestionType.STANDALONE]
+
+        plan = builder.build(
+            profile=profile,
+            question_type=QuestionType.STANDALONE,
+            strategy=strategy,
+            mode="agentic",
+            tools=[],
+            query="질문",
+            history=[],
+        )
+
+        assert plan.profile_id == "test"
+
     def test_standalone_without_history_empty_context(self):
         """STANDALONE + history 없을 때 conversation_context는 비어있다."""
         builder = StrategyBuilder()

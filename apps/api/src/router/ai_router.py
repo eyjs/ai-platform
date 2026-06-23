@@ -11,6 +11,7 @@ Layer 3: Strategy Builder (전략 + SearchScope + conversation_context + Executi
 """
 
 import time
+import json
 from typing import List, Optional, Union
 
 from src.domain.agent_profile import AgentProfile
@@ -27,17 +28,14 @@ from src.tools.base import ScopedTool, Tool
 
 logger = get_logger(__name__)
 
-# AI 결함으로 간주하여 Fallback 처리할 예외 목록
-# LLM 파싱 실패, JSON 형식 오류, 의도 분류 이상 등
-#
-# 주의: ValueError/KeyError/TypeError는 범위가 넓다.
-# 이 튜플은 _run_l0/_run_l1처럼 LLM 호출 직후의 좁은 try 블록에서만 사용할 것.
-# 넓은 범위에서 사용하면 프로그래밍 버그를 삼킬 위험이 있다.
+# AI 결함으로 간주하여 Fallback 처리할 예외 목록 — LLM 결함만 좁게.
+# resolver(context_resolver)·classifier(intent_classifier)는 LLM 오류를 내부에서 삼켜
+# 폴백을 반환하므로, 이 외부 catch는 *전파된* 예외만 만난다. ValueError/KeyError/TypeError까지
+# 잡으면 enum 변환·dict 접근 같은 프로그래밍 버그를 "L0/L1_fallback"으로 가려버린다.
+# → LLM 결함(AIError, 깨진 JSON)만 폴백하고 그 외는 전파해 버그를 드러낸다.
 _AI_RECOVERABLE = (
-    AIError,          # 우리 예외 계층
-    ValueError,       # JSON 파싱, enum 변환 실패
-    KeyError,         # LLM 응답에서 필수 필드 누락
-    TypeError,        # LLM 응답 타입 불일치
+    AIError,              # 우리 예외 계층(LLM 파싱/분류 결함)
+    json.JSONDecodeError, # LLM이 깨진 JSON을 반환 (ValueError 하위지만 의미 명확)
 )
 
 

@@ -543,9 +543,9 @@ class GraphExecutor:
             cache_padding_text=plan.cache_padding_text,
         )
 
-        # profile_id는 plan에서 추출 (무효화 연동용)
-        profile_id = getattr(plan, "profile_id", None)
-        self._graph_cache.put(cache_key, agent_app, profile_id=profile_id)
+        # profile_id로 엔트리 태깅 → 프로필 변경 시 invalidate(profile_id)가 실제로 매칭.
+        # (이전엔 ExecutionPlan에 profile_id가 없어 항상 None → targeted invalidation 무효였음)
+        self._graph_cache.put(cache_key, agent_app, profile_id=plan.profile_id or None)
 
         logger.debug(
             "agentic_graph_cache_miss",
