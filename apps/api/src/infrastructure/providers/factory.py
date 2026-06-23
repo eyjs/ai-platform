@@ -115,8 +115,9 @@ class ProviderFactory:
         from .llm.http_llm import HttpLLMProvider
 
         system_prefix = get_locale().prompt("llm_system_prefix")
-        # MLX HTTP 서버 — 운영은 env(AIP_MAIN_LLM_SERVER_URL=8106 전용서버), 미설정 시 8104 폴백.
-        url = self._settings.main_llm_server_url or "http://host.docker.internal:8104"
+        # 무료 콘텐츠 전용 MLX(8106=9B). main_llm_server_url과 분리 — 챗 모델 자동감지 오염·
+        # kms 8104(14B) 폴백 금지. 미설정 시 8106 기본(전용서버), 8104로 폴백하지 않음.
+        url = self._settings.fortune_llm_server_url or "http://host.docker.internal:8106"
         # 무료 코어스 콘텐츠는 간결 → max_tokens 제한(9B 생성시간 bound, 타임아웃 방지).
         logger.info("Using LOCAL MLX LLM (GPU): %s", url)
         return HttpLLMProvider(

@@ -27,6 +27,8 @@ _FORTUNE_TTL = {
     "today": 86400, "yearly": 2592000, "tojeong": 604800,
     "tarot": 86400, "dream": 86400, "name": 86400, "charm": 86400, "compare": 604800,
 }
+# 타입별 필수 키 — 있어야 캐시(절단/빈 응답을 TTL 동안 고정하는 것 방지). 놀이류는 미지정→비빈 검사만.
+_FORTUNE_REQUIRED_KEY = {"today": "hero", "yearly": "yearTheme", "tojeong": "yearSummary"}
 
 
 class FortuneInterpretRequest(BaseModel):
@@ -97,7 +99,14 @@ async def interpret_fortune(
             route=request_data.route,
         )
 
-        if cache is not None:
+        # 절단/빈 응답은 캐시하지 않음(TTL 동안 불량 응답 고정 방지).
+        required_key = _FORTUNE_REQUIRED_KEY.get(request_data.type)
+        cacheable = (
+            isinstance(fortune_data, dict)
+            and bool(fortune_data)
+            and (required_key is None or required_key in fortune_data)
+        )
+        if cache is not None and cacheable:
             try:
                 await cache.put(
                     _CACHE_PROFILE, _CACHE_MODE, normalized,
@@ -106,6 +115,8 @@ async def interpret_fortune(
                 )
             except Exception as ce:  # 캐시 실패는 비차단
                 logger.warning("fortune_cache_put_failed error=%s", ce)
+        elif not cacheable:
+            logger.warning("fortune_cache_skip (불완전 응답) fortune_type=%s", request_data.type)
 
         logger.info(
             "fortune_interpret_success",

@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     reranker_server_url: str = ""
     router_llm_server_url: str = ""
     main_llm_server_url: str = ""
+    # 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). main_llm과 분리 — 챗 모델 자동감지 오염 방지.
+    fortune_llm_server_url: str = ""
 
     # 응답 정책
     response_policy: str = "strict"

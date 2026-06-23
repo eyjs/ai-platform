@@ -210,6 +210,7 @@ class SajuReportService:
             INSERT INTO saju_report_results
             (id, job_id, report_type, sections_total, status, metadata)
             VALUES ($1, $2, $3, $4, 'generating', $5)
+            ON CONFLICT (id) DO NOTHING
             """,
             uuid.UUID(job_id),
             uuid.UUID(job_id),  # job_id를 report id로도 사용
