@@ -50,14 +50,17 @@ _LINEBREAK_PATTERN = re.compile(r"([다요죠][\.!]) ")
 class FortuneService:
     """사주 운세 해석 서비스."""
 
-    def __init__(self, main_llm: LLMProvider):
+    def __init__(self, main_llm: LLMProvider, local_llm: Optional[LLMProvider] = None):
         self._llm = main_llm
+        # 무료·패턴 콘텐츠용 로컬 LLM(MLX, $0). 미주입 시 main_llm 폴백.
+        self._local_llm = local_llm or main_llm
 
     async def interpret(
         self,
         fortune_type: str,
         saju_context: str,
         tojeong_data: Optional[Dict[str, Any]] = None,
+        route: Optional[str] = None,
     ) -> Dict[str, Any]:
         builder = _PROMPT_BUILDERS.get(fortune_type)
         if builder is None:
@@ -66,9 +69,11 @@ class FortuneService:
         prompt = builder(saju_context)
         system = MYO_PLAY_SYSTEM if fortune_type in _MYO_PLAY_TYPES else FORTUNE_SYSTEM_PROMPT
 
-        logger.info("fortune_interpret_start", fortune_type=fortune_type)
+        # 라우팅: 무료 운세·놀이는 기본 로컬(MLX, $0). route='commercial'만 상용.
+        llm = self._llm if route == "commercial" else self._local_llm
+        logger.info("fortune_interpret_start", fortune_type=fortune_type, route=(route or "local"))
 
-        raw = await self._llm.generate(prompt, system=system)
+        raw = await llm.generate(prompt, system=system)
 
         cleaned = _recover_truncated_json(raw)
         data = json.loads(cleaned)

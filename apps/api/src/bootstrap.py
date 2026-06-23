@@ -429,8 +429,9 @@ async def create_app_state(settings: Settings) -> AppState:
     feedback_service = FeedbackService(_session_factory, retention_days=30)
 
     # Fortune 해석 서비스 (동기 — DB 불필요)
+    # 무료·패턴 콘텐츠($0)는 로컬 LLM(MLX)로 라우팅, 고난도는 main_llm(상용).
     from src.services.fortune_service import FortuneService
-    fortune_service = FortuneService(main_llm=main_llm)
+    fortune_service = FortuneService(main_llm=main_llm, local_llm=provider_factory.get_local_llm())
     logger.info("fortune_service_initialized")
 
     # Task 004: Saju Report Service + QueueWorker

@@ -107,6 +107,34 @@ class ProviderFactory:
             label="main",
         )
 
+    # === 하이브리드 라우팅용 명시 provider (provider_mode 무시) ===
+    # 무료/패턴 콘텐츠($0)는 로컬, 고난도 추론은 상용 — 요청별 선택용.
+
+    def get_local_llm(self) -> LLMProvider:
+        """무료·패턴 콘텐츠용 로컬 MLX LLM($0, GPU 가속). MLX 전용 — ollama 사용 안 함."""
+        from .llm.http_llm import HttpLLMProvider
+
+        system_prefix = get_locale().prompt("llm_system_prefix")
+        # MLX HTTP 서버(8104). 컨테이너→호스트는 host.docker.internal.
+        url = self._settings.main_llm_server_url or "http://host.docker.internal:8104"
+        logger.info("Using LOCAL MLX LLM (GPU): %s", url)
+        return HttpLLMProvider(
+            base_url=url, system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
+        )
+
+    def get_commercial_llm(self) -> LLMProvider:
+        """고난도 추론용 상용 LLM(Anthropic Haiku). 키 없으면 로컬 폴백. mode 무시."""
+        if not self._settings.anthropic_api_key:
+            return self.get_local_llm()
+        from .llm.anthropic import AnthropicLLMProvider
+
+        system_prefix = get_locale().prompt("llm_system_prefix")
+        logger.info("Using COMMERCIAL Anthropic: %s", self._settings.anthropic_main_model)
+        return AnthropicLLMProvider(
+            api_key=self._settings.anthropic_api_key, model=self._settings.anthropic_main_model,
+            system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
+        )
+
     def _create_llm(
         self, server_url: str, local_model: str, label: str,
         anthropic_model: str = "claude-haiku-4-5",
