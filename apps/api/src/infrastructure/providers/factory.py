@@ -117,9 +117,10 @@ class ProviderFactory:
         system_prefix = get_locale().prompt("llm_system_prefix")
         # MLX HTTP 서버 — 운영은 env(AIP_MAIN_LLM_SERVER_URL=8106 전용서버), 미설정 시 8104 폴백.
         url = self._settings.main_llm_server_url or "http://host.docker.internal:8104"
+        # 무료 코어스 콘텐츠는 간결 → max_tokens 제한(9B 생성시간 bound, 타임아웃 방지).
         logger.info("Using LOCAL MLX LLM (GPU): %s", url)
         return HttpLLMProvider(
-            base_url=url, system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
+            base_url=url, system_prefix=system_prefix, max_tokens=1024,
         )
 
     def get_commercial_llm(self) -> LLMProvider:
