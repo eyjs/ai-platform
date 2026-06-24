@@ -16,7 +16,9 @@ import pytest
 from src.domain.agent_context import AgentContext
 from src.services.saju_report_service import SajuReportService
 from src.tools.base import ToolResult
+from src.tools.internal.saju_career_prompts import CAREER_V2_SECTION_KEYS
 from src.tools.internal.saju_prompts import COMPAT_V4_SECTION_KEYS, PAPER_V2_SECTION_KEYS
+from src.tools.internal.saju_wealth_prompts import WEALTH_V2_SECTION_KEYS
 
 
 SAMPLE_SAJU_DATA = {
@@ -267,6 +269,142 @@ class TestSajuReportPaperToolDirect:
         assert result.metadata["sections_total"] == 7
         for key in PAPER_V2_SECTION_KEYS:
             assert key in result.data
+
+
+class TestSajuReportServiceCareer:
+    @pytest.fixture
+    def pool(self):
+        return _make_pool()
+
+    @pytest.fixture
+    def llm(self):
+        return _make_llm_provider(CAREER_V2_SECTION_KEYS)
+
+    @pytest.fixture
+    def service(self, pool, llm):
+        return SajuReportService(pool, llm)
+
+    async def test_process_career_report_success(self, service, pool):
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "career",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-3",
+            "job_id": job_id,
+        }
+
+        result = await service.process_report_job(payload)
+
+        assert result["status"] == "completed"
+        assert result["report_type"] == "career"
+        # 5 sections + $schema key
+        assert result["sections_count"] == 6
+        assert result["job_id"] == job_id
+
+    async def test_career_sections_total_is_5(self, service, pool):
+        """sections_total=5 로 DB INSERT 되는지 확인한다."""
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "career",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-3",
+            "job_id": job_id,
+        }
+
+        await service.process_report_job(payload)
+
+        # INSERT 호출 인수에서 sections_total(4번째 positional) = 5 검증
+        insert_calls = [
+            c for c in pool.execute.call_args_list
+            if "INSERT INTO saju_report_results" in str(c)
+        ]
+        assert len(insert_calls) >= 1
+        # positional args: [job_uuid, job_uuid, report_type, sections_total, metadata_json]
+        call_args = insert_calls[0][0]  # positional tuple
+        sections_total_arg = call_args[4]  # 5번째 인수 (0-indexed=4)
+        assert sections_total_arg == 5
+
+    async def test_career_generates_5_llm_calls(self, service, llm):
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "career",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-3",
+            "job_id": job_id,
+        }
+
+        await service.process_report_job(payload)
+        assert llm.generate.call_count == 5
+
+
+class TestSajuReportServiceWealth:
+    @pytest.fixture
+    def pool(self):
+        return _make_pool()
+
+    @pytest.fixture
+    def llm(self):
+        return _make_llm_provider(WEALTH_V2_SECTION_KEYS)
+
+    @pytest.fixture
+    def service(self, pool, llm):
+        return SajuReportService(pool, llm)
+
+    async def test_process_wealth_report_success(self, service, pool):
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "wealth",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-4",
+            "job_id": job_id,
+        }
+
+        result = await service.process_report_job(payload)
+
+        assert result["status"] == "completed"
+        assert result["report_type"] == "wealth"
+        # 5 sections + $schema key
+        assert result["sections_count"] == 6
+        assert result["job_id"] == job_id
+
+    async def test_wealth_sections_total_is_5(self, service, pool):
+        """sections_total=5 로 DB INSERT 되는지 확인한다."""
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "wealth",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-4",
+            "job_id": job_id,
+        }
+
+        await service.process_report_job(payload)
+
+        insert_calls = [
+            c for c in pool.execute.call_args_list
+            if "INSERT INTO saju_report_results" in str(c)
+        ]
+        assert len(insert_calls) >= 1
+        call_args = insert_calls[0][0]
+        sections_total_arg = call_args[4]
+        assert sections_total_arg == 5
+
+    async def test_wealth_generates_5_llm_calls(self, service, llm):
+        job_id = str(uuid.uuid4())
+        payload = {
+            "report_type": "wealth",
+            "saju_data": SAMPLE_SAJU_DATA,
+            "metadata": {},
+            "user_id": "user-4",
+            "job_id": job_id,
+        }
+
+        await service.process_report_job(payload)
+        assert llm.generate.call_count == 5
 
 
 class TestSajuReportCompatToolDirect:

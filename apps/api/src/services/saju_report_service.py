@@ -19,8 +19,10 @@ import asyncpg
 from src.domain.agent_context import AgentContext
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
+from src.tools.internal.saju_report_career import SajuReportCareerTool
 from src.tools.internal.saju_report_compatibility import SajuReportCompatibilityTool
 from src.tools.internal.saju_report_paper import SajuReportPaperTool
+from src.tools.internal.saju_report_wealth import SajuReportWealthTool
 
 logger = get_logger(__name__)
 
@@ -39,6 +41,8 @@ class SajuReportService:
         # Tool 인스턴스 초기화 (LLMProvider 전달)
         self._paper_tool = SajuReportPaperTool(llm_provider=main_llm)
         self._compat_tool = SajuReportCompatibilityTool(llm_provider=main_llm)
+        self._career_tool = SajuReportCareerTool(llm_provider=main_llm)
+        self._wealth_tool = SajuReportWealthTool(llm_provider=main_llm)
 
     async def process_report_job(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """QueueWorker에서 호출되는 리포트 생성 핸들러.
@@ -66,7 +70,8 @@ class SajuReportService:
 
         try:
             # 1. 리포트 레코드 초기화
-            sections_total = 7 if report_type == "paper" else 6
+            # career/wealth=5섹션, paper=7섹션, compatibility=6섹션
+            sections_total = 5 if report_type in ("career", "wealth") else (7 if report_type == "paper" else 6)
             await self._create_report_record(
                 job_id=job_id,
                 report_type=report_type,
@@ -89,6 +94,18 @@ class SajuReportService:
                 )
             elif report_type == "compatibility":
                 report_data = await self._generate_compatibility_report(
+                    job_id=job_id,
+                    saju_data=saju_data,
+                    agent_context=agent_context,
+                )
+            elif report_type == "career":
+                report_data = await self._generate_career_report(
+                    job_id=job_id,
+                    saju_data=saju_data,
+                    agent_context=agent_context,
+                )
+            elif report_type == "wealth":
+                report_data = await self._generate_wealth_report(
                     job_id=job_id,
                     saju_data=saju_data,
                     agent_context=agent_context,
@@ -181,6 +198,56 @@ class SajuReportService:
 
         # 진행 상태를 완료로 업데이트 (tool에서 progress 콜백이 없으므로)
         await self._update_progress(job_id, 6, 6)
+
+        return result.data
+
+    async def _generate_career_report(
+        self,
+        job_id: str,
+        saju_data: Dict[str, Any],
+        agent_context: AgentContext,
+    ) -> Dict[str, Any]:
+        """Career(천직) 리포트 생성 (5섹션)."""
+
+        # Tool 파라미터 구성 (execute 메서드 사용)
+        params = {"saju_data": saju_data}
+
+        # SajuReportCareerTool 호출
+        result = await self._career_tool.execute(
+            params=params,
+            context=agent_context,
+        )
+
+        if not result.success:
+            raise RuntimeError(f"Career 리포트 생성 실패: {result.error}")
+
+        # 진행 상태를 완료로 업데이트 (tool에서 progress 콜백이 없으므로)
+        await self._update_progress(job_id, 5, 5)
+
+        return result.data
+
+    async def _generate_wealth_report(
+        self,
+        job_id: str,
+        saju_data: Dict[str, Any],
+        agent_context: AgentContext,
+    ) -> Dict[str, Any]:
+        """Wealth(재물) 리포트 생성 (5섹션)."""
+
+        # Tool 파라미터 구성 (execute 메서드 사용)
+        params = {"saju_data": saju_data}
+
+        # SajuReportWealthTool 호출
+        result = await self._wealth_tool.execute(
+            params=params,
+            context=agent_context,
+        )
+
+        if not result.success:
+            raise RuntimeError(f"Wealth 리포트 생성 실패: {result.error}")
+
+        # 진행 상태를 완료로 업데이트 (tool에서 progress 콜백이 없으므로)
+        await self._update_progress(job_id, 5, 5)
 
         return result.data
 
