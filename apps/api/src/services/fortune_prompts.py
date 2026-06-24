@@ -68,12 +68,11 @@ def build_yearly_prompt(saju_context: str) -> str:
 
 [작성 지시] 각 값을 1-2문장으로 짧게.
 - yearTheme.headline: 올해 핵심 한 문장(일간×세운) / theme: 키워드 3-5단어 / mood: excellent|good|neutral|caution|challenge 중 하나
-- saewoonAdvice.summary: 올해 큰 흐름 2-3문장 / quarterlyFocus.q1~q4: 각 한 줄
-- relationships: 올해 대인관계 / healthYearly: 올해 건강 한 줄 / keyActions: 실천 3개
+- saewoonAdvice.summary: 올해 큰 흐름과 조언 3-4문장
 
-★상투구 금지: 뻔한 점쟁이 말투('운명의 흐름','흔들려도 괜찮아' 등) 절대 쓰지 마라. 일간·세운의 구체에서만 끌어내라.
+★순수 한국어만 — 영어 단어 금지(올해를 this year로 쓰지 마라). 상투구 금지: 뻔한 점쟁이 말투('운명의 흐름','흔들려도 괜찮아' 등) 쓰지 말고 일간·세운의 구체에서만 끌어내라.
 아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
-{{"yearTheme":{{"headline":"","theme":"","mood":""}},"saewoonAdvice":{{"summary":"","quarterlyFocus":{{"q1":"","q2":"","q3":"","q4":""}}}},"relationships":"","healthYearly":"","keyActions":["","",""]}}"""
+{{"yearTheme":{{"headline":"","theme":"","mood":""}},"saewoonAdvice":{{"summary":""}}}}"""
 
 
 def build_tojeong_prompt(tojeong_context: str) -> str:
@@ -83,11 +82,11 @@ def build_tojeong_prompt(tojeong_context: str) -> str:
 
 {tojeong_context}
 
-[작성 지시] 각 값을 1-2문장으로 짧게, 한국어만.
-- yearSummary: 올해 총운 2-3문장(이 괘만의 이야기) / keywords: #키워드 3개
-- categories.health/wealth/love/career: 각 summary 1-2문장 + doList 2개 + cautionList 1개
-- overallAdvice: 올해 처세 핵심
+[작성 지시] 각 값을 1-2문장으로 짧게, 순수 한국어만(영어 단어 금지).
+- yearSummary: 올해 총운 2-3문장(이 괘만의 이야기)
+- categories.health/wealth/love/career: 각 summary 1-2문장(건강·재물·애정·직업운)
+- overallAdvice: 올해 처세 핵심 한 줄
 
 ★상투구 금지: 뻔한 점쟁이 말투('운명의 흐름','흔들려도 괜찮아' 등) 절대 쓰지 마라. 이 괘 등급의 구체에서만 끌어내라.
 아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
-{{"yearSummary":"","keywords":["","",""],"categories":{{"health":{{"summary":"","doList":["",""],"cautionList":[""]}},"wealth":{{"summary":"","doList":["",""],"cautionList":[""]}},"love":{{"summary":"","doList":["",""],"cautionList":[""]}},"career":{{"summary":"","doList":["",""],"cautionList":[""]}}}},"overallAdvice":""}}"""
+{{"yearSummary":"","categories":{{"health":{{"summary":""}},"wealth":{{"summary":""}},"love":{{"summary":""}},"career":{{"summary":""}}}},"overallAdvice":""}}"""
