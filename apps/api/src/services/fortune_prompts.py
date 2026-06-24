@@ -52,13 +52,11 @@ def build_today_prompt(saju_context: str) -> str:
 
 [작성 지시] 각 값을 1-2문장으로 짧게.
 - hero.headline: 오늘 핵심 한 문장(일간×일진 관계 반영) / hero.mood: great|good|neutral|caution 중 하나
-- dailyPillar: 오늘 일진과 일간 관계가 주는 기운
-- energyAdvice.summary: 오늘 의식할 에너지 / luckyColor·luckyFood·luckyTime·avoidTip: 각 짧게(오행 근거)
-- relationships: 오늘 대인관계 / healthAlert: 오늘 건강 한 줄 / actionItems: 실천 3개
+- energyAdvice.summary: 오늘 의식할 에너지·조언 2-3문장 / luckyColor: 행운 색(오행 근거 짧게) / avoidTip: 오늘 피할 것 한 줄
 
-★상투구 금지: '운명의 흐름','흔들려도 괜찮아','네 옆에 있을게' 같은 뻔한 점쟁이 말투 절대 쓰지 마라. 위 일간·일진의 구체적 관계에서만 끌어내라.
+★순수 한국어만 — 영어 단어 절대 금지('오늘'을 today로 쓰지 마라). 상투구 금지: '운명의 흐름','흔들려도 괜찮아','네 옆에 있을게' 같은 뻔한 점쟁이 말투 쓰지 말고, 위 일간·일진의 구체적 관계에서만 끌어내라.
 아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
-{{"hero":{{"headline":"","mood":""}},"dailyPillar":"","energyAdvice":{{"summary":"","luckyColor":"","luckyFood":"","luckyTime":"","avoidTip":""}},"relationships":"","healthAlert":"","actionItems":["","",""]}}"""
+{{"hero":{{"headline":"","mood":""}},"energyAdvice":{{"summary":"","luckyColor":"","avoidTip":""}}}}"""
 
 
 def build_yearly_prompt(saju_context: str) -> str:
