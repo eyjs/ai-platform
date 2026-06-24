@@ -73,10 +73,24 @@ class FortuneService:
         llm = self._llm if route == "commercial" else self._local_llm
         logger.info("fortune_interpret_start", fortune_type=fortune_type, route=(route or "local"))
 
-        raw = await llm.generate(prompt, system=system)
+        # 9B가 가끔 malformed JSON(comma 누락 등)을 내므로 최대 3회 재생성(간헐 실패라 대부분 1~2회로 성공).
+        data = None
+        for attempt in range(3):
+            raw = await llm.generate(prompt, system=system)
+            cleaned = _recover_truncated_json(raw)
+            try:
+                data = json.loads(cleaned)
+                break
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "fortune_json_parse_retry",
+                    fortune_type=fortune_type,
+                    attempt=attempt + 1,
+                    error=str(e),
+                )
+                if attempt == 2:
+                    raise  # 3회 모두 실패 → 상위로(500). 다이어트로 발생률 자체는 낮음.
 
-        cleaned = _recover_truncated_json(raw)
-        data = json.loads(cleaned)
         # 묘묘 보이스(반말)는 줄바꿈 강제 삽입(해요체 종결 패턴) 대상 아님
         if fortune_type not in _MYO_PLAY_TYPES:
             data = _add_line_breaks(data)
