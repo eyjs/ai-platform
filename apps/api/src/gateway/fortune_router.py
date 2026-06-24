@@ -28,8 +28,12 @@ _FORTUNE_TTL = {
     "today": 86400, "yearly": 2592000, "tojeong": 604800,
     "tarot": 86400, "dream": 86400, "name": 86400, "charm": 86400, "compare": 604800,
 }
-# 타입별 필수 키 — 있어야 캐시(절단/빈 응답을 TTL 동안 고정하는 것 방지). 놀이류는 미지정→비빈 검사만.
-_FORTUNE_REQUIRED_KEY = {"today": "hero", "yearly": "yearTheme", "tojeong": "yearSummary"}
+# 타입별 필수 키 — 이 키가 '존재 + 비어있지 않음'이어야 캐시(절단/빈 응답 TTL 고정 방지).
+_FORTUNE_REQUIRED_KEY = {
+    "today": "hero", "yearly": "yearTheme", "tojeong": "yearSummary",
+    "tarot": "reading", "dream": "reading", "name": "reading",
+    "charm": "blessing", "compare": "reading",
+}
 
 # single-flight — 동일 캐시키 동시 미스를 1회 생성으로 합쳐 GPU thundering herd 방지.
 # (단일 ai-platform 인스턴스·단일 이벤트루프 가정 — dict 접근은 await 사이 원자적)
@@ -125,7 +129,8 @@ async def interpret_fortune(
         cacheable = (
             isinstance(fortune_data, dict)
             and bool(fortune_data)
-            and (required_key is None or required_key in fortune_data)
+            # 필수 필드가 존재 + 비어있지 않아야(빈 reading/hero 캐시 거부 → 다음 요청 재생성)
+            and (required_key is None or bool(fortune_data.get(required_key)))
         )
         if cache is not None and cacheable:
             try:
