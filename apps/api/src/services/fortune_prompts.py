@@ -50,74 +50,46 @@ def build_today_prompt(saju_context: str) -> str:
 
 {saju_context}
 
-★간결 규칙: 각 필드는 1-2문장으로 짧게. 장황한 설명 금지. 핵심만. JSON만 출력.
-{{
-  "hero": {{
-    "headline": "오늘 핵심 한 문장 (일간×일진 관계 반영)",
-    "mood": "great | good | neutral | caution 중 하나"
-  }},
-  "dailyPillar": "오늘 일진과 일간의 관계가 주는 기운 1-2문장",
-  "energyAdvice": {{
-    "summary": "오늘 의식할 에너지 1-2문장",
-    "luckyColor": "행운 색 (오행 근거 짧게)",
-    "luckyFood": "행운 음식 (짧게)",
-    "luckyTime": "좋은 시간대 (짧게)",
-    "avoidTip": "오늘 피할 것 (짧게)"
-  }},
-  "relationships": "오늘 대인관계 조언 1-2문장",
-  "healthAlert": "오늘 건강 한 줄",
-  "actionItems": ["오늘 실천 1", "실천 2", "실천 3"]
-}}"""
+[작성 지시] 각 값을 1-2문장으로 짧게.
+- hero.headline: 오늘 핵심 한 문장(일간×일진 관계 반영) / hero.mood: great|good|neutral|caution 중 하나
+- dailyPillar: 오늘 일진과 일간 관계가 주는 기운
+- energyAdvice.summary: 오늘 의식할 에너지 / luckyColor·luckyFood·luckyTime·avoidTip: 각 짧게(오행 근거)
+- relationships: 오늘 대인관계 / healthAlert: 오늘 건강 한 줄 / actionItems: 실천 3개
+
+★상투구 금지: '운명의 흐름','흔들려도 괜찮아','네 옆에 있을게' 같은 뻔한 점쟁이 말투 절대 쓰지 마라. 위 일간·일진의 구체적 관계에서만 끌어내라.
+아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
+{{"hero":{{"headline":"","mood":""}},"dailyPillar":"","energyAdvice":{{"summary":"","luckyColor":"","luckyFood":"","luckyTime":"","avoidTip":""}},"relationships":"","healthAlert":"","actionItems":["","",""]}}"""
 
 
 def build_yearly_prompt(saju_context: str) -> str:
-    now = datetime.now()
-    year = now.year
-    cm = now.month
-    m2 = cm + 1 if cm + 1 <= 12 else cm + 1 - 12
-    m3 = cm + 2 if cm + 2 <= 12 else cm + 2 - 12
-
+    year = datetime.now().year
     return f"""\
 아래 일간과 올해 세운(歲運)의 관계로 {year}년 신년운세를 풀어주세요.
 
 {saju_context}
 
-★간결 규칙: 각 필드는 1-2문장으로 짧게. 장황 금지. 핵심만. JSON만 출력.
-{{
-  "yearTheme": {{
-    "headline": "올해 핵심 한 문장 (일간×세운 관계 반영)",
-    "theme": "올해 키워드 (3-5단어)",
-    "mood": "excellent | good | neutral | caution | challenge 중 하나"
-  }},
-  "saewoonAdvice": {{
-    "summary": "올해 세운이 주는 큰 흐름 2-3문장",
-    "quarterlyFocus": {{
-      "q1": "1-3월 한 줄", "q2": "4-6월 한 줄", "q3": "7-9월 한 줄", "q4": "10-12월 한 줄"
-    }}
-  }},
-  "relationships": "올해 대인관계 1-2문장",
-  "healthYearly": "올해 건강 한 줄",
-  "keyActions": ["올해 실천 1", "실천 2", "실천 3"]
-}}"""
+[작성 지시] 각 값을 1-2문장으로 짧게.
+- yearTheme.headline: 올해 핵심 한 문장(일간×세운) / theme: 키워드 3-5단어 / mood: excellent|good|neutral|caution|challenge 중 하나
+- saewoonAdvice.summary: 올해 큰 흐름 2-3문장 / quarterlyFocus.q1~q4: 각 한 줄
+- relationships: 올해 대인관계 / healthYearly: 올해 건강 한 줄 / keyActions: 실천 3개
+
+★상투구 금지: 뻔한 점쟁이 말투('운명의 흐름','흔들려도 괜찮아' 등) 절대 쓰지 마라. 일간·세운의 구체에서만 끌어내라.
+아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
+{{"yearTheme":{{"headline":"","theme":"","mood":""}},"saewoonAdvice":{{"summary":"","quarterlyFocus":{{"q1":"","q2":"","q3":"","q4":""}}}},"relationships":"","healthYearly":"","keyActions":["","",""]}}"""
 
 
 def build_tojeong_prompt(tojeong_context: str) -> str:
     year = datetime.now().year
-
     return f"""\
 아래 토정비결 괘로 {year}년 운세를 풀어주세요.
 
 {tojeong_context}
 
-★간결 규칙: 각 필드 1-2문장으로 짧게. 장황 금지. 한국어만. 괄호 가이드는 실제 내용으로 대체. JSON만.
-{{
-  "yearSummary": "올해 총운 2-3문장 (괘의 의미 반영, 이 괘만의 올해 이야기)",
-  "keywords": ["#키워드1", "#키워드2", "#키워드3"],
-  "categories": {{
-    "health": {{ "summary": "건강운 1-2문장", "doList": ["실천1", "실천2"], "cautionList": ["주의1"] }},
-    "wealth": {{ "summary": "재물운 1-2문장", "doList": ["실천1", "실천2"], "cautionList": ["주의1"] }},
-    "love": {{ "summary": "애정운 1-2문장", "doList": ["실천1", "실천2"], "cautionList": ["주의1"] }},
-    "career": {{ "summary": "직업운 1-2문장", "doList": ["실천1", "실천2"], "cautionList": ["주의1"] }}
-  }},
-  "overallAdvice": "올해 처세 핵심 1-2문장"
-}}"""
+[작성 지시] 각 값을 1-2문장으로 짧게, 한국어만.
+- yearSummary: 올해 총운 2-3문장(이 괘만의 이야기) / keywords: #키워드 3개
+- categories.health/wealth/love/career: 각 summary 1-2문장 + doList 2개 + cautionList 1개
+- overallAdvice: 올해 처세 핵심
+
+★상투구 금지: 뻔한 점쟁이 말투('운명의 흐름','흔들려도 괜찮아' 등) 절대 쓰지 마라. 이 괘 등급의 구체에서만 끌어내라.
+아래 JSON의 키는 그대로 두고 빈 값만 채워서, JSON만 응답하라:
+{{"yearSummary":"","keywords":["","",""],"categories":{{"health":{{"summary":"","doList":["",""],"cautionList":[""]}},"wealth":{{"summary":"","doList":["",""],"cautionList":[""]}},"love":{{"summary":"","doList":["",""],"cautionList":[""]}},"career":{{"summary":"","doList":["",""],"cautionList":[""]}}}},"overallAdvice":""}}"""
