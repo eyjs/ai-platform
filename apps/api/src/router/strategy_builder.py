@@ -78,6 +78,7 @@ class StrategyBuilder:
 
         scope = SearchScope(
             domain_codes=resolved_domains,
+            # NOT WIRED: vector_store에 category 컬럼/파라미터 없음 — category_ids 세팅되나 질의에 미사용
             category_ids=profile.category_scopes if profile.category_scopes else None,
             security_level_max=security_level,
             allowed_doc_ids=prior_doc_ids if question_type == QuestionType.SAME_DOC_FOLLOWUP else None,

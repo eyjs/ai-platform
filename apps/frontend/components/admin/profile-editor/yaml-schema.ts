@@ -32,8 +32,6 @@ export const PROFILE_SCHEMA: FieldSchema[] = [
   { key: 'memory_project_id', description: '메모리 프로젝트 ID', type: 'string' },
   { key: 'max_tool_calls', description: '최대 도구 호출 (1-20)', type: 'number' },
   { key: 'agent_timeout_seconds', description: '에이전트 타임아웃 (5-300)', type: 'number' },
-  { key: 'execution_path', description: '실행 경로', type: 'string' },
-  { key: 'validation_nudge_enabled', description: '검증 넛지 활성화', type: 'boolean' },
   { key: 'intent_hints', description: '커스텀 Intent 힌트', type: 'array' },
 ];
 
