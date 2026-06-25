@@ -1,0 +1,3513 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "reason": "오프라인 — 외부 사주 백엔드/만세력 엔진 없음(Addendum D). 구조적 유효·합성.",
+    "n_train": 50,
+    "n_val": 20
+  },
+  "default_section": "careerWealth",
+  "train": [
+    {
+      "id": "saju-000",
+      "saju_data": {
+        "basic": {
+          "name": "내담자000",
+          "gender": "male",
+          "birthDate": "1970-01-01",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 54,
+              "fire": 11,
+              "earth": 11,
+              "metal": 11,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 54
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-001",
+      "saju_data": {
+        "basic": {
+          "name": "내담자001",
+          "gender": "female",
+          "birthDate": "1971-02-02",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 44,
+              "fire": 12,
+              "earth": 14,
+              "metal": 15,
+              "water": 16,
+              "selfStatus": "신강",
+              "selfStrength": 44
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-002",
+      "saju_data": {
+        "basic": {
+          "name": "내담자002",
+          "gender": "male",
+          "birthDate": "1972-03-03",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 49,
+              "earth": 18,
+              "metal": 8,
+              "water": 10,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-003",
+      "saju_data": {
+        "basic": {
+          "name": "내담자003",
+          "gender": "female",
+          "birthDate": "1973-04-04",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 17,
+              "fire": 41,
+              "earth": 11,
+              "metal": 14,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 41
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-004",
+      "saju_data": {
+        "basic": {
+          "name": "내담자004",
+          "gender": "male",
+          "birthDate": "1974-05-05",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 9,
+              "fire": 13,
+              "earth": 56,
+              "metal": 9,
+              "water": 13,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-005",
+      "saju_data": {
+        "basic": {
+          "name": "내담자005",
+          "gender": "female",
+          "birthDate": "1975-06-06",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 15,
+              "earth": 42,
+              "metal": 13,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 42
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-006",
+      "saju_data": {
+        "basic": {
+          "name": "내담자006",
+          "gender": "male",
+          "birthDate": "1976-07-07",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 9,
+              "earth": 15,
+              "metal": 47,
+              "water": 15,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-007",
+      "saju_data": {
+        "basic": {
+          "name": "내담자007",
+          "gender": "female",
+          "birthDate": "1977-08-08",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 11,
+              "earth": 18,
+              "metal": 47,
+              "water": 8,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-008",
+      "saju_data": {
+        "basic": {
+          "name": "내담자008",
+          "gender": "male",
+          "birthDate": "1978-09-09",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 8,
+              "fire": 16,
+              "earth": 12,
+              "metal": 8,
+              "water": 55,
+              "selfStatus": "신강",
+              "selfStrength": 55
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-009",
+      "saju_data": {
+        "basic": {
+          "name": "내담자009",
+          "gender": "female",
+          "birthDate": "1979-10-10",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 8,
+              "earth": 17,
+              "metal": 14,
+              "water": 50,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-010",
+      "saju_data": {
+        "basic": {
+          "name": "내담자010",
+          "gender": "male",
+          "birthDate": "1980-11-11",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "해"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "사"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "술"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "인"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 53,
+              "fire": 12,
+              "earth": 10,
+              "metal": 8,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 53
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-011",
+      "saju_data": {
+        "basic": {
+          "name": "내담자011",
+          "gender": "female",
+          "birthDate": "1981-12-12",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "자"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "오"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "해"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "묘"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 50,
+              "fire": 14,
+              "earth": 13,
+              "metal": 12,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-012",
+      "saju_data": {
+        "basic": {
+          "name": "내담자012",
+          "gender": "male",
+          "birthDate": "1982-01-13",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 61,
+              "earth": 10,
+              "metal": 10,
+              "water": 10,
+              "selfStatus": "신강",
+              "selfStrength": 61
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-013",
+      "saju_data": {
+        "basic": {
+          "name": "내담자013",
+          "gender": "female",
+          "birthDate": "1983-02-14",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 51,
+              "earth": 12,
+              "metal": 13,
+              "water": 14,
+              "selfStatus": "신강",
+              "selfStrength": 51
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-014",
+      "saju_data": {
+        "basic": {
+          "name": "내담자014",
+          "gender": "male",
+          "birthDate": "1984-03-15",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 13,
+              "fire": 15,
+              "earth": 56,
+              "metal": 7,
+              "water": 9,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-015",
+      "saju_data": {
+        "basic": {
+          "name": "내담자015",
+          "gender": "female",
+          "birthDate": "1985-04-16",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 18,
+              "fire": 8,
+              "earth": 42,
+              "metal": 14,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 42
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-016",
+      "saju_data": {
+        "basic": {
+          "name": "내담자016",
+          "gender": "male",
+          "birthDate": "1986-05-17",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 9,
+              "fire": 14,
+              "earth": 18,
+              "metal": 45,
+              "water": 14,
+              "selfStatus": "신강",
+              "selfStrength": 45
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-017",
+      "saju_data": {
+        "basic": {
+          "name": "내담자017",
+          "gender": "female",
+          "birthDate": "1987-06-18",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 16,
+              "earth": 9,
+              "metal": 46,
+              "water": 19,
+              "selfStatus": "신강",
+              "selfStrength": 46
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-018",
+      "saju_data": {
+        "basic": {
+          "name": "내담자018",
+          "gender": "male",
+          "birthDate": "1988-07-19",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 9,
+              "earth": 15,
+              "metal": 9,
+              "water": 52,
+              "selfStatus": "신강",
+              "selfStrength": 52
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-019",
+      "saju_data": {
+        "basic": {
+          "name": "내담자019",
+          "gender": "female",
+          "birthDate": "1989-08-20",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 11,
+              "earth": 18,
+              "metal": 13,
+              "water": 41,
+              "selfStatus": "신강",
+              "selfStrength": 41
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-020",
+      "saju_data": {
+        "basic": {
+          "name": "내담자020",
+          "gender": "male",
+          "birthDate": "1990-09-21",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 45,
+              "fire": 17,
+              "earth": 13,
+              "metal": 8,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 45
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-021",
+      "saju_data": {
+        "basic": {
+          "name": "내담자021",
+          "gender": "female",
+          "birthDate": "1991-10-22",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 48,
+              "fire": 8,
+              "earth": 18,
+              "metal": 14,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 48
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-022",
+      "saju_data": {
+        "basic": {
+          "name": "내담자022",
+          "gender": "male",
+          "birthDate": "1992-11-23",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "해"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "사"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "술"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "인"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 49,
+              "earth": 10,
+              "metal": 8,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-023",
+      "saju_data": {
+        "basic": {
+          "name": "내담자023",
+          "gender": "female",
+          "birthDate": "1993-12-24",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "자"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "오"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "해"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "묘"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 48,
+              "earth": 13,
+              "metal": 12,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 48
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-024",
+      "saju_data": {
+        "basic": {
+          "name": "내담자024",
+          "gender": "male",
+          "birthDate": "1994-01-25",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 10,
+              "earth": 59,
+              "metal": 10,
+              "water": 10,
+              "selfStatus": "신강",
+              "selfStrength": 59
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-025",
+      "saju_data": {
+        "basic": {
+          "name": "내담자025",
+          "gender": "female",
+          "birthDate": "1995-02-26",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 11,
+              "earth": 50,
+              "metal": 13,
+              "water": 14,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-026",
+      "saju_data": {
+        "basic": {
+          "name": "내담자026",
+          "gender": "male",
+          "birthDate": "1996-03-27",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 13,
+              "fire": 15,
+              "earth": 17,
+              "metal": 46,
+              "water": 9,
+              "selfStatus": "신강",
+              "selfStrength": 46
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-027",
+      "saju_data": {
+        "basic": {
+          "name": "내담자027",
+          "gender": "female",
+          "birthDate": "1997-04-01",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 7,
+              "earth": 10,
+              "metal": 51,
+              "water": 16,
+              "selfStatus": "신강",
+              "selfStrength": 51
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-028",
+      "saju_data": {
+        "basic": {
+          "name": "내담자028",
+          "gender": "male",
+          "birthDate": "1998-05-02",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 8,
+              "fire": 12,
+              "earth": 16,
+              "metal": 8,
+              "water": 56,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-029",
+      "saju_data": {
+        "basic": {
+          "name": "내담자029",
+          "gender": "female",
+          "birthDate": "1999-06-03",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 14,
+              "earth": 8,
+              "metal": 12,
+              "water": 56,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-030",
+      "saju_data": {
+        "basic": {
+          "name": "내담자030",
+          "gender": "male",
+          "birthDate": "2000-07-04",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 50,
+              "fire": 9,
+              "earth": 16,
+              "metal": 9,
+              "water": 16,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-031",
+      "saju_data": {
+        "basic": {
+          "name": "내담자031",
+          "gender": "female",
+          "birthDate": "2001-08-05",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 47,
+              "fire": 12,
+              "earth": 19,
+              "metal": 14,
+              "water": 9,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-032",
+      "saju_data": {
+        "basic": {
+          "name": "내담자032",
+          "gender": "male",
+          "birthDate": "2002-09-06",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 9,
+              "fire": 52,
+              "earth": 13,
+              "metal": 9,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 52
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-033",
+      "saju_data": {
+        "basic": {
+          "name": "내담자033",
+          "gender": "female",
+          "birthDate": "2003-10-07",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 12,
+              "fire": 44,
+              "earth": 18,
+              "metal": 15,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 44
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-034",
+      "saju_data": {
+        "basic": {
+          "name": "내담자034",
+          "gender": "male",
+          "birthDate": "2004-11-08",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "해"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "사"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "술"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "인"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 12,
+              "earth": 46,
+              "metal": 8,
+              "water": 19,
+              "selfStatus": "신강",
+              "selfStrength": 46
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-035",
+      "saju_data": {
+        "basic": {
+          "name": "내담자035",
+          "gender": "female",
+          "birthDate": "2005-12-09",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "자"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "오"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "해"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "묘"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 15,
+              "earth": 45,
+              "metal": 13,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 45
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-036",
+      "saju_data": {
+        "basic": {
+          "name": "내담자036",
+          "gender": "male",
+          "birthDate": "2006-01-10",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 11,
+              "earth": 11,
+              "metal": 58,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 58
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-037",
+      "saju_data": {
+        "basic": {
+          "name": "내담자037",
+          "gender": "female",
+          "birthDate": "2007-02-11",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 12,
+              "earth": 13,
+              "metal": 50,
+              "water": 15,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-038",
+      "saju_data": {
+        "basic": {
+          "name": "내담자038",
+          "gender": "male",
+          "birthDate": "2008-03-12",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 13,
+              "fire": 15,
+              "earth": 17,
+              "metal": 8,
+              "water": 46,
+              "selfStatus": "신강",
+              "selfStrength": 46
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-039",
+      "saju_data": {
+        "basic": {
+          "name": "내담자039",
+          "gender": "female",
+          "birthDate": "2009-04-13",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 8,
+              "earth": 10,
+              "metal": 13,
+              "water": 53,
+              "selfStatus": "신강",
+              "selfStrength": 53
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-040",
+      "saju_data": {
+        "basic": {
+          "name": "내담자040",
+          "gender": "male",
+          "birthDate": "1970-05-14",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 50,
+              "fire": 12,
+              "earth": 17,
+              "metal": 8,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-041",
+      "saju_data": {
+        "basic": {
+          "name": "내담자041",
+          "gender": "female",
+          "birthDate": "1971-06-15",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 47,
+              "fire": 15,
+              "earth": 8,
+              "metal": 13,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-042",
+      "saju_data": {
+        "basic": {
+          "name": "내담자042",
+          "gender": "male",
+          "birthDate": "1972-07-16",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 50,
+              "earth": 14,
+              "metal": 8,
+              "water": 14,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-043",
+      "saju_data": {
+        "basic": {
+          "name": "내담자043",
+          "gender": "female",
+          "birthDate": "1973-08-17",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 48,
+              "earth": 17,
+              "metal": 12,
+              "water": 8,
+              "selfStatus": "신강",
+              "selfStrength": 48
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-044",
+      "saju_data": {
+        "basic": {
+          "name": "내담자044",
+          "gender": "male",
+          "birthDate": "1974-09-18",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 8,
+              "fire": 15,
+              "earth": 54,
+              "metal": 8,
+              "water": 15,
+              "selfStatus": "신강",
+              "selfStrength": 54
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-045",
+      "saju_data": {
+        "basic": {
+          "name": "내담자045",
+          "gender": "female",
+          "birthDate": "1975-10-19",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 12,
+              "fire": 9,
+              "earth": 52,
+              "metal": 15,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 52
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-046",
+      "saju_data": {
+        "basic": {
+          "name": "내담자046",
+          "gender": "male",
+          "birthDate": "1976-11-20",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "해"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "사"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "술"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "인"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 13,
+              "earth": 11,
+              "metal": 42,
+              "water": 19,
+              "selfStatus": "신강",
+              "selfStrength": 42
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-047",
+      "saju_data": {
+        "basic": {
+          "name": "내담자047",
+          "gender": "female",
+          "birthDate": "1977-12-21",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "자"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "오"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "해"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "묘"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 15,
+              "earth": 14,
+              "metal": 43,
+              "water": 12,
+              "selfStatus": "신강",
+              "selfStrength": 43
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-048",
+      "saju_data": {
+        "basic": {
+          "name": "내담자048",
+          "gender": "male",
+          "birthDate": "1978-01-22",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 11,
+              "earth": 11,
+              "metal": 11,
+              "water": 56,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-049",
+      "saju_data": {
+        "basic": {
+          "name": "내담자049",
+          "gender": "female",
+          "birthDate": "1979-02-23",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 12,
+              "earth": 13,
+              "metal": 14,
+              "water": 49,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "val": [
+    {
+      "id": "saju-050",
+      "saju_data": {
+        "basic": {
+          "name": "내담자050",
+          "gender": "male",
+          "birthDate": "1980-03-24",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 49,
+              "fire": 16,
+              "earth": 18,
+              "metal": 8,
+              "water": 10,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-051",
+      "saju_data": {
+        "basic": {
+          "name": "내담자051",
+          "gender": "female",
+          "birthDate": "1981-04-25",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 51,
+              "fire": 8,
+              "earth": 11,
+              "metal": 14,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 51
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-052",
+      "saju_data": {
+        "basic": {
+          "name": "내담자052",
+          "gender": "male",
+          "birthDate": "1982-05-26",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 9,
+              "fire": 53,
+              "earth": 17,
+              "metal": 9,
+              "water": 13,
+              "selfStatus": "신강",
+              "selfStrength": 53
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-053",
+      "saju_data": {
+        "basic": {
+          "name": "내담자053",
+          "gender": "female",
+          "birthDate": "1983-06-27",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 10,
+              "fire": 50,
+              "earth": 8,
+              "metal": 13,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-054",
+      "saju_data": {
+        "basic": {
+          "name": "내담자054",
+          "gender": "male",
+          "birthDate": "1984-07-01",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 8,
+              "earth": 55,
+              "metal": 8,
+              "water": 14,
+              "selfStatus": "신강",
+              "selfStrength": 55
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-055",
+      "saju_data": {
+        "basic": {
+          "name": "내담자055",
+          "gender": "female",
+          "birthDate": "1985-08-02",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 11,
+              "earth": 53,
+              "metal": 13,
+              "water": 8,
+              "selfStatus": "신강",
+              "selfStrength": 53
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-056",
+      "saju_data": {
+        "basic": {
+          "name": "내담자056",
+          "gender": "male",
+          "birthDate": "1986-09-03",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 8,
+              "fire": 16,
+              "earth": 12,
+              "metal": 49,
+              "water": 16,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-057",
+      "saju_data": {
+        "basic": {
+          "name": "내담자057",
+          "gender": "female",
+          "birthDate": "1987-10-04",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 8,
+              "earth": 17,
+              "metal": 54,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 54
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-058",
+      "saju_data": {
+        "basic": {
+          "name": "내담자058",
+          "gender": "male",
+          "birthDate": "1988-11-05",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "해"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "사"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "술"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "인"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 13,
+              "fire": 11,
+              "earth": 10,
+              "metal": 8,
+              "water": 58,
+              "selfStatus": "신강",
+              "selfStrength": 58
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-059",
+      "saju_data": {
+        "basic": {
+          "name": "내담자059",
+          "gender": "female",
+          "birthDate": "1989-12-06",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "자"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "오"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "해"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "묘"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 13,
+              "earth": 13,
+              "metal": 12,
+              "water": 48,
+              "selfStatus": "신강",
+              "selfStrength": 48
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-060",
+      "saju_data": {
+        "basic": {
+          "name": "내담자060",
+          "gender": "male",
+          "birthDate": "1990-01-07",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "축"
+            },
+            "month": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "미"
+            },
+            "day": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "자"
+            },
+            "hour": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "진"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 54,
+              "fire": 11,
+              "earth": 11,
+              "metal": 11,
+              "water": 11,
+              "selfStatus": "신강",
+              "selfStrength": 54
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "도화살",
+              "역마살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-061",
+      "saju_data": {
+        "basic": {
+          "name": "내담자061",
+          "gender": "female",
+          "birthDate": "1991-02-08",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "인"
+            },
+            "month": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "신"
+            },
+            "day": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "축"
+            },
+            "hour": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "사"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 44,
+              "fire": 12,
+              "earth": 14,
+              "metal": 15,
+              "water": 16,
+              "selfStatus": "신강",
+              "selfStrength": 44
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "역마살",
+              "양인살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-062",
+      "saju_data": {
+        "basic": {
+          "name": "내담자062",
+          "gender": "male",
+          "birthDate": "1992-03-09",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "묘"
+            },
+            "month": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "유"
+            },
+            "day": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "인"
+            },
+            "hour": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "오"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 14,
+              "fire": 49,
+              "earth": 18,
+              "metal": 8,
+              "water": 10,
+              "selfStatus": "신강",
+              "selfStrength": 49
+            },
+            "yongsin": {
+              "yongsin": "metal",
+              "heesin": "water",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "화개살",
+              "문창귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-063",
+      "saju_data": {
+        "basic": {
+          "name": "내담자063",
+          "gender": "female",
+          "birthDate": "1993-04-10",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "진"
+            },
+            "month": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "술"
+            },
+            "day": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "묘"
+            },
+            "hour": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "미"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 17,
+              "fire": 41,
+              "earth": 11,
+              "metal": 14,
+              "water": 17,
+              "selfStatus": "신강",
+              "selfStrength": 41
+            },
+            "yongsin": {
+              "yongsin": "earth",
+              "heesin": "metal",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "천을귀인",
+              "도화살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-064",
+      "saju_data": {
+        "basic": {
+          "name": "내담자064",
+          "gender": "male",
+          "birthDate": "1994-05-11",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "사"
+            },
+            "month": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "해"
+            },
+            "day": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "진"
+            },
+            "hour": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "신"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 9,
+              "fire": 13,
+              "earth": 56,
+              "metal": 9,
+              "water": 13,
+              "selfStatus": "신강",
+              "selfStrength": 56
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "양인살",
+              "천을귀인"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-065",
+      "saju_data": {
+        "basic": {
+          "name": "내담자065",
+          "gender": "female",
+          "birthDate": "1995-06-12",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "오"
+            },
+            "month": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "자"
+            },
+            "day": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "사"
+            },
+            "hour": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "유"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 15,
+              "earth": 42,
+              "metal": 13,
+              "water": 18,
+              "selfStatus": "신강",
+              "selfStrength": 42
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "수기 보강"
+            },
+            "shinsal": [
+              "백호살",
+              "괴강살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-066",
+      "saju_data": {
+        "basic": {
+          "name": "내담자066",
+          "gender": "male",
+          "birthDate": "1996-07-13",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "미"
+            },
+            "month": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "축"
+            },
+            "day": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "오"
+            },
+            "hour": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "술"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 15,
+              "fire": 9,
+              "earth": 15,
+              "metal": 47,
+              "water": 15,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "화기 보강"
+            },
+            "shinsal": [
+              "괴강살",
+              "홍염살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-067",
+      "saju_data": {
+        "basic": {
+          "name": "내담자067",
+          "gender": "female",
+          "birthDate": "1997-08-14",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "신"
+            },
+            "month": {
+              "heavenlyStem": "병",
+              "earthlyBranch": "인"
+            },
+            "day": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "미"
+            },
+            "hour": {
+              "heavenlyStem": "기",
+              "earthlyBranch": "해"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 16,
+              "fire": 11,
+              "earth": 18,
+              "metal": 47,
+              "water": 8,
+              "selfStatus": "신강",
+              "selfStrength": 47
+            },
+            "yongsin": {
+              "yongsin": "water",
+              "heesin": "wood",
+              "strategy": "목기 보강"
+            },
+            "shinsal": [
+              "문창귀인",
+              "화개살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-068",
+      "saju_data": {
+        "basic": {
+          "name": "내담자068",
+          "gender": "male",
+          "birthDate": "1998-09-15",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "갑",
+              "earthlyBranch": "유"
+            },
+            "month": {
+              "heavenlyStem": "정",
+              "earthlyBranch": "묘"
+            },
+            "day": {
+              "heavenlyStem": "임",
+              "earthlyBranch": "신"
+            },
+            "hour": {
+              "heavenlyStem": "경",
+              "earthlyBranch": "자"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 8,
+              "fire": 16,
+              "earth": 12,
+              "metal": 8,
+              "water": 55,
+              "selfStatus": "신강",
+              "selfStrength": 55
+            },
+            "yongsin": {
+              "yongsin": "wood",
+              "heesin": "fire",
+              "strategy": "금기 강화"
+            },
+            "shinsal": [
+              "월덕귀인",
+              "백호살"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "saju-069",
+      "saju_data": {
+        "basic": {
+          "name": "내담자069",
+          "gender": "female",
+          "birthDate": "1999-10-16",
+          "fourPillars": {
+            "year": {
+              "heavenlyStem": "을",
+              "earthlyBranch": "술"
+            },
+            "month": {
+              "heavenlyStem": "무",
+              "earthlyBranch": "진"
+            },
+            "day": {
+              "heavenlyStem": "계",
+              "earthlyBranch": "유"
+            },
+            "hour": {
+              "heavenlyStem": "신",
+              "earthlyBranch": "축"
+            }
+          }
+        },
+        "premium": {
+          "interpretation": {
+            "energyScore": {
+              "wood": 11,
+              "fire": 8,
+              "earth": 17,
+              "metal": 14,
+              "water": 50,
+              "selfStatus": "신강",
+              "selfStrength": 50
+            },
+            "yongsin": {
+              "yongsin": "fire",
+              "heesin": "earth",
+              "strategy": "토기 안정"
+            },
+            "shinsal": [
+              "홍염살",
+              "월덕귀인"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

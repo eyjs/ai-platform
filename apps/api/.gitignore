@@ -1,3 +1,7 @@
 
 # 크롤 테스트 데이터 (대용량 PDF)
 scripts/crawl_data/
+
+# GEPA PoC 산출물 (후보 프롬프트·리포트·trace) — .gitkeep만 추적
+scripts/gepa_results/*
+!scripts/gepa_results/.gitkeep

@@ -46,6 +46,10 @@ anthropic = [
     "anthropic>=0.40.0",
     "langchain-anthropic>=0.3.0",
 ]
+# GEPA 프롬프트 최적화 PoC — 오프라인 전용. 운영 의존성 아님(scripts/gepa_optimize.py만 사용).
+gepa = [
+    "gepa>=0.0.17",
+]
 
 [build-system]
 requires = ["hatchling"]
