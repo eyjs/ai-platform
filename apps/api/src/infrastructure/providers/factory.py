@@ -124,6 +124,24 @@ class ProviderFactory:
             base_url=url, system_prefix=system_prefix, max_tokens=1024,
         )
 
+    def get_report_llm(self) -> LLMProvider:
+        """사주 리포트 전용 LLM. report_llm_server_url 설정 시 그 MLX 서버(14B 등),
+        미설정 시 get_main_llm()으로 폴백.
+
+        채팅(main=빠른 9B)과 분리 — 리포트는 JSON 안정성이 중요해 14B(8104) 권장.
+        9B는 리포트 JSON에서 반복붕괴 위험이 있어 분리한다.
+        """
+        url = self._settings.report_llm_server_url
+        if not url:
+            return self.get_main_llm()
+        from .llm.http_llm import HttpLLMProvider
+
+        system_prefix = get_locale().prompt("llm_system_prefix")
+        logger.info("Using REPORT LLM server: %s", url)
+        return HttpLLMProvider(
+            base_url=url, system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
+        )
+
     def get_commercial_llm(self) -> LLMProvider:
         """고난도 추론용 상용 LLM(Anthropic Haiku). 키 없으면 로컬 폴백. mode 무시."""
         if not self._settings.anthropic_api_key:

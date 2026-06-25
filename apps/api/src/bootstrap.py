@@ -178,11 +178,14 @@ async def create_app_state(settings: Settings) -> AppState:
     embedding_provider = provider_factory.get_embedding_provider()
     router_llm = provider_factory.get_router_llm()
     main_llm = provider_factory.get_main_llm()
+    # 리포트 전용 LLM(report_llm_server_url 미설정 시 main_llm). 채팅=9B / 리포트=14B 분리.
+    report_llm = provider_factory.get_report_llm()
     logger.info(
         "providers_initialized",
         embedding=type(embedding_provider).__name__,
         router_llm=type(router_llm).__name__,
         main_llm=type(main_llm).__name__,
+        report_llm=type(report_llm).__name__,
     )
 
     reranker = None
@@ -212,8 +215,8 @@ async def create_app_state(settings: Settings) -> AppState:
     tool_registry.register(FactLookupTool(fact_store=fact_store))
     from src.tools.internal import SajuLookupTool, SajuReportPaperTool, SajuReportCompatibilityTool
     tool_registry.register(SajuLookupTool(backend_url=settings.saju_backend_url))
-    tool_registry.register(SajuReportPaperTool(llm_provider=main_llm))
-    tool_registry.register(SajuReportCompatibilityTool(llm_provider=main_llm))
+    tool_registry.register(SajuReportPaperTool(llm_provider=report_llm))
+    tool_registry.register(SajuReportCompatibilityTool(llm_provider=report_llm))
 
     # FlowSNS 연동 도구
     if settings.flowsns_api_key:
@@ -442,7 +445,8 @@ async def create_app_state(settings: Settings) -> AppState:
     from src.services.saju_report_service import SajuReportService
     from src.infrastructure.job_queue import QueueWorker
 
-    saju_report_service = SajuReportService(pool=pool, main_llm=main_llm)
+    # 리포트는 report_llm(14B)로 — 9B JSON 반복붕괴 회피. 채팅은 main_llm(9B) 유지.
+    saju_report_service = SajuReportService(pool=pool, main_llm=report_llm)
 
     # QueueWorker for saju-report queue
     saju_report_worker = QueueWorker(

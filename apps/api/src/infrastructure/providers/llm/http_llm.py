@@ -60,9 +60,14 @@ class HttpLLMProvider(LLMProvider):
             return thinking, answer
         return "", text.strip()
 
-    async def generate(self, prompt: str, system: str = "") -> str:
-        """답변만 반환한다 (thinking 제거)."""
-        system_msg = self._build_system(system)
+    async def generate(
+        self, prompt: str, system: str = "",
+        cacheable_system: str = "", volatile_system: str = "",
+    ) -> str:
+        """답변만 반환한다 (thinking 제거). cacheable/volatile은 결합(캐싱 미지원)."""
+        system_msg = self._build_system(
+            self._combine_system(system, cacheable_system, volatile_system)
+        )
         response = await self._client.post(
             f"{self._base_url}/v1/chat/completions",
             json={
@@ -101,22 +106,37 @@ class HttpLLMProvider(LLMProvider):
         text = response.json()["choices"][0]["message"]["content"]
         return self.split_thinking(text)
 
-    async def generate_json(self, prompt: str, system: str = "") -> dict:
-        text = await self.generate(prompt, system)
+    async def generate_json(
+        self, prompt: str, system: str = "",
+        cacheable_system: str = "", volatile_system: str = "",
+    ) -> dict:
+        text = await self.generate(
+            prompt, self._combine_system(system, cacheable_system, volatile_system)
+        )
         # LLM이 ```json ... ``` 으로 감싸는 경우 fence 제거
         stripped = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
         stripped = re.sub(r"\n?```\s*$", "", stripped)
         return json.loads(stripped)
 
-    async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
+    async def generate_stream(
+        self, prompt: str, system: str = "",
+        cacheable_system: str = "", volatile_system: str = "",
+    ) -> AsyncIterator[str]:
         """하위 호환: 답변 텍스트만 yield (thinking 제거)."""
-        async for chunk in self.generate_stream_typed(prompt, system):
+        async for chunk in self.generate_stream_typed(
+            prompt, system, cacheable_system=cacheable_system, volatile_system=volatile_system,
+        ):
             if chunk.kind == "answer":
                 yield chunk.content
 
-    async def generate_stream_typed(self, prompt: str, system: str = "") -> AsyncIterator[StreamChunk]:
+    async def generate_stream_typed(
+        self, prompt: str, system: str = "",
+        cacheable_system: str = "", volatile_system: str = "",
+    ) -> AsyncIterator[StreamChunk]:
         """thinking/answer를 StreamChunk로 구분하여 yield."""
-        system_msg = self._build_system(system)
+        system_msg = self._build_system(
+            self._combine_system(system, cacheable_system, volatile_system)
+        )
         in_thinking = False
 
         async with self._client.stream(

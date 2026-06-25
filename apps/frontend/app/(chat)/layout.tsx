@@ -78,6 +78,7 @@ export default function ChatLayout({
         }));
       },
       onDone: (data: {
+        answer?: string;
         sources?: Array<{ title: string; url?: string }>;
         response_id?: string;
       }) => {
@@ -85,6 +86,8 @@ export default function ChatLayout({
         updateLastMessage(currentSessionId, (msg) => ({
           ...msg,
           isStreaming: false,
+          // 최종 답변 전문으로 보정 — 스트리밍 토큰 누락/버퍼링 시에도 완전한 답변 표시.
+          content: data.answer && data.answer.length > 0 ? data.answer : msg.content,
           sources: data.sources,
           // Task 014: 피드백 키 저장. 버튼은 이 값이 있을 때만 활성.
           responseId: data.response_id ?? msg.responseId,
