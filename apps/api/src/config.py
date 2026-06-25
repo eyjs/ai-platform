@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     main_llm_server_url: str = ""
     # 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). main_llm과 분리 — 챗 모델 자동감지 오염 방지.
     fortune_llm_server_url: str = ""
+    # 사주 리포트 전용 LLM 서버. 미설정 시 main_llm으로 폴백.
+    # 채팅은 빠른 9B(main), 리포트는 JSON 안정적인 14B로 분리하기 위함(8104).
+    report_llm_server_url: str = ""
 
     # 응답 정책
     response_policy: str = "strict"

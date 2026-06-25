@@ -72,6 +72,21 @@ class LLMProvider(ABC):
             return self._system_prefix
         return f"{self._system_prefix}\n\n{system}"
 
+    @staticmethod
+    def _combine_system(
+        system: str = "", cacheable_system: str = "", volatile_system: str = "",
+    ) -> str:
+        """캐싱 미지원 백엔드용 — cacheable/volatile system을 단일 system으로 결합한다.
+
+        AnthropicLLMProvider는 프롬프트 캐싱을 위해 generate(cacheable_system, volatile_system)
+        시그니처를 쓴다. MLX/Ollama/OpenAI 등 캐싱 없는 백엔드는 이 둘을 이어붙여 하나의
+        system으로 처리한다(의미 동일, 캐시 경계만 없음). 하위호환: 신규 인자가 모두 비면
+        기존 system 사용.
+        """
+        if cacheable_system or volatile_system:
+            return "\n\n".join(p for p in (cacheable_system, volatile_system) if p)
+        return system
+
     @property
     def capability(self) -> ProviderCapability:
         """기본 capability. 각 구현체는 이 property 를 오버라이드해야 한다.
