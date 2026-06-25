@@ -58,7 +58,7 @@ class AgentProfile:
 
     # 도메인 스코프
     domain_scopes: list[str] = field(default_factory=list)
-    category_scopes: list[str] = field(default_factory=list)
+    category_scopes: list[str] = field(default_factory=list)  # NOT WIRED: vector_store에 category 컬럼/파라미터 없음 — SearchScope.category_ids에 세팅되나 질의에 미사용
     security_level_max: str = SecurityLevel.PUBLIC
     include_common: bool = True  # 플랫폼 공통 지식(_common) 포함 여부
 
@@ -87,18 +87,9 @@ class AgentProfile:
     memory_max_turns: int = 10
     memory_retention_days: int | None = None
 
-    # 검증 넛지
-    validation_nudge_enabled: bool = False
-    validation_nudge_interval: int = 20
-    validation_nudge_type: str = "fact_consistency"
-
-    # 실행 경로
-    execution_path: str = "subagent"
-
     # 에이전틱 모드 설정
     max_tool_calls: int = 5
     agent_timeout_seconds: int = 30
-    llm_system_prefix: str | None = None  # None = 플랫폼 기본값 사용
 
     # Planner (Plan-and-Execute)
     planning_disabled: bool = False  # True이면 이 프로필에서 Planner 비활성화
