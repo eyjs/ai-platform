@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### Changed — Profile 배선 핵심 구멍 복원 (범위 B) (2026-06-25)
+
+플랫폼 철학 "Agent는 하나, Profile YAML만 바꾸면 행동이 바뀐다"를 실질 복원했다. `AgentProfile` 행동 필드 5개를 YAML→로더→ExecutionPlan→실행기까지 완전 배선하고, 죽은 필드를 정리하며, 로더 라운드트립 테스트로 동류 갭의 재발을 영구 차단했다.
+
+- **P0-1 planning_disabled**: `profile_store._parse_profile`에 키 파싱+직렬화 2줄 추가. `planning_disabled: true` YAML이 실제로 Planner 노드를 비활성화한다(기존 소비처 `strategy_builder:186` 정상, 로더만 누락이었음). — (merge `798ae07`)
+- **P0-2 main_model**: 별칭 해석기(`resolve_model_alias`, infra/Settings-only 순수 함수) 신규 도입. `ExecutionPlan.main_model` 필드 추가. `strategy_builder.build()`가 raw alias를 plan에 전달. `GraphExecutor._effective_agentic_app`에서 요청별 override seam — 비어 있거나 해석 불가면 부트스트랩 기본값 사용(회귀 0). 지원 별칭: `haiku`/`sonnet`/`opus`(Anthropic/Ollama/HTTP/OpenAI 백엔드별 매핑). — (merge `798ae07`)
+- **P0-3 router_model**: `ExecutionPlan.router_model` 필드 추가 + `StrategyBuilder.build()` 전달 + `resolve_model_alias` 재사용. plan 배선과 별칭 해석까지만. **KNOWN GAP**: AIRouter 내 서브컴포넌트는 생성자 1회 바인딩이라 라우팅 LLM 실호출 swap은 다음 이터레이션. — (merge `798ae07`)
+- **P0-4 max_tool_calls**: agentic 루프에서 실제 tool 메시지 수 카운트 기반 정밀 상한 적용. 초과 시 부분 답변 반환 + WARN 로그. ainvoke/astream 양 경로. — (merge `798ae07`)
+- **P0-5 agent_timeout_seconds**: `asyncio.wait_for`(ainvoke)·`asyncio.timeout`(astream)으로 per-profile 타임아웃 강제. 스트림 경로는 부분 토큰 보존 + clean done 이벤트. — (merge `798ae07`)
+- **P1 죽은 필드 정리**: `validation_nudge_enabled/interval/type`, `execution_path`, `llm_system_prefix`(Profile 필드) 제거. `category_scopes` NOT WIRED 주석. frontend `yaml-schema.ts` 동기화. — (merge `798ae07`)
+- **P0-T 라운드트립 테스트**: 모든 AgentProfile 필드의 파싱·직렬화를 영구 강제(실제 로더 경유, MagicMock 없음). — (merge `798ae07`)
+
+신규 44 tests. 전체 **1272 passed / 9 skipped / 0 fail**.
+
 ### Security — P0 보안 활성화 + 실행단 인가 (2026-06-10)
 
 로드맵 P0-보안(Step 1~4)은 코드로는 기구현이었으나 플래그 기본 OFF 상태였다. 운영 전환을 실행하고, 그 과정에서 발견된 결함 2건을 봉합했으며, P1/P2의 보안 직결 항목(F19·D14 일부)을 앞당겨 적용했다.
