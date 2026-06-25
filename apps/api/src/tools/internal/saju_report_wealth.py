@@ -15,6 +15,7 @@ from src.domain.agent_context import AgentContext
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.tools.base import ToolResult
+from src.tools.internal.hanja_normalizer import normalize_llm_text
 from src.tools.internal.saju_context_formatter import format_single_person_context
 from src.tools.internal.saju_wealth_prompts import WEALTH_V2_SECTION_KEYS, get_wealth_section_prompt
 
@@ -144,7 +145,7 @@ class SajuReportWealthTool:
                     system=system_prompt,
                 )
 
-                llm_text = _extract_json(raw_response)
+                llm_text = normalize_llm_text(_extract_json(raw_response))
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 
