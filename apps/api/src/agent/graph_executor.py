@@ -4,7 +4,7 @@ UniversalAgent를 대체. execute()/execute_stream() 인터페이스 유지.
 """
 
 import time
-from typing import AsyncIterator, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Optional
 
 from langchain_core.language_models import BaseChatModel
 
@@ -14,6 +14,7 @@ from src.agent.state import create_initial_state
 from src.agent.tool_adapter import convert_tools_to_langchain
 from src.domain.models import AgentMode, AgentResponse, SourceRef, TraceInfo
 from src.infrastructure.providers.base import LLMProvider, StreamChunk
+from src.infrastructure.providers.model_aliases import resolve_model_alias
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.trace_logger import RequestTrace
@@ -25,6 +26,10 @@ from src.services.kms_graph_client import KmsGraphClient
 from src.domain.agent_context import AgentContext
 from src.tools.registry import ToolRegistry
 from src.workflow.engine import StepResult, WorkflowEngine
+
+if TYPE_CHECKING:
+    from src.config import Settings
+    from src.infrastructure.providers.factory import ProviderFactory
 
 logger = get_logger(__name__)
 
@@ -104,6 +109,8 @@ class GraphExecutor:
         kms_graph_client: Optional[KmsGraphClient] = None,
         vector_store: Optional[VectorStore] = None,
         graph_cache: Optional[GraphCache] = None,
+        provider_factory: Optional["ProviderFactory"] = None,
+        settings: Optional["Settings"] = None,
     ):
         self._main_llm = main_llm
         self._registry = tool_registry
@@ -111,6 +118,10 @@ class GraphExecutor:
         self._chat_model = chat_model
         self._workflow_engine = workflow_engine
         self._graph_cache = graph_cache or GraphCache()
+        # P0-2/3 모델 오버라이드 seam: profile.main_model alias를 실제 모델로 바꿔 그래프를 빌드한다.
+        # provider_factory / settings 가 None 이면 기존 self._chat_model 경로로 완전 폴백(회귀 없음).
+        self._provider_factory = provider_factory
+        self._settings = settings
 
         # 결정론적 그래프 (한 번 컴파일, 재사용)
         det_graph = build_deterministic_graph(
@@ -554,6 +565,48 @@ class GraphExecutor:
         )
         return agent_app
 
+    def _effective_agentic_app(
+        self,
+        lc_tools: list,
+        plan: ExecutionPlan,
+        context: "AgentContext",
+    ):
+        """plan.main_model alias를 해석해 적절한 agentic graph app을 반환한다.
+
+        오버라이드 로직 (P0-2/3 model wiring seam):
+          1. plan.main_model 이 지정됐고 settings/provider_factory 가 있으면
+             alias를 구체 모델 ID로 해석한다.
+          2. resolved 가 비어있으면 기존 self._chat_model 경로로 폴백한다.
+          3. context.metadata 가 있으면 캐시 없이 새로 빌드한다(기존 동작 유지).
+
+        Task C (timeout/cap) seam: 이 메서드의 반환값(agent_app)을 래핑하거나
+        build_agentic_graph 호출 직전에 추가 인자를 주입하면 된다.
+        """
+        # --- P0-2/3 오버라이드 경로 ---
+        resolved = ""
+        if self._settings and self._provider_factory and plan.main_model:
+            resolved = resolve_model_alias(plan.main_model, self._settings)
+
+        if resolved:
+            # 모델별 그래프는 공유 캐시(system_prompt+tools+padding 키)와 섞이지 않도록
+            # 캐시를 거치지 않고 항상 새로 빌드한다.
+            override_model = self._provider_factory.get_chat_model(model_name=resolved)
+            return build_agentic_graph(
+                chat_model=override_model,
+                tools=lc_tools,
+                system_prompt=plan.system_prompt,
+                cache_padding_text=plan.cache_padding_text,
+            )
+
+        # --- 기존 경로 (폴백 / 회귀 없음) ---
+        if context.metadata:
+            return build_agentic_graph(
+                chat_model=self._chat_model, tools=lc_tools,
+                system_prompt=plan.system_prompt,
+                cache_padding_text=plan.cache_padding_text,
+            )
+        return self._get_or_build_agentic_graph(lc_tools, plan)
+
     async def _execute_agentic(
         self,
         question: str,
@@ -578,14 +631,7 @@ class GraphExecutor:
             logger.warning("agentic_no_tools, falling back to deterministic")
             return await self._execute_deterministic(question, plan, session_id, trace=trace, context=context)
 
-        if context.metadata:
-            agent_app = build_agentic_graph(
-                chat_model=self._chat_model, tools=lc_tools,
-                system_prompt=plan.system_prompt,
-                cache_padding_text=plan.cache_padding_text,
-            )
-        else:
-            agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
+        agent_app = self._effective_agentic_app(lc_tools, plan, context)
 
         effective_question = _build_agentic_user_turn(question, plan)
 
@@ -661,14 +707,7 @@ class GraphExecutor:
                 yield event
             return
 
-        if context.metadata:
-            agent_app = build_agentic_graph(
-                chat_model=self._chat_model, tools=lc_tools,
-                system_prompt=plan.system_prompt,
-                cache_padding_text=plan.cache_padding_text,
-            )
-        else:
-            agent_app = self._get_or_build_agentic_graph(lc_tools, plan)
+        agent_app = self._effective_agentic_app(lc_tools, plan, context)
 
         effective_question = _build_agentic_user_turn(question, plan)
 

@@ -67,3 +67,8 @@ class ExecutionPlan:
     # volatile_system_prompt: 날짜/per-turn 등 캐시 경계 밖 지시.
     # system_prompt 는 cacheable(persona+grounding) 로 취급, volatile_system_prompt 는 캐시 밖.
     volatile_system_prompt: str = ""
+    # 모델 별칭 필드 (P0-2/3). Profile 에서 흘러온 논리 alias("haiku"/"sonnet" 등) 또는 구체 ID.
+    # Router 는 raw alias 를 전달만 하고, 해석(resolve)은 Agent(C3) executor 에서 수행한다.
+    # router_model KNOWN GAP: plan 에 실려 있지만 L0-L2 라우팅 LLM 교체는 미구현 — model_aliases.py 참조.
+    main_model: str = ""
+    router_model: str = ""
