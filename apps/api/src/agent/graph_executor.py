@@ -3,10 +3,12 @@
 UniversalAgent를 대체. execute()/execute_stream() 인터페이스 유지.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, AsyncIterator, Optional
 
 from langchain_core.language_models import BaseChatModel
+from langgraph.errors import GraphRecursionError
 
 from src.agent.graphs import build_agentic_graph, build_deterministic_graph
 from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
@@ -635,14 +637,54 @@ class GraphExecutor:
 
         effective_question = _build_agentic_user_turn(question, plan)
 
-        result = await agent_app.ainvoke(
-            {"messages": [{"role": "user", "content": effective_question}]},
-        )
+        # P0-4: recursion_limit = 2*max_tool_calls+1 (런어웨이 가드, 정밀 캡이 아님).
+        # 정밀 캡은 아래 messages 카운팅으로 구현한다.
+        recursion_limit = 2 * plan.max_tool_calls + 1
+        invoke_config = {"recursion_limit": recursion_limit}
+
+        # P0-5: agent_timeout_seconds — ainvoke 전체를 asyncio.wait_for 로 래핑한다.
+        result = None
+        timed_out = False
+        recursion_exceeded = False
+        try:
+            result = await asyncio.wait_for(
+                agent_app.ainvoke(
+                    {"messages": [{"role": "user", "content": effective_question}]},
+                    config=invoke_config,
+                ),
+                timeout=plan.agent_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            logger.warning(
+                "agentic_timeout",
+                timeout=plan.agent_timeout_seconds,
+                question_prefix=question[:80],
+            )
+        except GraphRecursionError:
+            recursion_exceeded = True
+            logger.warning(
+                "agentic_tool_cap_reached_via_recursion",
+                max=plan.max_tool_calls,
+                recursion_limit=recursion_limit,
+                question_prefix=question[:80],
+            )
+
+        if timed_out:
+            return AgentResponse(
+                answer="응답 생성이 지연되어 안전하게 중단했어요. 잠시 후 다시 시도해 주세요.",
+                sources=[],
+                trace=TraceInfo(
+                    question_type=plan.question_type.value,
+                    mode="agentic",
+                    tools_called=[],
+                ),
+            )
 
         # 결과 추출
         answer = ""
         tools_called = []
-        if "messages" in result:
+        if result and "messages" in result:
             for msg in result["messages"]:
                 if hasattr(msg, "type") and msg.type == "tool":
                     tools_called.append(msg.name if hasattr(msg, "name") else "unknown")
@@ -651,6 +693,17 @@ class GraphExecutor:
             last_msg = result["messages"][-1]
             if hasattr(last_msg, "content"):
                 answer = _content_to_text(last_msg.content)
+
+        # P0-4 정밀 캡: tool 메시지 수 > max_tool_calls 이면 캡에 걸린 것으로 처리한다.
+        # GraphRecursionError 로 중단된 경우도 이미 수집된 tool 수로 경고를 기록한다.
+        tool_count = len(tools_called)
+        if recursion_exceeded or tool_count > plan.max_tool_calls:
+            logger.warning(
+                "agentic_tool_cap_reached",
+                max=plan.max_tool_calls,
+                called=tool_count,
+                question_prefix=question[:80],
+            )
 
         # Guardrail
         guardrail_score: Optional[float] = None
@@ -722,63 +775,105 @@ class GraphExecutor:
         _usage_cache_read: int = 0
         _usage_cache_creation: int = 0
 
-        async for event in agent_app.astream_events(
-            {"messages": [{"role": "user", "content": effective_question}]},
-            version="v2",
-        ):
-            kind = event.get("event", "")
+        # P0-4: recursion_limit = 2*max_tool_calls+1 (런어웨이 가드, 정밀 캡이 아님).
+        # 정밀 캡은 on_tool_start 이벤트 카운팅으로 구현한다.
+        recursion_limit = 2 * plan.max_tool_calls + 1
+        stream_config = {"recursion_limit": recursion_limit}
 
-            if kind == "on_tool_start":
-                tool_name = event.get("name", "unknown")
-                yield {"type": "trace", "data": {
-                    "step": "tool_call",
-                    "tool": tool_name,
-                }}
+        # P0-4/P0-5 상태 플래그
+        _tool_cap_reached = False
+        _stream_timed_out = False
+        _tool_start_count = 0  # on_tool_start 카운터 (정밀 캡용)
 
-            elif kind == "on_tool_end":
-                tool_name = event.get("name", "unknown")
-                tools_called.append(tool_name)
-                yield {"type": "trace", "data": {
-                    "step": "tool_complete",
-                    "tool": tool_name,
-                }}
+        # P0-5: asyncio.timeout (Python 3.11+ / 이 venv는 3.13) 으로 전체 스트림 소비를
+        # 타임아웃으로 제한한다. 타임아웃 시 이미 yield 된 토큰(answer)은 보존된다.
+        # on TimeoutError: 부분 토큰 보존 + 친화적 close 토큰 + clean done 이벤트를 yield 한다.
+        try:
+            async with asyncio.timeout(plan.agent_timeout_seconds):
+                async for event in agent_app.astream_events(
+                    {"messages": [{"role": "user", "content": effective_question}]},
+                    version="v2",
+                    config=stream_config,
+                ):
+                    kind = event.get("event", "")
 
-            elif kind == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
-                        text = _content_to_text(chunk.content)
-                        if text:
-                            yield {"type": "token", "data": text}
-                            answer += text
-                # 스트리밍 청크에서 usage_metadata 집계 (LangChain usage_metadata)
-                if chunk:
-                    um = getattr(chunk, "usage_metadata", None)
-                    if um:
-                        _usage_input += um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
-                        _usage_output += um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
-                        _usage_cache_read += um.get("input_token_details", {}).get("cache_read", 0) if isinstance(um, dict) else getattr(getattr(um, "input_token_details", None) or {}, "get", lambda k, d=0: d)("cache_read", 0)
+                    if kind == "on_tool_start":
+                        _tool_start_count += 1
+                        # P0-4 정밀 캡: 카운터가 한도를 초과하면 스트림 소비를 중단한다.
+                        if _tool_start_count > plan.max_tool_calls:
+                            _tool_cap_reached = True
+                            logger.warning(
+                                "agentic_tool_cap_reached",
+                                max=plan.max_tool_calls,
+                                called=_tool_start_count,
+                                question_prefix=question[:80],
+                            )
+                            break
+                        tool_name = event.get("name", "unknown")
+                        yield {"type": "trace", "data": {
+                            "step": "tool_call",
+                            "tool": tool_name,
+                        }}
 
-            elif kind == "on_chat_model_end":
-                # on_chat_model_end: response_metadata 또는 usage_metadata 확인
-                data = event.get("data", {})
-                output = data.get("output")
-                if output:
-                    # LangChain AIMessage response_metadata (Anthropic: usage)
-                    rm = getattr(output, "response_metadata", None)
-                    if rm and isinstance(rm, dict):
-                        usage_rm = rm.get("usage", {}) or {}
-                        _usage_input = max(_usage_input, usage_rm.get("input_tokens", 0) or 0)
-                        _usage_output = max(_usage_output, usage_rm.get("output_tokens", 0) or 0)
-                        _usage_cache_read = max(_usage_cache_read, usage_rm.get("cache_read_input_tokens", 0) or 0)
-                        _usage_cache_creation = max(_usage_cache_creation, usage_rm.get("cache_creation_input_tokens", 0) or 0)
-                    # LangChain usage_metadata (표준 필드)
-                    um = getattr(output, "usage_metadata", None)
-                    if um:
-                        _in = um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
-                        _out = um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
-                        _usage_input = max(_usage_input, _in)
-                        _usage_output = max(_usage_output, _out)
+                    elif kind == "on_tool_end":
+                        tool_name = event.get("name", "unknown")
+                        tools_called.append(tool_name)
+                        yield {"type": "trace", "data": {
+                            "step": "tool_complete",
+                            "tool": tool_name,
+                        }}
+
+                    elif kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            if not (hasattr(chunk, "tool_calls") and chunk.tool_calls):
+                                text = _content_to_text(chunk.content)
+                                if text:
+                                    yield {"type": "token", "data": text}
+                                    answer += text
+                        # 스트리밍 청크에서 usage_metadata 집계 (LangChain usage_metadata)
+                        if chunk:
+                            um = getattr(chunk, "usage_metadata", None)
+                            if um:
+                                _usage_input += um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
+                                _usage_output += um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
+                                _usage_cache_read += um.get("input_token_details", {}).get("cache_read", 0) if isinstance(um, dict) else getattr(getattr(um, "input_token_details", None) or {}, "get", lambda k, d=0: d)("cache_read", 0)
+
+                    elif kind == "on_chat_model_end":
+                        # on_chat_model_end: response_metadata 또는 usage_metadata 확인
+                        data = event.get("data", {})
+                        output = data.get("output")
+                        if output:
+                            # LangChain AIMessage response_metadata (Anthropic: usage)
+                            rm = getattr(output, "response_metadata", None)
+                            if rm and isinstance(rm, dict):
+                                usage_rm = rm.get("usage", {}) or {}
+                                _usage_input = max(_usage_input, usage_rm.get("input_tokens", 0) or 0)
+                                _usage_output = max(_usage_output, usage_rm.get("output_tokens", 0) or 0)
+                                _usage_cache_read = max(_usage_cache_read, usage_rm.get("cache_read_input_tokens", 0) or 0)
+                                _usage_cache_creation = max(_usage_cache_creation, usage_rm.get("cache_creation_input_tokens", 0) or 0)
+                            # LangChain usage_metadata (표준 필드)
+                            um = getattr(output, "usage_metadata", None)
+                            if um:
+                                _in = um.get("input_tokens", 0) if isinstance(um, dict) else getattr(um, "input_tokens", 0) or 0
+                                _out = um.get("output_tokens", 0) if isinstance(um, dict) else getattr(um, "output_tokens", 0) or 0
+                                _usage_input = max(_usage_input, _in)
+                                _usage_output = max(_usage_output, _out)
+
+        except TimeoutError:
+            # P0-5 타임아웃: 이미 yield 된 부분 토큰(answer)은 보존된다.
+            # 친화적 close 토큰을 추가로 yield 하여 사용자가 중단됐음을 알 수 있게 한다.
+            # done 이벤트는 아래 공통 경로에서 yield 된다 — SSE 스트림이 열린 채로 남지 않도록.
+            _stream_timed_out = True
+            logger.warning(
+                "agentic_stream_timeout",
+                timeout=plan.agent_timeout_seconds,
+                partial_tokens=len(answer),
+                question_prefix=question[:80],
+            )
+            close_msg = "\n\n_(응답 생성이 지연되어 안전하게 중단했어요. 잠시 후 다시 시도해 주세요.)_"
+            yield {"type": "token", "data": close_msg}
+            answer += close_msg
 
         # Guardrail
         faithfulness_score: Optional[float] = None
