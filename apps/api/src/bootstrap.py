@@ -330,6 +330,10 @@ async def create_app_state(settings: Settings) -> AppState:
         workflow_engine=workflow_engine,
         kms_graph_client=kms_graph_client,
         vector_store=vector_store,
+        # P0-2/3 model wiring: profile.main_model alias 해석을 위해 주입.
+        # chat_model(기본) 은 그대로 유지되며, resolved alias 가 있을 때만 override 빌드.
+        provider_factory=provider_factory,
+        settings=settings,
     )
 
     # 11. Parsing Provider + Ingest Pipeline
