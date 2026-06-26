@@ -20,24 +20,20 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export interface KnowledgeStats {
   totalDocuments: number;
-  pendingDocuments: number;
-  completedDocuments: number;
-  failedDocuments: number;
   totalChunks: number;
   avgChunksPerDocument: number;
-  documentsByStatus: Array<{ status: string; count: number }>;
-  documentsBySource: Array<{ source: string; count: number }>;
+  documentsByDomain: Array<{ domain: string; count: number }>;
+  documentsBySecurityLevel: Array<{ level: string; count: number }>;
 }
 
 export interface KnowledgeDocument {
   id: string;
   title: string;
-  source: string | null;
-  status: string;
-  fileSize: number | null;
-  mimeType: string | null;
+  fileName: string | null;
+  domainCode: string | null;
+  securityLevel: string | null;
+  sourceUrl: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 export interface KnowledgeDocumentsResponse {
@@ -49,8 +45,8 @@ export interface KnowledgeDocumentsResponse {
 
 export interface KnowledgeDocumentDetail extends KnowledgeDocument {
   content: string | null;
-  filePath: string | null;
   chunkCount: number;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface ReindexResponse {
@@ -70,14 +66,14 @@ export async function fetchKnowledgeStats(): Promise<KnowledgeStats> {
 export async function fetchKnowledgeDocuments(params: {
   page?: number;
   size?: number;
-  source?: string;
-  status?: string;
+  domainCode?: string;
+  securityLevel?: string;
 }): Promise<KnowledgeDocumentsResponse> {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
   if (params.size) query.set('size', String(params.size));
-  if (params.source) query.set('source', params.source);
-  if (params.status) query.set('status', params.status);
+  if (params.domainCode) query.set('domainCode', params.domainCode);
+  if (params.securityLevel) query.set('securityLevel', params.securityLevel);
 
   const res = await fetch(`${BFF_URL}/knowledge/documents?${query}`, {
     headers: authHeaders(),

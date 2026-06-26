@@ -23,8 +23,8 @@ export default function KnowledgePipelinePage() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [sourceFilter, setSourceFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [domainFilter, setDomainFilter] = useState('');
+  const [securityFilter, setSecurityFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
@@ -33,8 +33,7 @@ export default function KnowledgePipelinePage() {
 
   const loadStats = useCallback(async () => {
     try {
-      const data = await fetchKnowledgeStats();
-      setStats(data);
+      setStats(await fetchKnowledgeStats());
     } catch (err) {
       setError(err instanceof Error ? err.message : '통계 로딩 실패');
     }
@@ -47,8 +46,8 @@ export default function KnowledgePipelinePage() {
       const data = await fetchKnowledgeDocuments({
         page,
         size: PAGE_SIZE,
-        source: sourceFilter || undefined,
-        status: statusFilter || undefined,
+        domainCode: domainFilter || undefined,
+        securityLevel: securityFilter || undefined,
       });
       setDocuments(data.items);
       setTotal(data.total);
@@ -57,7 +56,7 @@ export default function KnowledgePipelinePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, sourceFilter, statusFilter]);
+  }, [page, domainFilter, securityFilter]);
 
   useEffect(() => {
     loadStats();
@@ -66,10 +65,6 @@ export default function KnowledgePipelinePage() {
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
-
-  const handleReindexRequest = (id: string) => {
-    setConfirmTarget(id);
-  };
 
   const handleReindexConfirm = async () => {
     if (!confirmTarget) return;
@@ -86,20 +81,13 @@ export default function KnowledgePipelinePage() {
     }
   };
 
-  const sourceOptions = [
-    { value: '', label: '전체 소스' },
-    ...(stats?.documentsBySource.map((d) => ({
-      value: d.source,
-      label: `${d.source} (${d.count})`,
-    })) ?? []),
+  const domainOptions = [
+    { value: '', label: '전체 도메인' },
+    ...(stats?.documentsByDomain.map((d) => ({ value: d.domain, label: `${d.domain} (${d.count})` })) ?? []),
   ];
-
-  const statusOptions = [
-    { value: '', label: '전체 상태' },
-    ...(stats?.documentsByStatus.map((d) => ({
-      value: d.status,
-      label: `${d.status} (${d.count})`,
-    })) ?? []),
+  const securityOptions = [
+    { value: '', label: '전체 보안등급' },
+    ...(stats?.documentsBySecurityLevel.map((d) => ({ value: d.level, label: `${d.level} (${d.count})` })) ?? []),
   ];
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -112,38 +100,35 @@ export default function KnowledgePipelinePage() {
 
       {/* Stats Cards */}
       {stats ? (
-        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
           <StatCard label="총 문서 수" value={stats.totalDocuments.toLocaleString()} />
           <StatCard label="총 청크 수" value={stats.totalChunks.toLocaleString()} />
-          <StatCard label="완료" value={stats.completedDocuments.toLocaleString()} />
-          <StatCard label="실패" value={stats.failedDocuments.toLocaleString()} />
+          <StatCard label="문서당 평균 청크" value={String(stats.avgChunksPerDocument)} />
         </div>
       ) : (
-        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
             <Skeleton key={i} height="88px" />
           ))}
         </div>
       )}
 
-      {/* Source Distribution */}
-      {stats && stats.documentsBySource.length > 0 && (
+      {/* Domain Distribution */}
+      {stats && stats.documentsByDomain.length > 0 && (
         <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] p-5">
           <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">
-            소스 분포
+            도메인 분포
           </h2>
           <div className="flex flex-wrap gap-3">
-            {stats.documentsBySource.map((d) => {
+            {stats.documentsByDomain.map((d) => {
               const ratio = stats.totalDocuments > 0 ? (d.count / stats.totalDocuments) * 100 : 0;
               return (
-                <div key={d.source} className="flex items-center gap-2">
+                <div key={d.domain} className="flex items-center gap-2">
                   <div
                     className="h-2 rounded-full bg-[var(--color-primary-500)]"
                     style={{ width: `${Math.max(ratio, 4)}px` }}
                   />
-                  <span className="text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">
-                    {d.source}
-                  </span>
+                  <span className="text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{d.domain}</span>
                   <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
                     {d.count}건 ({ratio.toFixed(1)}%)
                   </span>
@@ -157,24 +142,24 @@ export default function KnowledgePipelinePage() {
       {/* Filters */}
       <div className="mb-4 flex flex-wrap gap-3">
         <Dropdown
-          options={sourceOptions}
-          value={sourceFilter}
+          options={domainOptions}
+          value={domainFilter}
           onChange={(v) => {
-            setSourceFilter(v);
+            setDomainFilter(v);
             setPage(1);
           }}
-          placeholder="전체 소스"
+          placeholder="전체 도메인"
           className="w-56"
         />
         <Dropdown
-          options={statusOptions}
-          value={statusFilter}
+          options={securityOptions}
+          value={securityFilter}
           onChange={(v) => {
-            setStatusFilter(v);
+            setSecurityFilter(v);
             setPage(1);
           }}
-          placeholder="전체 상태"
-          className="w-40"
+          placeholder="전체 보안등급"
+          className="w-48"
         />
       </div>
 
@@ -197,7 +182,7 @@ export default function KnowledgePipelinePage() {
           <>
             <DocumentTable
               documents={documents}
-              onReindex={handleReindexRequest}
+              onReindex={(id) => setConfirmTarget(id)}
               reindexingId={reindexingId}
             />
             {totalPages > 1 && (
@@ -206,22 +191,10 @@ export default function KnowledgePipelinePage() {
                   {total}개 중 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)}
                 </span>
                 <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                    aria-label="이전 페이지"
-                  >
+                  <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="이전 페이지">
                     이전
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                    aria-label="다음 페이지"
-                  >
+                  <Button variant="ghost" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} aria-label="다음 페이지">
                     다음
                   </Button>
                 </div>

@@ -13,27 +13,6 @@ import {
   type KnowledgeDocumentDetail,
 } from '@/lib/api/bff-knowledge';
 
-const statusConfig: Record<string, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
-  completed: { variant: 'success', label: 'Completed' },
-  indexed: { variant: 'success', label: 'Indexed' },
-  pending: { variant: 'warning', label: 'Pending' },
-  processing: { variant: 'warning', label: 'Processing' },
-  failed: { variant: 'error', label: 'Failed' },
-  error: { variant: 'error', label: 'Error' },
-};
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes || bytes <= 0) return '-';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let v = bytes;
-  let u = 0;
-  while (v >= 1024 && u < units.length - 1) {
-    v /= 1024;
-    u += 1;
-  }
-  return `${v.toFixed(u === 0 ? 0 : 1)}${units[u]}`;
-}
-
 export default function KnowledgeDocumentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -49,8 +28,7 @@ export default function KnowledgeDocumentDetailPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchKnowledgeDocumentDetail(id);
-      setDoc(data);
+      setDoc(await fetchKnowledgeDocumentDetail(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : '문서 로딩 실패');
     } finally {
@@ -97,11 +75,8 @@ export default function KnowledgeDocumentDetailPage() {
     );
   }
 
-  const status = statusConfig[doc.status] ?? { variant: 'neutral' as const, label: doc.status };
-
   return (
     <div>
-      {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -113,35 +88,33 @@ export default function KnowledgeDocumentDetailPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">
-            {doc.title}
-          </h1>
-          <Badge variant={status.variant}>{status.label}</Badge>
+          <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">{doc.title}</h1>
+          {doc.domainCode && <Badge variant="secondary">{doc.domainCode}</Badge>}
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setShowConfirm(true)}
-          loading={isReindexing}
-          aria-label="문서 재인덱싱"
-        >
+        <Button variant="primary" size="sm" onClick={() => setShowConfirm(true)} loading={isReindexing} aria-label="문서 재인덱싱">
           Reindex
         </Button>
       </div>
 
       {/* Metadata */}
       <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] p-5">
-        <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">
-          메타데이터
-        </h2>
+        <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">메타데이터</h2>
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">ID</dt>
             <dd className="mt-0.5 font-mono text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.id}</dd>
           </div>
           <div>
-            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">소스</dt>
-            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.source ?? '-'}</dd>
+            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">파일명</dt>
+            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.fileName ?? '-'}</dd>
+          </div>
+          <div>
+            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">보안등급</dt>
+            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.securityLevel ?? '-'}</dd>
+          </div>
+          <div>
+            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">청크 수</dt>
+            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.chunkCount.toLocaleString()}</dd>
           </div>
           <div>
             <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">생성 일자</dt>
@@ -149,30 +122,16 @@ export default function KnowledgeDocumentDetailPage() {
               {new Date(doc.createdAt).toLocaleString('ko-KR')}
             </dd>
           </div>
-          <div>
-            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">청크 수</dt>
-            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.chunkCount.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">크기</dt>
-            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{formatBytes(doc.fileSize)}</dd>
-          </div>
-          <div>
-            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">MIME</dt>
-            <dd className="mt-0.5 text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.mimeType ?? '-'}</dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">경로</dt>
-            <dd className="mt-0.5 truncate font-mono text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.filePath ?? '-'}</dd>
+          <div className="sm:col-span-3">
+            <dt className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">출처 URL</dt>
+            <dd className="mt-0.5 truncate text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">{doc.sourceUrl ?? '-'}</dd>
           </div>
         </dl>
       </div>
 
       {/* Content */}
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] p-5">
-        <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">
-          원문
-        </h2>
+        <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">원문 (청크)</h2>
         <div className="max-h-96 overflow-y-auto rounded-[var(--radius-md)] bg-[var(--color-neutral-50)] p-4">
           <pre className="whitespace-pre-wrap font-mono text-[var(--font-size-sm)] leading-relaxed text-[var(--color-neutral-700)]">
             {doc.content ?? '내용이 없습니다'}
