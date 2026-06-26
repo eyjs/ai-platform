@@ -189,7 +189,7 @@ export default function AdminChatPage() {
       </aside>
 
       {/* 채팅 영역 */}
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ChatMessageList
           messages={currentSession?.messages || []}
           profileName={selectedProfileName !== '자동 선택' ? selectedProfileName : undefined}

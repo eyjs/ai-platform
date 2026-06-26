@@ -26,7 +26,7 @@ export function ChatMessageList({
   }
 
   return (
-    <div className="relative flex-1">
+    <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
