@@ -50,7 +50,6 @@ from src.workflow.checkpointer import build_checkpointer
 from src.workflow.context_adapter import SajuContextAdapter
 from src.workflow.engine import WorkflowEngine
 from src.workflow.graph_builder import WorkflowGraphBuilder
-from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.store import WorkflowStore
 
 logger = get_logger(__name__)
@@ -95,7 +94,6 @@ class AppState:
     fortune_service: Optional[Any] = None
     # Workflow action client (외부 API 호출)
     action_client: Optional[ActionClient] = None
-    workflow_session_store: Optional[WorkflowSessionStore] = None
 
     # T2: LangGraph AsyncPostgresSaver (미설치 시 None, T4가 엔진에 연결)
     # G1 ②안: thread_id 외부 노출 차단 — 어댑터(T4)만 접근
@@ -307,54 +305,46 @@ async def create_app_state(settings: Settings) -> AppState:
     # 10. Workflow Engine (Agent보다 먼저 — Agent가 의존)
     workflow_store = WorkflowStore(pool=pool, seed_dir="seeds/workflows")
     await workflow_store.load_seeds()
-    workflow_session_store = WorkflowSessionStore(pool=pool)
     action_client = ActionClient()
     # 공유 분류기 — WorkflowEngine과 classify-intent 라우트가 동일 인스턴스 재사용.
     classifier = SemanticClassifier(router_llm)
 
     # T2: AsyncPostgresSaver 체크포인터 부트스트랩 (psycopg v3 전용 풀, asyncpg와 별도).
-    # 미설치 환경에서는 (None, None) 반환 — 부트스트랩이 죽지 않음 (G5).
+    # 미설치 환경에서는 (None, None) 반환 — 엔진이 MemorySaver로 자동 폴백.
     workflow_checkpointer, _workflow_checkpointer_cm = await build_checkpointer(
         settings.database_url
     )
+    if workflow_checkpointer is None:
+        logger.warning(
+            "workflow_no_checkpointer",
+            reason="AsyncPostgresSaver 미설치 — MemorySaver 자동 폴백 (단위 테스트 모드)",
+        )
 
-    # AIP_WORKFLOW_ENGINE 분기 — "langgraph"이고 checkpointer가 있으면 신경로, 아니면 legacy.
-    # G5: checkpointer가 None이면 엔진 생성자 내부에서 legacy 폴백 처리된다.
     _context_adapters = {
         # 서비스별 dynamic 스텝 enrichment 플러그인. 프로파일이 이름으로 선택.
         "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
     }
-    _graph_builder: WorkflowGraphBuilder | None = None
-    if settings.workflow_engine == "langgraph":
-        if workflow_checkpointer is not None:
-            _graph_builder = WorkflowGraphBuilder(
-                store=workflow_store,
-                llm=main_llm,
-                context_adapters=_context_adapters,
-                classifier=classifier,
-                action_client=action_client,
-            )
-            logger.info("workflow_graph_builder_initialized", backend="langgraph")
-        else:
-            logger.warning(
-                "workflow_langgraph_no_checkpointer",
-                reason="checkpointer 미설치 — legacy로 폴백 (G5)",
-            )
+    _graph_builder = WorkflowGraphBuilder(
+        store=workflow_store,
+        llm=main_llm,
+        context_adapters=_context_adapters,
+        classifier=classifier,
+        action_client=action_client,
+    )
+    logger.info("workflow_graph_builder_initialized", backend="langgraph")
 
     workflow_engine = WorkflowEngine(
         workflow_store,
-        session_store=workflow_session_store,
         action_client=action_client,
         llm=main_llm,  # dynamic 스텝(캐릭터 통찰)용
         context_adapters=_context_adapters,
         # select 자유입력 분기를 의미로 판단하는 공통 분류기(경량 router_llm).
         classifier=classifier,
-        # LangGraph 경로 의존성 (G5: checkpointer=None이면 엔진이 legacy로 폴백)
+        # LangGraph 경로 의존성 — checkpointer=None이면 엔진이 MemorySaver로 자동 폴백
         graph_builder=_graph_builder,
         checkpointer=workflow_checkpointer,
-        engine_backend=settings.workflow_engine,
     )
-    logger.info("workflows_loaded", count=workflow_store.count, backend=settings.workflow_engine)
+    logger.info("workflows_loaded", count=workflow_store.count, backend="langgraph")
 
     # KMS 지식그래프 클라이언트 (미설정 시 NullKmsClient)
     if settings.kms_api_url and settings.kms_internal_key:
@@ -533,7 +523,6 @@ async def create_app_state(settings: Settings) -> AppState:
         saju_report_service=saju_report_service,
         saju_report_worker=saju_report_worker,
         action_client=action_client,
-        workflow_session_store=workflow_session_store,
         workflow_checkpointer=workflow_checkpointer,
         _workflow_checkpointer_cm=_workflow_checkpointer_cm,
         providers=providers,
@@ -546,7 +535,6 @@ def start_cleanup_task(
     session_memory: SessionMemory,
     job_queue: JobQueue,
     interval: int,
-    workflow_session_store: WorkflowSessionStore | None = None,
     rate_limiter: PGRateLimiter | None = None,
     rate_limit_idle_ttl: int = 3600,
 ) -> asyncio.Task:
@@ -559,8 +547,6 @@ def start_cleanup_task(
                 await cache.cleanup_expired()
                 await session_memory.cleanup_expired()
                 await job_queue.cleanup_stale(stale_seconds=600)
-                if workflow_session_store:
-                    await workflow_session_store.cleanup_expired()
                 if rate_limiter:
                     await rate_limiter.cleanup_stale(idle_seconds=rate_limit_idle_ttl)
             except Exception as e:

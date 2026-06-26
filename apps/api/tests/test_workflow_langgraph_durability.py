@@ -80,7 +80,6 @@ def _make_lg_engine(
         store,
         graph_builder=builder,
         checkpointer=cp,
-        engine_backend="langgraph",
         action_client=action_client,
     )
 
@@ -622,7 +621,6 @@ class TestD7AsyncPostgresSaverDurability:
             store,
             graph_builder=builder,
             checkpointer=saver,
-            engine_backend="langgraph",
             action_client=action_client,
         )
         return engine, cm
