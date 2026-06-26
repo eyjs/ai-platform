@@ -13,11 +13,14 @@ export interface DocumentTableProps {
   className?: string;
 }
 
-const statusConfig = {
-  indexed: { variant: 'success' as const, label: 'Indexed' },
-  processing: { variant: 'warning' as const, label: 'Processing' },
-  error: { variant: 'error' as const, label: 'Error' },
-} as const;
+const statusConfig: Record<string, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
+  completed: { variant: 'success', label: 'Completed' },
+  indexed: { variant: 'success', label: 'Indexed' },
+  pending: { variant: 'warning', label: 'Pending' },
+  processing: { variant: 'warning', label: 'Processing' },
+  failed: { variant: 'error', label: 'Failed' },
+  error: { variant: 'error', label: 'Error' },
+};
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -26,6 +29,18 @@ function formatDate(iso: string): string {
     month: '2-digit',
     day: '2-digit',
   });
+}
+
+function formatBytes(bytes: number | null): string {
+  if (!bytes || bytes <= 0) return '-';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = bytes;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u += 1;
+  }
+  return `${v.toFixed(u === 0 ? 0 : 1)}${units[u]}`;
 }
 
 export function DocumentTable({
@@ -51,16 +66,16 @@ export function DocumentTable({
               제목
             </th>
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              도메인
+              소스
             </th>
             <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">
-              청크
+              크기
             </th>
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
               상태
             </th>
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              인덱싱 일자
+              생성 일자
             </th>
             <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">
               작업
@@ -69,7 +84,7 @@ export function DocumentTable({
         </thead>
         <tbody>
           {documents.map((doc) => {
-            const status = statusConfig[doc.status];
+            const status = statusConfig[doc.status] ?? { variant: 'neutral' as const, label: doc.status };
             return (
               <tr
                 key={doc.id}
@@ -84,16 +99,16 @@ export function DocumentTable({
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-700)]">
-                  {doc.domainName}
+                  {doc.source ?? '-'}
                 </td>
                 <td className="px-4 py-3 text-right text-[var(--color-neutral-700)]">
-                  {doc.chunkCount.toLocaleString()}
+                  {formatBytes(doc.fileSize)}
                 </td>
                 <td className="px-4 py-3">
                   <Badge variant={status.variant}>{status.label}</Badge>
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-500)]">
-                  {formatDate(doc.indexedAt)}
+                  {formatDate(doc.createdAt)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <Button

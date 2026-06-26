@@ -20,40 +20,44 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export interface KnowledgeStats {
   totalDocuments: number;
+  pendingDocuments: number;
+  completedDocuments: number;
+  failedDocuments: number;
   totalChunks: number;
-  domainDistribution: Array<{ domainCode: string; domainName: string; count: number }>;
+  avgChunksPerDocument: number;
+  documentsByStatus: Array<{ status: string; count: number }>;
+  documentsBySource: Array<{ source: string; count: number }>;
 }
 
 export interface KnowledgeDocument {
   id: string;
   title: string;
-  domainCode: string;
-  domainName: string;
-  chunkCount: number;
-  status: 'indexed' | 'processing' | 'error';
-  indexedAt: string;
+  source: string | null;
+  status: string;
+  fileSize: number | null;
+  mimeType: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface KnowledgeDocumentsResponse {
-  data: KnowledgeDocument[];
+  items: KnowledgeDocument[];
   total: number;
   page: number;
   size: number;
 }
 
-export interface KnowledgeDocumentDetail {
-  id: string;
-  title: string;
-  domainCode: string;
-  domainName: string;
-  status: 'indexed' | 'processing' | 'error';
-  indexedAt: string;
-  contentPreview: string;
-  chunks: Array<{
-    order: number;
-    length: number;
-    embeddingStatus: 'completed' | 'pending' | 'error';
-  }>;
+export interface KnowledgeDocumentDetail extends KnowledgeDocument {
+  content: string | null;
+  filePath: string | null;
+  chunkCount: number;
+}
+
+export interface ReindexResponse {
+  jobId: string;
+  documentId: string;
+  status: string;
+  message: string;
 }
 
 export async function fetchKnowledgeStats(): Promise<KnowledgeStats> {
@@ -66,13 +70,13 @@ export async function fetchKnowledgeStats(): Promise<KnowledgeStats> {
 export async function fetchKnowledgeDocuments(params: {
   page?: number;
   size?: number;
-  domainCode?: string;
+  source?: string;
   status?: string;
 }): Promise<KnowledgeDocumentsResponse> {
   const query = new URLSearchParams();
   if (params.page) query.set('page', String(params.page));
   if (params.size) query.set('size', String(params.size));
-  if (params.domainCode) query.set('domain_code', params.domainCode);
+  if (params.source) query.set('source', params.source);
   if (params.status) query.set('status', params.status);
 
   const res = await fetch(`${BFF_URL}/knowledge/documents?${query}`, {
@@ -88,7 +92,7 @@ export async function fetchKnowledgeDocumentDetail(id: string): Promise<Knowledg
   return handleResponse(res);
 }
 
-export async function reindexDocument(id: string): Promise<{ success: boolean }> {
+export async function reindexDocument(id: string): Promise<ReindexResponse> {
   const res = await fetch(`${BFF_URL}/knowledge/reindex/${id}`, {
     method: 'POST',
     headers: authHeaders(),

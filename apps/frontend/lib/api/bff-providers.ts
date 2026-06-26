@@ -17,17 +17,33 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export interface ProviderStatus {
-  name: string;
-  type: 'llm' | 'embedding' | 'reranker';
-  status: 'healthy' | 'degraded' | 'error';
-  avgLatencyMs: number;
-  errorRate: number;
-  lastError: string | null;
-  lastCheckedAt: string;
+export interface ProviderTypeStatus {
+  providerType: string;
+  totalProviders: number;
+  activeEntries: number;
+  expiredEntries: number;
 }
 
-export async function fetchProviderStatus(): Promise<ProviderStatus[]> {
+export interface ProviderMetrics {
+  providerId: string;
+  providerType: string;
+  cacheEntries: number;
+  expiredEntries: number;
+  lastActivity: string | null;
+  isActive: boolean;
+}
+
+/** bff `/providers/status` 응답 — provider 캐시 상태(헬스 아님). */
+export interface ProvidersStatus {
+  totalProviders: number;
+  activeProviders: number;
+  cacheEntries: number;
+  expiredEntries: number;
+  providersByType: ProviderTypeStatus[];
+  providerMetrics: ProviderMetrics[];
+}
+
+export async function fetchProviderStatus(): Promise<ProvidersStatus> {
   const res = await fetch(`${BFF_URL}/providers/status`, {
     headers: authHeaders(),
   });
