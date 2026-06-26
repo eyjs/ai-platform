@@ -127,19 +127,18 @@ def _build_store(*definitions: WorkflowDefinition) -> WorkflowStore:
 
 
 def make_engine(store: WorkflowStore, action_client=None, classifier=None) -> WorkflowEngine:
-    """레거시 엔진 factory.
+    """LangGraph 엔진 factory (T6 단일 엔진 컷오버 후).
 
-    T5에서 신엔진 backend를 파라미터화할 때 이 factory만 교체하면 된다.
-    이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
+    graph_builder/checkpointer 미주입 시 MemorySaver + WorkflowGraphBuilder 자동 생성.
+    이 단언은 LangGraph 단일 엔진에서 검증된다.
     """
     return WorkflowEngine(store, action_client=action_client, classifier=classifier)
 
 
 def make_lg_engine(store: WorkflowStore, action_client=None, classifier=None) -> WorkflowEngine:
-    """LangGraph 신엔진 factory.
+    """LangGraph 엔진 factory — make_engine과 동일 (T6 이후 수렴).
 
-    InMemorySaver를 체크포인터로 사용해 DB 없이 in-process로 동작한다.
-    graph_builder 캐시는 인스턴스별이므로 각 테스트에서 독립적으로 동작한다.
+    하위 호환을 위해 유지한다.
     """
     from langgraph.checkpoint.memory import MemorySaver
 
@@ -151,7 +150,6 @@ def make_lg_engine(store: WorkflowStore, action_client=None, classifier=None) ->
         store,
         graph_builder=builder,
         checkpointer=checkpointer,
-        engine_backend="langgraph",
         action_client=action_client,
     )
 
