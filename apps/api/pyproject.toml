@@ -10,6 +10,10 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "langgraph>=0.3.0",
     "langchain-core>=0.3.0",
+    # LangGraph Postgres 체크포인터 (psycopg v3 기반, asyncpg와 별도 드라이버)
+    # <3.1.0 상한 필수: 3.1.0은 langgraph-checkpoint>=4.1.0 요구, 설치된 4.0.1과 충돌.
+    "langgraph-checkpoint-postgres>=3.0.5,<3.1.0",
+    "psycopg[binary,pool]>=3.2.0",
     "httpx>=0.28.0",
     "asyncpg>=0.30.0",
     "pgvector>=0.3.0",

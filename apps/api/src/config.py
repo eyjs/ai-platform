@@ -193,6 +193,11 @@ class Settings(BaseSettings):
     flowsns_api_key: str = ""
     flowsns_timeout: float = 15.0
 
+    # 워크플로우 엔진 백엔드 (AIP_WORKFLOW_ENGINE)
+    # "legacy" — 기존 WorkflowEngine 직접 구동 (기본, 운영 무영향)
+    # "langgraph" — LangGraph StateGraph + AsyncPostgresSaver 경로 (T4 신경로)
+    workflow_engine: str = "legacy"
+
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000

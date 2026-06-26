@@ -35,7 +35,11 @@ def deps():
     llm = AsyncMock()
     profile_store = AsyncMock()
     session_memory = AsyncMock()
+    # workflow_engine의 async 메서드(get_session/cancel)는 AsyncMock으로 선언해야 await 가능.
+    # MagicMock은 await를 지원하지 않아 TypeError("object MagicMock can't be used in 'await'").
     workflow_engine = MagicMock()
+    workflow_engine.get_session = AsyncMock()
+    workflow_engine.cancel = AsyncMock()
     tenant_service = AsyncMock()
     return llm, profile_store, session_memory, workflow_engine, tenant_service
 
