@@ -23,12 +23,12 @@ export default function ArchitecturePage() {
   const selectedClientInfo = CLIENTS.find((c) => c.id === selectedClient);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+    <div>
       {/* Hero */}
       <div className="mb-8 text-center">
-        <h2 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">
+        <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">
           AI Platform 시스템 아키텍처
-        </h2>
+        </h1>
         <p className="mt-2 text-[var(--font-size-sm)] text-[var(--color-neutral-500)]">
           클라이언트를 클릭하면 요청이 시스템을 통해 어떻게 처리되는지 시뮬레이션합니다
         </p>
@@ -46,10 +46,7 @@ export default function ArchitecturePage() {
       {/* Flow Simulator (appears when client selected) */}
       {selectedClientInfo && (
         <section className="mb-8 animate-fade-slide-up">
-          <FlowSimulator
-            client={selectedClientInfo}
-            onLayerChange={handleLayerChange}
-          />
+          <FlowSimulator client={selectedClientInfo} onLayerChange={handleLayerChange} />
         </section>
       )}
 
