@@ -74,7 +74,8 @@ async def lifespan(app: FastAPI):
     await seed_dev_api_keys(state.vector_store.pool)
 
     # app.state에 컴포넌트 등록 (AppState 필드 자동 매핑)
-    _INTERNAL_FIELDS = {"cleanup_task", "providers", "saju_report_worker"}
+    # _workflow_checkpointer_cm: psycopg 풀 컨텍스트 매니저 — app.state 노출 차단 (G1 ②안)
+    _INTERNAL_FIELDS = {"cleanup_task", "providers", "saju_report_worker", "_workflow_checkpointer_cm"}
     for field_name in state.__dataclass_fields__:
         if field_name not in _INTERNAL_FIELDS:
             setattr(app.state, field_name, getattr(state, field_name))

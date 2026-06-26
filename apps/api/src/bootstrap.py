@@ -46,6 +46,7 @@ from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
 from src.services.null_kms_client import NullKmsClient
 from src.workflow.action_client import ActionClient
+from src.workflow.checkpointer import build_checkpointer
 from src.workflow.context_adapter import SajuContextAdapter
 from src.workflow.engine import WorkflowEngine
 from src.workflow.session_store import WorkflowSessionStore
@@ -94,6 +95,12 @@ class AppState:
     # Workflow action client (외부 API 호출)
     action_client: Optional[ActionClient] = None
     workflow_session_store: Optional[WorkflowSessionStore] = None
+
+    # T2: LangGraph AsyncPostgresSaver (미설치 시 None, T4가 엔진에 연결)
+    # G1 ②안: thread_id 외부 노출 차단 — 어댑터(T4)만 접근
+    workflow_checkpointer: Optional[Any] = None
+    # context manager — lifespan 종료 시 __aexit__ 호출로 psycopg 풀 정리
+    _workflow_checkpointer_cm: Optional[Any] = None
 
     # 내부 관리용
     cleanup_task: Optional[asyncio.Task] = None
@@ -317,6 +324,13 @@ async def create_app_state(settings: Settings) -> AppState:
     )
     logger.info("workflows_loaded", count=workflow_store.count)
 
+    # T2: AsyncPostgresSaver 체크포인터 부트스트랩 (psycopg v3 전용 풀, asyncpg와 별도).
+    # 미설치 환경에서는 (None, None) 반환 — 부트스트랩이 죽지 않음 (G5).
+    # 엔진 연결은 하지 않는다 — T4 책임.
+    workflow_checkpointer, _workflow_checkpointer_cm = await build_checkpointer(
+        settings.database_url
+    )
+
     # KMS 지식그래프 클라이언트 (미설정 시 NullKmsClient)
     if settings.kms_api_url and settings.kms_internal_key:
         kms_graph_client = KmsGraphClient(settings.kms_api_url, settings.kms_internal_key)
@@ -495,6 +509,8 @@ async def create_app_state(settings: Settings) -> AppState:
         saju_report_worker=saju_report_worker,
         action_client=action_client,
         workflow_session_store=workflow_session_store,
+        workflow_checkpointer=workflow_checkpointer,
+        _workflow_checkpointer_cm=_workflow_checkpointer_cm,
         providers=providers,
         classifier=classifier,
     )
@@ -611,6 +627,14 @@ async def shutdown(state: AppState) -> None:
             await state.action_client.close()
         except Exception as e:
             logger.warning("action_client_close_error", error=str(e))
+
+    # T2: AsyncPostgresSaver psycopg 풀 정리 (context manager __aexit__)
+    if state._workflow_checkpointer_cm:
+        try:
+            await state._workflow_checkpointer_cm.__aexit__(None, None, None)
+            logger.info("checkpointer_closed")
+        except Exception as e:
+            logger.warning("checkpointer_close_error", error=str(e))
 
     await state.vector_store.close()
     logger.info("shutdown_complete")
