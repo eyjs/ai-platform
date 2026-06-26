@@ -117,6 +117,9 @@ services:
       NODE_ENV: production
       BFF_PORT: 3001
       DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
+      # bff가 api로 중계하는 호출(피드백 등). docker 네트워크상 api 서비스명:내부포트.
+      # 미설정 시 localhost:8000(=bff 자신) → 502 API_UNREACHABLE.
+      AIP_API_URL: http://api:8000
       JWT_SECRET: ${AIP_JWT_SECRET:-dev-jwt-secret-change-in-production}
       # D17: bff가 개인키로 RS256 서명, 공개키로 자체 검증. 개인키는 bff에만.
       AIP_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private.pem
