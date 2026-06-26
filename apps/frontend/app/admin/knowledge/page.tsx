@@ -18,19 +18,12 @@ import {
 
 const PAGE_SIZE = 10;
 
-const STATUS_OPTIONS = [
-  { value: '', label: '전체 상태' },
-  { value: 'indexed', label: 'Indexed' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'error', label: 'Error' },
-];
-
 export default function KnowledgePipelinePage() {
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [domainFilter, setDomainFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,17 +47,17 @@ export default function KnowledgePipelinePage() {
       const data = await fetchKnowledgeDocuments({
         page,
         size: PAGE_SIZE,
-        domainCode: domainFilter || undefined,
+        source: sourceFilter || undefined,
         status: statusFilter || undefined,
       });
-      setDocuments(data.data);
+      setDocuments(data.items);
       setTotal(data.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : '문서 목록 로딩 실패');
     } finally {
       setIsLoading(false);
     }
-  }, [page, domainFilter, statusFilter]);
+  }, [page, sourceFilter, statusFilter]);
 
   useEffect(() => {
     loadStats();
@@ -93,11 +86,19 @@ export default function KnowledgePipelinePage() {
     }
   };
 
-  const domainOptions = [
-    { value: '', label: '전체 도메인' },
-    ...(stats?.domainDistribution.map((d) => ({
-      value: d.domainCode,
-      label: d.domainName,
+  const sourceOptions = [
+    { value: '', label: '전체 소스' },
+    ...(stats?.documentsBySource.map((d) => ({
+      value: d.source,
+      label: `${d.source} (${d.count})`,
+    })) ?? []),
+  ];
+
+  const statusOptions = [
+    { value: '', label: '전체 상태' },
+    ...(stats?.documentsByStatus.map((d) => ({
+      value: d.status,
+      label: `${d.status} (${d.count})`,
     })) ?? []),
   ];
 
@@ -111,35 +112,37 @@ export default function KnowledgePipelinePage() {
 
       {/* Stats Cards */}
       {stats ? (
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatCard label="총 문서 수" value={stats.totalDocuments.toLocaleString()} />
           <StatCard label="총 청크 수" value={stats.totalChunks.toLocaleString()} />
-          {stats.domainDistribution.slice(0, 2).map((d) => (
-            <StatCard key={d.domainCode} label={d.domainName} value={d.count.toLocaleString()} />
-          ))}
+          <StatCard label="완료" value={stats.completedDocuments.toLocaleString()} />
+          <StatCard label="실패" value={stats.failedDocuments.toLocaleString()} />
         </div>
       ) : (
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
             <Skeleton key={i} height="88px" />
           ))}
         </div>
       )}
 
-      {/* Domain Distribution */}
-      {stats && stats.domainDistribution.length > 0 && (
+      {/* Source Distribution */}
+      {stats && stats.documentsBySource.length > 0 && (
         <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--color-neutral-200)] bg-[var(--surface-card)] p-5">
           <h2 className="mb-3 text-[var(--font-size-base)] font-semibold text-[var(--color-neutral-900)]">
-            도메인 분포
+            소스 분포
           </h2>
           <div className="flex flex-wrap gap-3">
-            {stats.domainDistribution.map((d) => {
+            {stats.documentsBySource.map((d) => {
               const ratio = stats.totalDocuments > 0 ? (d.count / stats.totalDocuments) * 100 : 0;
               return (
-                <div key={d.domainCode} className="flex items-center gap-2">
-                  <div className="h-2 rounded-full bg-[var(--color-primary-500)]" style={{ width: `${Math.max(ratio, 4)}px` }} />
+                <div key={d.source} className="flex items-center gap-2">
+                  <div
+                    className="h-2 rounded-full bg-[var(--color-primary-500)]"
+                    style={{ width: `${Math.max(ratio, 4)}px` }}
+                  />
                   <span className="text-[var(--font-size-sm)] text-[var(--color-neutral-700)]">
-                    {d.domainName}
+                    {d.source}
                   </span>
                   <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
                     {d.count}건 ({ratio.toFixed(1)}%)
@@ -154,17 +157,17 @@ export default function KnowledgePipelinePage() {
       {/* Filters */}
       <div className="mb-4 flex flex-wrap gap-3">
         <Dropdown
-          options={domainOptions}
-          value={domainFilter}
+          options={sourceOptions}
+          value={sourceFilter}
           onChange={(v) => {
-            setDomainFilter(v);
+            setSourceFilter(v);
             setPage(1);
           }}
-          placeholder="전체 도메인"
-          className="w-48"
+          placeholder="전체 소스"
+          className="w-56"
         />
         <Dropdown
-          options={STATUS_OPTIONS}
+          options={statusOptions}
           value={statusFilter}
           onChange={(v) => {
             setStatusFilter(v);

@@ -6,17 +6,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { RequestLogSummary } from '@/lib/api/admin';
 
-const statusVariant: Record<string, 'success' | 'error' | 'warning'> = {
-  success: 'success',
-  error: 'error',
-  timeout: 'warning',
-};
-
-const statusLabel: Record<string, string> = {
-  success: '성공',
-  error: '오류',
-  timeout: '타임아웃',
-};
+function statusVariantOf(code: number): 'success' | 'error' | 'warning' {
+  if (code >= 500) return 'error';
+  if (code >= 400) return 'warning';
+  return 'success';
+}
 
 function latencyColor(ms: number): string {
   if (ms < 500) return 'var(--color-success)';
@@ -139,16 +133,16 @@ export function RequestLogTable({
                   </span>
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-800)]">
-                  {row.profileName}
+                  {row.profileId ?? '-'}
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-700)]">
                   <span className="block max-w-[200px] truncate">
-                    {row.questionPreview || '-'}
+                    {row.requestPreview || '-'}
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <Badge variant={statusVariant[row.status] ?? 'neutral'}>
-                    {statusLabel[row.status] ?? row.status}
+                  <Badge variant={statusVariantOf(row.statusCode)}>
+                    {row.statusCode}
                   </Badge>
                 </td>
                 <td className="px-4 py-3">
@@ -160,7 +154,7 @@ export function RequestLogTable({
                   </span>
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-500)]">
-                  {new Date(row.timestamp).toLocaleString('ko-KR')}
+                  {new Date(row.ts).toLocaleString('ko-KR')}
                 </td>
               </tr>
             ))

@@ -18,9 +18,9 @@ import {
 
 const STATUS_OPTIONS = [
   { value: '', label: '전체 상태' },
-  { value: 'success', label: '성공' },
-  { value: 'error', label: '오류' },
-  { value: 'timeout', label: '타임아웃' },
+  { value: '200', label: '200 성공' },
+  { value: '400', label: '400 요청오류' },
+  { value: '500', label: '500 서버오류' },
 ];
 
 export default function RequestLogsPage() {
@@ -81,8 +81,8 @@ export default function RequestLogsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatsCard
-            title="오늘 총 요청"
-            value={stats.totalToday.toLocaleString()}
+            title="총 요청"
+            value={stats.totalRequests.toLocaleString()}
             icon={
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -116,8 +116,8 @@ export default function RequestLogsPage() {
       <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <select
-            value={filters.status ?? ''}
-            onChange={(e) => updateFilters({ status: e.target.value || undefined })}
+            value={filters.status?.toString() ?? ''}
+            onChange={(e) => updateFilters({ status: e.target.value ? Number(e.target.value) : undefined })}
             className="h-8 rounded-[var(--radius-md)] border border-[var(--color-neutral-200)] bg-[var(--surface-input)] px-2 text-[var(--font-size-sm)] text-[var(--color-neutral-700)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
             aria-label="상태 필터"
           >
@@ -142,7 +142,7 @@ export default function RequestLogsPage() {
       {/* 테이블 */}
       <Card className="overflow-hidden p-0">
         <RequestLogTable
-          data={logs?.data ?? []}
+          data={logs?.items ?? []}
           total={logs?.total ?? 0}
           page={filters.page ?? 1}
           pageSize={filters.size ?? 20}

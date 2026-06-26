@@ -42,12 +42,18 @@ export interface PlatformOverview {
 
 export interface RequestLogSummary {
   id: string;
-  profileId: string;
-  profileName: string;
-  status: 'success' | 'error' | 'timeout';
+  ts: string;
+  apiKeyId: string | null;
+  profileId: string | null;
+  providerId: string | null;
+  statusCode: number;
   latencyMs: number;
-  questionPreview: string;
-  timestamp: string;
+  promptTokens: number;
+  completionTokens: number;
+  cacheHit: boolean;
+  errorCode: string | null;
+  requestPreview: string | null;
+  responsePreview: string | null;
 }
 
 export interface RequestLogDetail {
@@ -86,7 +92,7 @@ export interface RequestLogDetail {
 }
 
 export interface RequestLogsResponse {
-  data: RequestLogSummary[];
+  items: RequestLogSummary[];
   total: number;
   page: number;
   size: number;
@@ -94,7 +100,7 @@ export interface RequestLogsResponse {
 
 export interface RequestLogFilters {
   profileId?: string;
-  status?: string;
+  status?: number;
   startDate?: string;
   endDate?: string;
   page?: number;
@@ -102,9 +108,13 @@ export interface RequestLogFilters {
 }
 
 export interface RequestLogStats {
-  totalToday: number;
+  totalRequests: number;
   errorCount: number;
+  errorRate: number;
   avgLatencyMs: number;
+  cacheHitRate: number;
+  totalTokens: number;
+  requestsByHour: Array<{ hour: string; count: number }>;
 }
 
 export async function fetchPlatformOverview(): Promise<PlatformOverview> {
@@ -118,10 +128,10 @@ export async function fetchRequestLogs(
   filters: RequestLogFilters = {},
 ): Promise<RequestLogsResponse> {
   const params = new URLSearchParams();
-  if (filters.profileId) params.set('profileId', filters.profileId);
-  if (filters.status) params.set('status', filters.status);
-  if (filters.startDate) params.set('startDate', filters.startDate);
-  if (filters.endDate) params.set('endDate', filters.endDate);
+  if (filters.profileId) params.set('profile_id', filters.profileId);
+  if (filters.status != null) params.set('status', String(filters.status));
+  if (filters.startDate) params.set('date_from', filters.startDate);
+  if (filters.endDate) params.set('date_to', filters.endDate);
   params.set('page', String(filters.page ?? 1));
   params.set('size', String(filters.size ?? 20));
 
