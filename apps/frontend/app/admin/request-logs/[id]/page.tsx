@@ -7,17 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchRequestLogDetail, type RequestLogSummary } from '@/lib/api/admin';
+import { formatDuration, latencyColor } from '@/lib/format';
 
 function statusVariantOf(code: number): 'success' | 'error' | 'warning' {
   if (code >= 500) return 'error';
   if (code >= 400) return 'warning';
   return 'success';
-}
-
-function latencyColor(ms: number): string {
-  if (ms < 500) return 'var(--color-success)';
-  if (ms <= 2000) return 'var(--color-warning)';
-  return 'var(--color-error)';
 }
 
 export default function RequestLogDetailPage() {
@@ -100,7 +95,7 @@ export default function RequestLogDetailPage() {
         <Card variant="section">
           <p className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">응답 시간</p>
           <p className="mt-1 font-mono text-[var(--font-size-sm)] font-medium" style={{ color: latencyColor(detail.latencyMs) }}>
-            {detail.latencyMs}ms
+            {formatDuration(detail.latencyMs)}
           </p>
         </Card>
         <Card variant="section">

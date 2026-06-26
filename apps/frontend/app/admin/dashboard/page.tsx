@@ -13,12 +13,7 @@ import { UsageChart } from '@/components/admin/dashboard/usage-chart';
 import { LatencyChart } from '@/components/admin/dashboard/latency-chart';
 import { fetchUsage, fetchLatency } from '@/lib/api/bff-dashboard';
 import { fetchPlatformOverview, type PlatformOverview } from '@/lib/api/admin';
-
-function latencyColor(ms: number): string {
-  if (ms < 500) return 'var(--color-success)';
-  if (ms <= 2000) return 'var(--color-warning)';
-  return 'var(--color-error)';
-}
+import { formatDuration, latencyColor } from '@/lib/format';
 
 function HourlyTrendChart({ data }: { data: Array<{ hour: string; count: number }> }) {
   const maxCount = Math.max(...data.map((d) => d.count), 1);
@@ -115,7 +110,7 @@ export default function DashboardPage() {
             title="평균 레이턴시"
             value={
               overview.avgLatencyMs > 0
-                ? `${overview.avgLatencyMs}ms · p95 ${overview.p95LatencyMs}ms`
+                ? `${formatDuration(overview.avgLatencyMs)} · p95 ${formatDuration(overview.p95LatencyMs)}`
                 : '-'
             }
             variant={overview.avgLatencyMs > 2000 ? 'warning' : 'default'}
@@ -222,7 +217,7 @@ export default function DashboardPage() {
                           className="font-mono text-[var(--font-size-xs)] font-medium"
                           style={{ color: latencyColor(log.latencyMs) }}
                         >
-                          {log.latencyMs}ms
+                          {formatDuration(log.latencyMs)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-[var(--color-neutral-500)]">

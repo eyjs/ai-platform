@@ -15,6 +15,7 @@ import {
   type RequestLogsResponse,
   type RequestLogStats,
 } from '@/lib/api/admin';
+import { formatDuration } from '@/lib/format';
 
 const STATUS_OPTIONS = [
   { value: '', label: '전체 상태' },
@@ -101,7 +102,7 @@ export default function RequestLogsPage() {
           />
           <StatsCard
             title="평균 응답 시간"
-            value={stats.avgLatencyMs > 0 ? `${stats.avgLatencyMs}ms` : '-'}
+            value={stats.avgLatencyMs > 0 ? formatDuration(stats.avgLatencyMs) : '-'}
             variant={stats.avgLatencyMs > 2000 ? 'warning' : 'default'}
             icon={
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

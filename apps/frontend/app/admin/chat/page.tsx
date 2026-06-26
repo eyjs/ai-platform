@@ -56,7 +56,11 @@ export default function AdminChatPage() {
       },
       onTrace: (data: Record<string, unknown>) => {
         if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({ ...msg, traceData: data }));
+        updateLastMessage(currentSessionId, (msg) => ({
+          ...msg,
+          traceData: data,
+          traceEvents: [...(msg.traceEvents ?? []), data],
+        }));
       },
       onDone: (data: {
         answer?: string;

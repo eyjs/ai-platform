@@ -207,15 +207,19 @@ class ProviderFactory:
         if backend == "http":
             from langchain_openai import ChatOpenAI
 
+            # streaming=True: agentic astream_events가 on_chat_model_stream을 토큰 단위로
+            # 발생시키도록(MLX 서버는 stream=True를 지원). 미설정 시 최종 답변이 한 청크로 와
+            # 프론트에서 한번에 렌더링됨.
             return ChatOpenAI(
                 base_url=f"{s.main_llm_server_url.rstrip('/')}/v1",
                 api_key="not-needed", model=model_name or s.main_model or "default",
+                streaming=True,
             )
 
         if backend == "ollama":
             from langchain_ollama import ChatOllama
 
-            return ChatOllama(model=model_name or s.main_model, base_url=s.ollama_host)
+            return ChatOllama(model=model_name or s.main_model, base_url=s.ollama_host, streaming=True)
 
         if backend == "anthropic":
             from langchain_anthropic import ChatAnthropic
