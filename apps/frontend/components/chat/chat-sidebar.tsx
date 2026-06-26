@@ -109,8 +109,17 @@ export function ChatSidebar({
           />
         </div>
 
-        {/* 아키텍처 링크 */}
-        <div className="border-t border-[var(--color-neutral-200)] p-3">
+        {/* 관리자 대시보드 + 아키텍처 링크 */}
+        <div className="space-y-1 border-t border-[var(--color-neutral-200)] p-3">
+          <Link
+            href="/admin/dashboard"
+            className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-neutral-500)] transition-colors hover:bg-[var(--color-neutral-100)] hover:text-[var(--color-neutral-700)]"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V9m4 8V5m4 12v-6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+            모니터링 대시보드
+          </Link>
           <Link
             href="/architecture"
             className="flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-neutral-500)] transition-colors hover:bg-[var(--color-neutral-100)] hover:text-[var(--color-neutral-700)]"
