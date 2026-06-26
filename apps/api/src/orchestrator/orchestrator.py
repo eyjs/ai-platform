@@ -92,27 +92,49 @@ class MasterOrchestrator:
             )
 
         current = meta.get("current_profile_id")
+        valid_ids = {p["id"] for p in profiles}
 
         # 4. 컨텍스트 기반 라우팅 (꼬리질문, 과거 프로필 참조)
         router = ProfileRouter(profiles)
         continuation = self._resolve_continuation(
             question, current, meta, history, router, profiles,
         )
+
+        # Tier 1 임베딩을 미리 1회 계산 — 아래 Tier 1 재사용 + 토픽 전환 감지에 사용.
+        emb_result = await self._embedding_router.route(question) if self._embedding_router else None
+
         if continuation:
-            logger.info(
-                "orchestrator_continuation",
-                session_id=session_id,
-                profile_id=continuation.selected_profile_id,
-                reason=continuation.reason,
-            )
-            return continuation
+            # 토픽 전환 감지: soft continuation(대명사/짧은질문)이라도 임베딩이 다른 프로필을
+            # 명확히(비모호 + 고신뢰 ≥0.6) 선호하면 continuation을 무시하고 재라우팅한다.
+            # → 사주 세션 중 보험 질문 등 명백한 토픽 전환에서 워크플로우/프로필 고정을 벗어난다.
+            if (
+                continuation.is_continuation
+                and emb_result is not None
+                and not emb_result.is_ambiguous
+                and emb_result.profile_id in valid_ids
+                and emb_result.profile_id != continuation.selected_profile_id
+                and emb_result.confidence >= 0.6
+            ):
+                logger.info(
+                    "orchestrator_topic_switch",
+                    session_id=session_id,
+                    from_profile=continuation.selected_profile_id,
+                    to_profile=emb_result.profile_id,
+                    confidence=round(emb_result.confidence, 4),
+                )
+            else:
+                logger.info(
+                    "orchestrator_continuation",
+                    session_id=session_id,
+                    profile_id=continuation.selected_profile_id,
+                    reason=continuation.reason,
+                )
+                return continuation
 
         # 5. 3-Tier Profile Router
-        valid_ids = {p["id"] for p in profiles}
 
-        # Tier 1: 임베딩 유사도 (~100ms, 다국어 지원)
+        # Tier 1: 임베딩 유사도 — 위에서 계산한 emb_result 재사용.
         if self._embedding_router:
-            emb_result = await self._embedding_router.route(question)
             if emb_result and not emb_result.is_ambiguous and emb_result.profile_id in valid_ids:
                 logger.info(
                     "orchestrator_tier1_embedding",
