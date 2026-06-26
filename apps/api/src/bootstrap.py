@@ -49,6 +49,7 @@ from src.workflow.action_client import ActionClient
 from src.workflow.checkpointer import build_checkpointer
 from src.workflow.context_adapter import SajuContextAdapter
 from src.workflow.engine import WorkflowEngine
+from src.workflow.graph_builder import WorkflowGraphBuilder
 from src.workflow.session_store import WorkflowSessionStore
 from src.workflow.store import WorkflowStore
 
@@ -310,26 +311,49 @@ async def create_app_state(settings: Settings) -> AppState:
     action_client = ActionClient()
     # 공유 분류기 — WorkflowEngine과 classify-intent 라우트가 동일 인스턴스 재사용.
     classifier = SemanticClassifier(router_llm)
+
+    # T2: AsyncPostgresSaver 체크포인터 부트스트랩 (psycopg v3 전용 풀, asyncpg와 별도).
+    # 미설치 환경에서는 (None, None) 반환 — 부트스트랩이 죽지 않음 (G5).
+    workflow_checkpointer, _workflow_checkpointer_cm = await build_checkpointer(
+        settings.database_url
+    )
+
+    # AIP_WORKFLOW_ENGINE 분기 — "langgraph"이고 checkpointer가 있으면 신경로, 아니면 legacy.
+    # G5: checkpointer가 None이면 엔진 생성자 내부에서 legacy 폴백 처리된다.
+    _context_adapters = {
+        # 서비스별 dynamic 스텝 enrichment 플러그인. 프로파일이 이름으로 선택.
+        "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
+    }
+    _graph_builder: WorkflowGraphBuilder | None = None
+    if settings.workflow_engine == "langgraph":
+        if workflow_checkpointer is not None:
+            _graph_builder = WorkflowGraphBuilder(
+                store=workflow_store,
+                llm=main_llm,
+                context_adapters=_context_adapters,
+                classifier=classifier,
+            )
+            logger.info("workflow_graph_builder_initialized", backend="langgraph")
+        else:
+            logger.warning(
+                "workflow_langgraph_no_checkpointer",
+                reason="checkpointer 미설치 — legacy로 폴백 (G5)",
+            )
+
     workflow_engine = WorkflowEngine(
         workflow_store,
         session_store=workflow_session_store,
         action_client=action_client,
         llm=main_llm,  # dynamic 스텝(캐릭터 통찰)용
-        context_adapters={
-            # 서비스별 dynamic 스텝 enrichment 플러그인. 프로파일이 이름으로 선택.
-            "saju": SajuContextAdapter(backend_url=settings.saju_backend_url),
-        },
+        context_adapters=_context_adapters,
         # select 자유입력 분기를 의미로 판단하는 공통 분류기(경량 router_llm).
         classifier=classifier,
+        # LangGraph 경로 의존성 (G5: checkpointer=None이면 엔진이 legacy로 폴백)
+        graph_builder=_graph_builder,
+        checkpointer=workflow_checkpointer,
+        engine_backend=settings.workflow_engine,
     )
-    logger.info("workflows_loaded", count=workflow_store.count)
-
-    # T2: AsyncPostgresSaver 체크포인터 부트스트랩 (psycopg v3 전용 풀, asyncpg와 별도).
-    # 미설치 환경에서는 (None, None) 반환 — 부트스트랩이 죽지 않음 (G5).
-    # 엔진 연결은 하지 않는다 — T4 책임.
-    workflow_checkpointer, _workflow_checkpointer_cm = await build_checkpointer(
-        settings.database_url
-    )
+    logger.info("workflows_loaded", count=workflow_store.count, backend=settings.workflow_engine)
 
     # KMS 지식그래프 클라이언트 (미설정 시 NullKmsClient)
     if settings.kms_api_url and settings.kms_internal_key:

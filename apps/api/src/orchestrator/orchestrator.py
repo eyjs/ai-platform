@@ -445,7 +445,7 @@ class MasterOrchestrator:
         meta: dict,
     ) -> None:
         """프로필 전환 시 활성 워크플로우를 일시정지한다."""
-        active_wf = self._workflow.get_session(session_id)
+        active_wf = await self._workflow.get_session(session_id)
         if active_wf and not active_wf.completed:
             paused_state = {
                 "workflow_id": active_wf.workflow_id,
@@ -469,7 +469,7 @@ class MasterOrchestrator:
             await self._session.save_orchestrator_metadata(session_id, meta)
 
             # 워크플로우 메모리에서 제거
-            self._workflow.cancel(session_id)
+            await self._workflow.cancel(session_id)
 
             logger.info(
                 "orchestrator_workflow_paused",
