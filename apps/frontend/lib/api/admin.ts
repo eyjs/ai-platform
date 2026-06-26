@@ -18,19 +18,26 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+export interface OverviewLog {
+  ts: string;
+  profileId: string | null;
+  statusCode: number;
+  latencyMs: number;
+  errorCode: string | null;
+  requestPreview: string | null;
+  responsePreview: string | null;
+}
+
 export interface PlatformOverview {
-  totalRequests: number;
+  totalProfiles: number;
+  activeProfiles: number;
+  todayRequests: number;
   errorRate: number;
   avgLatencyMs: number;
-  activeProfiles: number;
-  changes: {
-    totalRequests: number;
-    errorRate: number;
-    avgLatency: number;
-    activeProfiles: number;
-  };
-  hourlyTrend: Array<{ hour: string; count: number }>;
-  recentLogs: Array<RequestLogSummary>;
+  p95LatencyMs: number;
+  apiKeys: { total: number; active: number };
+  requests24h: Array<{ hour: string; count: number }>;
+  recentLogs: OverviewLog[];
 }
 
 export interface RequestLogSummary {
