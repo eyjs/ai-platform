@@ -11,6 +11,7 @@ Gateway 가 fire-and-forget 으로 enqueue, 워커가 배치로 DB insert.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Awaitable, Callable, Optional
 
@@ -113,12 +114,14 @@ class RequestLogService:
                           (ts, api_key_id, profile_id, provider_id, status_code, latency_ms,
                            prompt_tokens, completion_tokens, cache_hit, error_code,
                            request_preview, response_preview,
-                           response_id, faithfulness_score)
+                           response_id, faithfulness_score,
+                           client_ip, user_id, latency_breakdown)
                         VALUES
                           (:ts, :api_key_id, :profile_id, :provider_id, :status_code, :latency_ms,
                            :prompt_tokens, :completion_tokens, :cache_hit, :error_code,
                            :request_preview, :response_preview,
-                           :response_id, :faithfulness_score)
+                           :response_id, :faithfulness_score,
+                           :client_ip, :user_id, CAST(:latency_breakdown AS JSONB))
                         """
                     ),
                     [
@@ -137,6 +140,12 @@ class RequestLogService:
                             "response_preview": RequestLogEntry.truncate_preview(e.response_preview),
                             "response_id": e.response_id,
                             "faithfulness_score": e.faithfulness_score,
+                            "client_ip": e.client_ip,
+                            "user_id": e.user_id,
+                            "latency_breakdown": (
+                                json.dumps(e.latency_breakdown, ensure_ascii=False)
+                                if e.latency_breakdown else None
+                            ),
                         }
                         for e in batch
                     ],

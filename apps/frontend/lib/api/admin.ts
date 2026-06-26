@@ -40,6 +40,11 @@ export interface PlatformOverview {
   recentLogs: OverviewLog[];
 }
 
+export interface LatencyBreakdown {
+  total_ms: number;
+  nodes: Array<{ node: string; ms: number } & Record<string, unknown>>;
+}
+
 export interface RequestLogSummary {
   id: string;
   ts: string;
@@ -54,6 +59,10 @@ export interface RequestLogSummary {
   errorCode: string | null;
   requestPreview: string | null;
   responsePreview: string | null;
+  // Phase 3: 상세에서만 채워짐 (목록은 undefined).
+  clientIp?: string | null;
+  userId?: string | null;
+  latencyBreakdown?: LatencyBreakdown | null;
 }
 
 export interface RequestLogDetail {
