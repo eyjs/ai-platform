@@ -332,6 +332,7 @@ async def create_app_state(settings: Settings) -> AppState:
                 llm=main_llm,
                 context_adapters=_context_adapters,
                 classifier=classifier,
+                action_client=action_client,
             )
             logger.info("workflow_graph_builder_initialized", backend="langgraph")
         else:

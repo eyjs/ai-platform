@@ -398,9 +398,6 @@ class TestS1HappyPath:
         await engine.advance("s1-full", "홍길동")      # input → confirm
         result = await engine.advance("s1-full", "예") # confirm → done
 
-        # LangGraph #1 Bug: terminal message completed 미설정 — langgraph만 xfail
-        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
-
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed
         assert "홍길동" in result.bot_message           # 템플릿 렌더링 확인
@@ -551,9 +548,6 @@ class TestS5ValidationRepromptAndRecovery:
         # Act
         result = await engine.advance("s5-recover", "010-1234-5678")  # 올바른 입력
 
-        # LangGraph #1 Bug: terminal message completed 미설정 — langgraph만 xfail
-        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
-
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed  # done 스텝(message)으로 진행하고 완료
 
@@ -684,9 +678,6 @@ class TestS8ActionSuccessFailure:
         await engine.start("parity_action", "s8-fresh")
         await engine.advance("s8-fresh", "홍길동")  # ask_name → submit(action step)
 
-        # LangGraph #2 Bug: action_client가 전달되지 않아 stub 미호출 — langgraph만 xfail
-        _xfail_if_lg(engine_factory, _BUG2_ACTION_CLIENT)
-
         # Assert: stub이 적어도 한 번 호출됐음
         # 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert stub.called >= 1
@@ -700,10 +691,6 @@ class TestS8ActionSuccessFailure:
 
         # Act
         result = await engine.advance("s8-fail", "홍길동")  # ask_name → submit(실패)
-
-        # LangGraph #2 Bug: action_client가 전달되지 않아 on_error_message 대신
-        # "외부 연동 기능이 비활성화되어 있습니다." 반환 — langgraph만 xfail
-        _xfail_if_lg(engine_factory, _BUG2_ACTION_CLIENT)
 
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed
@@ -735,9 +722,6 @@ class TestS9ResumeThenAdvance:
         )
         result = await engine.advance("s9", "010-9999-8888")  # step_2 → step_3
 
-        # LangGraph #3 Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
-        _xfail_if_lg(engine_factory, _BUG3_RESUME_STEP)
-
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.step_id == "step_3"
         session = await engine.get_session("s9")
@@ -759,9 +743,6 @@ class TestS9ResumeThenAdvance:
             step_id="step_2",
             collected={"name": "김유신"},
         )
-
-        # LangGraph #3 Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
-        _xfail_if_lg(engine_factory, _BUG3_RESUME_STEP)
 
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.step_id == "step_2"
@@ -825,10 +806,6 @@ class TestS10StructuredSignals:
 
         # Act: 확인 → done(message, terminal)
         result = await engine.advance("s10-terminal", "예")
-
-        # LangGraph #1 Bug: _make_message_node가 completed=True / last_result를 상태에
-        # 기록하지 않아 terminal message step이 completed=False 로 반환됨 — xfail
-        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
 
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed is True

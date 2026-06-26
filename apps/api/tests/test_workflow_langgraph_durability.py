@@ -129,11 +129,11 @@ def _two_step_workflow() -> WorkflowDefinition:
 
 
 def _retry_workflow() -> WorkflowDefinition:
-    """select(max_retries=2): G2 retry_count 검증용."""
+    """select(max_retries=3): G2 retry_count 검증용 — 3회 미매칭 후 이탈."""
     return WorkflowDefinition(
         id="dur_retry",
         name="내구성 재시도",
-        max_retries=2,
+        max_retries=3,
         steps=[
             WorkflowStep(
                 id="pick", type="select",
@@ -297,13 +297,6 @@ class TestD3CancelThenGetSession:
 
         assert result is True
 
-    @pytest.mark.xfail(
-        reason=(
-            "LangGraph _lg_cancel 버그: adelete_thread를 세션 존재 여부 확인 없이 호출하면 "
-            "MemorySaver가 예외 없이 반환 → 항상 True 반환. engine.py:_lg_cancel 수정 필요 (T4 대상)"
-        ),
-        strict=False,
-    )
     async def test_cancel_nonexistent_session(self):
         """존재하지 않는 세션 cancel은 False를 반환한다."""
         store = _build_store(_two_step_workflow())
@@ -444,23 +437,9 @@ class TestD4SajuDiscoveryLovePath:
         await engine.advance("d4-love-005", "09:00")
         await engine.advance("d4-love-005", "남성")  # → run_compat_male
 
-        # LangGraph Bug #2: _make_action_node이 action_client=None으로 하드코딩 → xfail
-        pytest.xfail(
-            "LangGraph _make_action_node 버그: graph_builder.py에서 action_client=None으로 "
-            "하드코딩, action_client 스텁이 전달되지 않음 — T4에서 수정 예정"
-        )
-
         # action_client 스텁이 최소 1회 호출됐는지 확인
         assert stub.called >= 1
 
-    @pytest.mark.xfail(
-        reason=(
-            "LangGraph _make_message_node 버그: terminal message 노드가 "
-            "completed/concluded를 state에 설정하지 않아 StepResult.completed=False "
-            "반환 — graph_builder.py:_make_message_node 수정 필요 (T3/T4 반려 대상)"
-        ),
-        strict=False,
-    )
     async def test_love_path_reveal_compat_completed(self):
         """reveal_compat(message, report=compatibility)에서 completed+report 확인."""
         store = await self._load_saju_store()
@@ -503,7 +482,7 @@ class TestD5G2RetryCountLoop:
         assert r1.step_id == "pick"
 
     async def test_max_retries_triggers_escape(self):
-        """max_retries=2 → 3회 미매칭 후 escaped+completed+concluded."""
+        """max_retries=3 → 3회 미매칭 후 escaped+completed+concluded."""
         store = _build_store(_retry_workflow())
         engine = _make_lg_engine(store)
 
@@ -512,14 +491,6 @@ class TestD5G2RetryCountLoop:
         await engine.advance("g2-002", "없는2")  # retry 2
 
         r3 = await engine.advance("g2-002", "없는3")  # max_retries 도달
-
-        # LangGraph Bug #1: _make_message_node가 escaped/completed/concluded를 state에
-        # 기록하지 않아 max_retries 후 escape 메시지 노드가 completed=True지만 escaped=False
-        # 로 반환됨 (혹은 다음 advance가 "이미 완료된 워크플로우" 반환) — xfail
-        pytest.xfail(
-            "LangGraph _make_message_node 버그: terminal escape 단계에서 escaped/concluded가 "
-            "state에 기록되지 않아 r3.escaped=False. graph_builder.py:_make_message_node 수정 필요"
-        )
 
         assert r3.completed
         assert r3.escaped
@@ -535,13 +506,7 @@ class TestD5G2RetryCountLoop:
 
         result = await engine.advance("g2-003", "A")  # 올바른 입력 → end(message)
 
-        # LangGraph Bug #1: message 노드가 state를 업데이트하지 않아 step_id='pick'에 머묾
-        pytest.xfail(
-            "LangGraph _make_message_node 버그: message 노드 실행 후 step_id가 'end'로 갱신되지 "
-            "않아 result.step_id='pick' 반환. graph_builder.py:_make_message_node 수정 필요"
-        )
-
-        # end(message) 도달 — completed 여부는 message 버그로 변동, step_id만 확인
+        # end(message) 도달
         assert result.step_id == "end"
         assert not result.escaped
 
@@ -563,13 +528,6 @@ class TestD6G3ResumeAdvanceContinuity:
             collected={"name": "이순신"},
         )
 
-        # LangGraph Bug #3: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
-        pytest.xfail(
-            "LangGraph _lg_resume 버그: make_initial_state(step_id)로 seed를 만들어도 "
-            "graph.ainvoke는 항상 START → entry_step_id에서 시작. step_id 파라미터 무시됨. "
-            "engine.py:_lg_resume 수정 필요"
-        )
-
         assert result.step_id == "step_2"
         assert "이순신님" in result.bot_message
 
@@ -585,13 +543,6 @@ class TestD6G3ResumeAdvanceContinuity:
             collected={"name": "홍길동"},
         )
         result = await engine.advance("g3-002", "010-5678-1234")
-
-        # LangGraph Bug #3: resume이 entry_step부터 재시작하므로 advance도 step_2가 아닌
-        # entry_step 다음으로 진행 — xfail
-        pytest.xfail(
-            "LangGraph _lg_resume 버그: step_id 무시 → resume 후 advance도 entry 기준으로 진행. "
-            "result.step_id='step_2'(entry 다음) != 'done'"
-        )
 
         assert result.step_id == "done"
         session = await engine.get_session("g3-002")
@@ -614,11 +565,6 @@ class TestD6G3ResumeAdvanceContinuity:
             session_id="g3-003",
             step_id="step_2",
             collected={"name": "세종대왕"},
-        )
-
-        # LangGraph Bug #3: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
-        pytest.xfail(
-            "LangGraph _lg_resume 버그: step_id 무시 → result.step_id='step_1'(entry) != 'step_2'"
         )
 
         assert result.step_id == "step_2"

@@ -151,6 +151,12 @@ class WorkflowEngine:
         self._graph_builder = graph_builder
         self._checkpointer = checkpointer
 
+        # Bug #2 수정: 외부에서 graph_builder를 주입할 때 action_client를 builder에 전파.
+        # 테스트 factory는 builder를 먼저 생성한 뒤 engine에 action_client를 넘기므로,
+        # builder 생성 시점에 action_client를 알 수 없다 → engine __init__에서 동기화.
+        if graph_builder is not None and action_client is not None:
+            graph_builder._action_client = action_client
+
         # 실제 사용 백엔드 결정: langgraph 요청이어도 checkpointer 미설치 시 legacy (G5)
         if engine_backend == "langgraph" and (graph_builder is None or checkpointer is None):
             logger.warning(
@@ -445,20 +451,22 @@ class WorkflowEngine:
     async def _lg_cancel(self, session_id: str) -> bool:
         """LangGraph 경로 cancel: checkpointer에서 thread 삭제.
 
-        adelete_thread API(3.x)가 없으면 체크포인트를 completed=True로 override해 무력화한다.
+        Bug #3b 수정: adelete_thread 호출 전 세션 존재 여부를 확인한다.
+        MemorySaver는 없는 thread에도 예외 없이 반환하므로 aget_tuple로 선검사 필수.
+        adelete_thread API(3.x)가 없으면 체크포인트를 완료 상태로 override해 무력화한다.
         """
         try:
+            # 세션 존재 여부 선검사 (Bug #3b)
+            config = {"configurable": {"thread_id": session_id}}
+            tpl = await self._checkpointer.aget_tuple(config)
+            if not tpl:
+                return False
+
             # langgraph-checkpoint-postgres 3.x: adelete_thread(thread_id) API 사용.
-            # 미존재 시 AttributeError → except 분기에서 graceful.
             if hasattr(self._checkpointer, "adelete_thread"):
                 await self._checkpointer.adelete_thread(session_id)
             else:
-                # API 미지원 시: thread가 존재하는지만 확인하고 성공 처리
-                config = {"configurable": {"thread_id": session_id}}
-                tpl = await self._checkpointer.aget_tuple(config)
-                if not tpl:
-                    return False
-                # 삭제 불가 환경 — completed 상태로 기록(다음 get_session에서 완료로 반환)
+                # 삭제 API 미지원 환경 — 존재는 확인됐으므로 성공 처리만
                 logger.warning(
                     "workflow_lg_cancel_no_delete_api",
                     layer="WORKFLOW",

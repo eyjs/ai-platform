@@ -155,6 +155,7 @@ class WorkflowGraphBuilder:
         classifier: Any | None = None,
         action_endpoint_default: str | None = None,
         action_headers_default: dict | None = None,
+        action_client: Any | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
@@ -162,6 +163,7 @@ class WorkflowGraphBuilder:
         self._classifier = classifier
         self._action_endpoint_default = action_endpoint_default
         self._action_headers_default = action_headers_default or {}
+        self._action_client = action_client
         # workflow_id → CompiledStateGraph 캐시 (빌더 인스턴스별)
         self._cache: dict[str, Any] = {}
 
@@ -205,6 +207,10 @@ class WorkflowGraphBuilder:
         """WorkflowDefinition → StateGraph(미컴파일) 변환.
 
         각 step을 노드로 추가하고, step 타입에 따라 엣지를 연결한다.
+
+        __start_router__ 노드를 통해 resume 시 step_id를 직접 지정 가능:
+        state["current_step_id"]가 설정되어 있으면 해당 스텝으로 직행,
+        없으면 entry_step_id로 시작한다 — _lg_resume(G3) 수정 핵심.
         """
         graph = StateGraph(WorkflowGraphState)
 
@@ -212,9 +218,18 @@ class WorkflowGraphBuilder:
             node_fn = self._make_node(step, definition)
             graph.add_node(step.id, node_fn)
 
-        # START → entry step
+        # __start_router__: state["current_step_id"]를 읽어 목적 스텝으로 라우팅.
+        # start 시에는 entry_step_id, resume 시에는 seed_state["current_step_id"]로 분기.
         entry = definition.entry_step_id
-        graph.add_edge(START, entry)
+
+        async def _start_router(state: WorkflowGraphState) -> Command:
+            target = state.get("current_step_id") or entry
+            if not definition.get_step(target):
+                target = entry
+            return Command(goto=target)
+
+        graph.add_node("__start_router__", _start_router)
+        graph.add_edge(START, "__start_router__")
 
         # 각 step의 엣지 설정
         for step in definition.steps:
@@ -244,7 +259,11 @@ class WorkflowGraphBuilder:
 
         message-chain 체인은 LangGraph 엣지 연결(add_edge)로 표현하며,
         재귀가 없으므로 recursion_limit를 소진하지 않는다.
+        terminal message(next 없거나 미존재)이면 completed/concluded/last_result를 채운다
+        — _make_action_node의 종료 처리(graph_builder.py:338-345) 패턴과 동등.
         """
+        is_terminal = not step.next or not definition.get_step(step.next)
+
         async def node(state: WorkflowGraphState) -> dict:
             collected = state.get("collected") or {}
             rendered = render_template(step.prompt, collected)
@@ -256,15 +275,32 @@ class WorkflowGraphBuilder:
                 "report_hint": report_hint,
                 "current_step_id": step.id,
             }
-            # next 없거나 미존재 → END 처리는 엣지에서 수행
+            if is_terminal:
+                full_msg = "\n\n".join(parts)
+                last_result = _step_result_to_dict(StepResult(
+                    bot_message=full_msg,
+                    completed=True,
+                    concluded=True,
+                    collected=dict(collected),
+                    step_id=step.id,
+                    step_type=step.type,
+                    report=report_hint,
+                ))
+                updates["completed"] = True
+                updates["last_result"] = last_result
             return updates
 
         return node
 
     def _make_dynamic_node(self, step: WorkflowStep, definition: WorkflowDefinition):
-        """dynamic 노드: generate_dynamic 호출 후 message_parts 누적, next로 자동전이."""
+        """dynamic 노드: generate_dynamic 호출 후 message_parts 누적, next로 자동전이.
+
+        terminal dynamic(next 없거나 미존재)이면 completed/concluded/last_result를 채운다
+        — legacy engine._process_current_step(engine.py:1000-1011) 동등.
+        """
         llm = self._llm
         context_adapters = self._context_adapters
+        is_terminal = not step.next or not definition.get_step(step.next)
 
         async def node(state: WorkflowGraphState) -> dict:
             collected = state.get("collected") or {}
@@ -277,11 +313,25 @@ class WorkflowGraphBuilder:
             parts = list(state.get("message_parts") or [])
             if insight:
                 parts.append(insight)
-            return {
+            updates: dict = {
                 "message_parts": parts,
                 "report_hint": report_hint,
                 "current_step_id": step.id,
             }
+            if is_terminal:
+                full_msg = "\n\n".join(parts)
+                last_result = _step_result_to_dict(StepResult(
+                    bot_message=full_msg,
+                    completed=True,
+                    concluded=True,
+                    collected=dict(collected),
+                    step_id=step.id,
+                    step_type=step.type,
+                    report=report_hint,
+                ))
+                updates["completed"] = True
+                updates["last_result"] = last_result
+            return updates
 
         return node
 
@@ -294,6 +344,7 @@ class WorkflowGraphBuilder:
         """
         action_endpoint = self._action_endpoint_default
         action_headers = self._action_headers_default
+        action_client = self._action_client
 
         async def node(state: WorkflowGraphState) -> dict:
             collected = dict(state.get("collected") or {})
@@ -310,7 +361,7 @@ class WorkflowGraphBuilder:
 
             action_result = await execute_action_step(
                 step, adapter_session,
-                None,  # action_client: T4에서 연결 — 빌더 단독 테스트에선 None
+                action_client,
                 action_endpoint,
                 action_headers,
             )
