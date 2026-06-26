@@ -68,12 +68,23 @@ export class DashboardLogsDto {
   size: number;
 }
 
+export class OverviewLogItemDto {
+  ts: string;
+  profileId: string | null;
+  statusCode: number;
+  latencyMs: number;
+  errorCode: string | null;
+  requestPreview: string | null;
+  responsePreview: string | null;
+}
+
 export class PlatformOverviewDto {
   totalProfiles: number;
   activeProfiles: number;
   todayRequests: number;
   errorRate: number;
   avgLatencyMs: number;
+  p95LatencyMs: number;
   apiKeys: {
     total: number;
     active: number;
@@ -82,4 +93,5 @@ export class PlatformOverviewDto {
     hour: string;
     count: number;
   }[];
+  recentLogs: OverviewLogItemDto[];
 }
