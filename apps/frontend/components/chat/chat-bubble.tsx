@@ -3,6 +3,7 @@
 import { cn } from '@/lib/cn';
 import { Avatar } from '@/components/ui/avatar';
 import { MarkdownRenderer } from './markdown-renderer';
+import { TracePanel } from './trace-panel';
 import type { ChatMessage } from '@/types/chat';
 import type { FeedbackScore } from '@/types/feedback';
 
@@ -85,6 +86,9 @@ export function ChatBubble({ message, className, onFeedback }: ChatBubbleProps) 
               ))}
             </div>
           </div>
+        )}
+        {!isUser && message.traceEvents && message.traceEvents.length > 0 && (
+          <TracePanel events={message.traceEvents} />
         )}
         {canFeedback && (
           <div

@@ -5,17 +5,12 @@ import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { RequestLogSummary } from '@/lib/api/admin';
+import { formatDuration, latencyColor } from '@/lib/format';
 
 function statusVariantOf(code: number): 'success' | 'error' | 'warning' {
   if (code >= 500) return 'error';
   if (code >= 400) return 'warning';
   return 'success';
-}
-
-function latencyColor(ms: number): string {
-  if (ms < 500) return 'var(--color-success)';
-  if (ms <= 2000) return 'var(--color-warning)';
-  return 'var(--color-error)';
 }
 
 export interface RequestLogTableProps {
@@ -150,7 +145,7 @@ export function RequestLogTable({
                     className="font-mono text-[var(--font-size-xs)] font-medium"
                     style={{ color: latencyColor(row.latencyMs) }}
                   >
-                    {row.latencyMs}ms
+                    {formatDuration(row.latencyMs)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-[var(--color-neutral-500)]">

@@ -12,6 +12,8 @@ export interface ChatMessage {
   errorMessage?: string;
   sources?: Array<{ title: string; url?: string }>;
   traceData?: Record<string, unknown>;
+  /** RAG 파이프라인 트레이스 — SSE trace 이벤트를 순서대로 누적(답변별 펼쳐보기용). */
+  traceEvents?: Array<Record<string, unknown>>;
   /** api 가 생성한 응답 식별자 (SSE done 이벤트로 수신). 피드백 제출 키. */
   responseId?: string;
   /** 사용자가 남긴 피드백 (UI 반영용). 아직 제출 전이면 undefined/null */

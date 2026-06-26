@@ -24,13 +24,17 @@ class RequestLogEntry:
     # Task 014: 피드백 연결 + 품질 신호
     response_id: Optional[str] = None
     faithfulness_score: Optional[float] = None
+    # Phase 3: 요청별 관측성 — 클라이언트 IP, 사용자 식별자, 레이어별 처리시간(trace.summary()).
+    client_ip: Optional[str] = None
+    user_id: Optional[str] = None
+    latency_breakdown: Optional[dict] = None
 
     def with_(self, **changes) -> "RequestLogEntry":
         """불변 업데이트."""
         return replace(self, **changes)
 
     @staticmethod
-    def truncate_preview(text: Optional[str], max_len: int = 200) -> Optional[str]:
+    def truncate_preview(text: Optional[str], max_len: int = 4000) -> Optional[str]:
         if text is None:
             return None
         return text[:max_len]
