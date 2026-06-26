@@ -141,7 +141,7 @@ export async function fetchRequestLogs(
   return handleResponse(res);
 }
 
-export async function fetchRequestLogDetail(id: string): Promise<RequestLogDetail> {
+export async function fetchRequestLogDetail(id: string): Promise<RequestLogSummary> {
   const res = await fetch(`${BFF_URL}/request-logs/${encodeURIComponent(id)}`, {
     headers: authHeaders(),
   });

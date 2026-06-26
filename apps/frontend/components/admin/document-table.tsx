@@ -13,48 +13,14 @@ export interface DocumentTableProps {
   className?: string;
 }
 
-const statusConfig: Record<string, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
-  completed: { variant: 'success', label: 'Completed' },
-  indexed: { variant: 'success', label: 'Indexed' },
-  pending: { variant: 'warning', label: 'Pending' },
-  processing: { variant: 'warning', label: 'Processing' },
-  failed: { variant: 'error', label: 'Failed' },
-  error: { variant: 'error', label: 'Error' },
-};
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
-function formatBytes(bytes: number | null): string {
-  if (!bytes || bytes <= 0) return '-';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let v = bytes;
-  let u = 0;
-  while (v >= 1024 && u < units.length - 1) {
-    v /= 1024;
-    u += 1;
-  }
-  return `${v.toFixed(u === 0 ? 0 : 1)}${units[u]}`;
-}
-
-export function DocumentTable({
-  documents,
-  onReindex,
-  reindexingId,
-  className,
-}: DocumentTableProps) {
+export function DocumentTable({ documents, onReindex, reindexingId, className }: DocumentTableProps) {
   if (documents.length === 0) {
-    return (
-      <div className="py-12 text-center text-[var(--color-neutral-400)]">
-        문서가 없습니다
-      </div>
-    );
+    return <div className="py-12 text-center text-[var(--color-neutral-400)]">문서가 없습니다</div>;
   }
 
   return (
@@ -62,68 +28,47 @@ export function DocumentTable({
       <table className="w-full text-[var(--font-size-sm)]">
         <thead>
           <tr className="border-b border-[var(--color-neutral-200)]">
-            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              제목
-            </th>
-            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              소스
-            </th>
-            <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">
-              크기
-            </th>
-            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              상태
-            </th>
-            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">
-              생성 일자
-            </th>
-            <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">
-              작업
-            </th>
+            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">제목</th>
+            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">파일명</th>
+            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">도메인</th>
+            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">보안등급</th>
+            <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">생성 일자</th>
+            <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">작업</th>
           </tr>
         </thead>
         <tbody>
-          {documents.map((doc) => {
-            const status = statusConfig[doc.status] ?? { variant: 'neutral' as const, label: doc.status };
-            return (
-              <tr
-                key={doc.id}
-                className="border-b border-[var(--color-neutral-100)] transition-colors hover:bg-[var(--color-neutral-50)]"
-              >
-                <td className="px-4 py-3">
-                  <Link
-                    href={`/admin/knowledge/${doc.id}`}
-                    className="font-medium text-[var(--color-primary-600)] hover:underline focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)] rounded-[var(--radius-sm)]"
-                  >
-                    {doc.title}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 text-[var(--color-neutral-700)]">
-                  {doc.source ?? '-'}
-                </td>
-                <td className="px-4 py-3 text-right text-[var(--color-neutral-700)]">
-                  {formatBytes(doc.fileSize)}
-                </td>
-                <td className="px-4 py-3">
-                  <Badge variant={status.variant}>{status.label}</Badge>
-                </td>
-                <td className="px-4 py-3 text-[var(--color-neutral-500)]">
-                  {formatDate(doc.createdAt)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onReindex(doc.id)}
-                    loading={reindexingId === doc.id}
-                    aria-label={`${doc.title} 재인덱싱`}
-                  >
-                    Reindex
-                  </Button>
-                </td>
-              </tr>
-            );
-          })}
+          {documents.map((doc) => (
+            <tr
+              key={doc.id}
+              className="border-b border-[var(--color-neutral-100)] transition-colors hover:bg-[var(--color-neutral-50)]"
+            >
+              <td className="px-4 py-3">
+                <Link
+                  href={`/admin/knowledge/${doc.id}`}
+                  className="rounded-[var(--radius-sm)] font-medium text-[var(--color-primary-600)] hover:underline focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+                >
+                  {doc.title}
+                </Link>
+              </td>
+              <td className="px-4 py-3 text-[var(--color-neutral-700)]">{doc.fileName ?? '-'}</td>
+              <td className="px-4 py-3">
+                {doc.domainCode ? <Badge variant="secondary">{doc.domainCode}</Badge> : '-'}
+              </td>
+              <td className="px-4 py-3 text-[var(--color-neutral-700)]">{doc.securityLevel ?? '-'}</td>
+              <td className="px-4 py-3 text-[var(--color-neutral-500)]">{formatDate(doc.createdAt)}</td>
+              <td className="px-4 py-3 text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onReindex(doc.id)}
+                  loading={reindexingId === doc.id}
+                  aria-label={`${doc.title} 재인덱싱`}
+                >
+                  Reindex
+                </Button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

@@ -2,16 +2,16 @@ import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 /**
- * 문서 목록 조회 DTO
+ * 문서 목록 조회 DTO. documents 실제 컬럼(domain_code, security_level) 기준 필터.
  */
 export class QueryDocumentsDto {
   @IsOptional()
   @IsString()
-  status?: string;
+  domainCode?: string;
 
   @IsOptional()
   @IsString()
-  source?: string;
+  securityLevel?: string;
 
   @IsOptional()
   @IsInt()
@@ -29,9 +29,6 @@ export class QueryDocumentsDto {
   size?: number = 20;
 }
 
-/**
- * 문서 목록 응답 DTO
- */
 export class DocumentsResponseDto {
   items: DocumentItemDto[];
   total: number;
@@ -39,46 +36,33 @@ export class DocumentsResponseDto {
   size: number;
 }
 
-/**
- * 문서 항목 DTO
- */
+/** 문서 항목 — documents 실제 컬럼. */
 export class DocumentItemDto {
   id: string;
   title: string;
-  source: string | null;
-  status: string;
-  fileSize: number | null;
-  mimeType: string | null;
+  fileName: string | null;
+  domainCode: string | null;
+  securityLevel: string | null;
+  sourceUrl: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
-/**
- * 문서 상세 응답 DTO (청크 수 포함)
- */
+/** 문서 상세 — content는 document_chunks 연결, chunkCount 포함. */
 export class DocumentDetailDto extends DocumentItemDto {
   content: string | null;
-  filePath: string | null;
   chunkCount: number;
+  metadata: Record<string, unknown> | null;
 }
 
-/**
- * Knowledge Pipeline 통계 DTO
- */
+/** Knowledge 통계 — documents엔 status 컬럼이 없어 도메인/보안등급 분포로. */
 export class KnowledgeStatsDto {
   totalDocuments: number;
-  pendingDocuments: number;
-  completedDocuments: number;
-  failedDocuments: number;
   totalChunks: number;
   avgChunksPerDocument: number;
-  documentsByStatus: { status: string; count: number }[];
-  documentsBySource: { source: string; count: number }[];
+  documentsByDomain: { domain: string; count: number }[];
+  documentsBySecurityLevel: { level: string; count: number }[];
 }
 
-/**
- * 재인덱싱 요청 응답 DTO
- */
 export class ReindexResponseDto {
   jobId: string;
   documentId: string;

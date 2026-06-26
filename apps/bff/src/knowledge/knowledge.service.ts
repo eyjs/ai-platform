@@ -32,16 +32,16 @@ export class KnowledgeService {
    * 문서 목록 조회
    */
   async findDocuments(query: QueryDocumentsDto): Promise<DocumentsResponseDto> {
-    const { status, source, page = 1, size = 20 } = query;
+    const { domainCode, securityLevel, page = 1, size = 20 } = query;
 
     const queryBuilder = this.documentRepo.createQueryBuilder('doc');
 
-    if (status) {
-      queryBuilder.andWhere('doc.status = :status', { status });
+    if (domainCode) {
+      queryBuilder.andWhere('doc.domainCode = :domainCode', { domainCode });
     }
 
-    if (source) {
-      queryBuilder.andWhere('doc.source = :source', { source });
+    if (securityLevel) {
+      queryBuilder.andWhere('doc.securityLevel = :securityLevel', { securityLevel });
     }
 
     queryBuilder
@@ -54,12 +54,11 @@ export class KnowledgeService {
     const items: DocumentItemDto[] = documents.map((doc) => ({
       id: doc.id,
       title: doc.title,
-      source: doc.source,
-      status: doc.status,
-      fileSize: doc.fileSize,
-      mimeType: doc.mimeType,
+      fileName: doc.fileName,
+      domainCode: doc.domainCode,
+      securityLevel: doc.securityLevel,
+      sourceUrl: doc.sourceUrl,
       createdAt: doc.createdAt.toISOString(),
-      updatedAt: doc.updatedAt.toISOString(),
     }));
 
     return {
@@ -80,21 +79,27 @@ export class KnowledgeService {
       return null;
     }
 
-    // 청크 수 조회
+    // 청크 수 + content(청크를 순서대로 이어붙임, 상한 50). 실제 컬럼만 사용하는 raw 쿼리.
     const chunkCount = await this.chunkRepo.count({ where: { documentId: id } });
+    const chunkRows: Array<{ content: string }> = await this.documentRepo.manager
+      .query(
+        `SELECT content FROM document_chunks WHERE document_id = $1 ORDER BY chunk_index ASC LIMIT 50`,
+        [id],
+      )
+      .catch(() => []);
+    const content = chunkRows.map((r) => r.content).join('\n\n') || null;
 
     return {
       id: document.id,
       title: document.title,
-      content: document.content,
-      source: document.source,
-      status: document.status,
-      filePath: document.filePath,
-      fileSize: document.fileSize,
-      mimeType: document.mimeType,
+      fileName: document.fileName,
+      domainCode: document.domainCode,
+      securityLevel: document.securityLevel,
+      sourceUrl: document.sourceUrl,
       createdAt: document.createdAt.toISOString(),
-      updatedAt: document.updatedAt.toISOString(),
+      content,
       chunkCount,
+      metadata: document.metadata,
     };
   }
 
@@ -104,55 +109,39 @@ export class KnowledgeService {
   async getStats(): Promise<KnowledgeStatsDto> {
     const manager = this.documentRepo.manager;
 
-    // 기본 통계
-    const statsResult = await manager.query(
-      `SELECT
-         COUNT(*)::int AS total_documents,
-         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END)::int AS pending_documents,
-         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)::int AS completed_documents,
-         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)::int AS failed_documents
-       FROM documents`,
-    ).catch(() => [{ total_documents: 0, pending_documents: 0, completed_documents: 0, failed_documents: 0 }]);
+    // documents엔 status 컬럼이 없다 → 도메인/보안등급 분포로 집계.
+    const docResult = await manager
+      .query(`SELECT COUNT(*)::int AS total_documents FROM documents`)
+      .catch(() => [{ total_documents: 0 }]);
+    const chunkResult = await manager
+      .query(`SELECT COUNT(*)::int AS total_chunks FROM document_chunks`)
+      .catch(() => [{ total_chunks: 0 }]);
+    const domainResult = await manager
+      .query(
+        `SELECT COALESCE(domain_code, 'unknown') AS domain, COUNT(*)::int AS count
+         FROM documents GROUP BY domain_code ORDER BY count DESC LIMIT 10`,
+      )
+      .catch(() => []);
+    const securityResult = await manager
+      .query(
+        `SELECT COALESCE(security_level, 'unknown') AS level, COUNT(*)::int AS count
+         FROM documents GROUP BY security_level ORDER BY count DESC`,
+      )
+      .catch(() => []);
 
-    // 총 청크 수
-    const chunkResult = await manager.query(
-      `SELECT COUNT(*)::int AS total_chunks FROM document_chunks`,
-    ).catch(() => [{ total_chunks: 0 }]);
-
-    // 상태별 문서 수
-    const statusResult = await manager.query(
-      `SELECT status, COUNT(*)::int AS count
-       FROM documents
-       GROUP BY status
-       ORDER BY count DESC`,
-    ).catch(() => []);
-
-    // 소스별 문서 수
-    const sourceResult = await manager.query(
-      `SELECT COALESCE(source, 'unknown') AS source, COUNT(*)::int AS count
-       FROM documents
-       GROUP BY source
-       ORDER BY count DESC
-       LIMIT 10`,
-    ).catch(() => []);
-
-    const stats = statsResult[0];
-    const totalDocuments = Number(stats.total_documents);
+    const totalDocuments = Number(docResult[0].total_documents);
     const totalChunks = Number(chunkResult[0].total_chunks);
 
     return {
       totalDocuments,
-      pendingDocuments: Number(stats.pending_documents),
-      completedDocuments: Number(stats.completed_documents),
-      failedDocuments: Number(stats.failed_documents),
       totalChunks,
       avgChunksPerDocument: totalDocuments > 0 ? Math.round((totalChunks / totalDocuments) * 10) / 10 : 0,
-      documentsByStatus: statusResult.map((row: Record<string, unknown>) => ({
-        status: String(row.status),
+      documentsByDomain: domainResult.map((row: Record<string, unknown>) => ({
+        domain: String(row.domain),
         count: Number(row.count),
       })),
-      documentsBySource: sourceResult.map((row: Record<string, unknown>) => ({
-        source: String(row.source),
+      documentsBySecurityLevel: securityResult.map((row: Record<string, unknown>) => ({
+        level: String(row.level),
         count: Number(row.count),
       })),
     };

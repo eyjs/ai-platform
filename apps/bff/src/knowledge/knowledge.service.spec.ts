@@ -12,14 +12,12 @@ function makeDocument(overrides: Partial<Document> = {}): Document {
   return {
     id: 'doc-uuid-1',
     title: 'Test Document',
-    content: 'Some content',
-    source: 'upload',
-    status: 'completed',
-    filePath: '/tmp/test.pdf',
-    fileSize: 1024,
-    mimeType: 'application/pdf',
+    fileName: 'test.pdf',
+    domainCode: '사주명리',
+    securityLevel: 'PUBLIC',
+    sourceUrl: null,
+    metadata: null,
     createdAt: makeDate(),
-    updatedAt: makeDate(),
     ...overrides,
   } as Document;
 }
@@ -101,26 +99,26 @@ describe('KnowledgeService', () => {
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe('doc-uuid-1');
       expect(result.items[0].title).toBe('Test Document');
-      expect(result.items[0].status).toBe('completed');
+      expect(result.items[0].domainCode).toBe('사주명리');
     });
 
-    it('applies status filter when provided', async () => {
-      const doc = makeDocument({ status: 'pending' });
+    it('applies domainCode filter when provided', async () => {
+      const doc = makeDocument({ domainCode: '사주명리' });
       const qb = makeQueryBuilder([doc], 1);
       documentRepo.createQueryBuilder.mockReturnValue(qb as unknown as ReturnType<typeof documentRepo.createQueryBuilder>);
 
-      await service.findDocuments({ status: 'pending' });
+      await service.findDocuments({ domainCode: '사주명리' });
 
-      expect(qb.andWhere).toHaveBeenCalledWith('doc.status = :status', { status: 'pending' });
+      expect(qb.andWhere).toHaveBeenCalledWith('doc.domainCode = :domainCode', { domainCode: '사주명리' });
     });
 
-    it('applies source filter when provided', async () => {
+    it('applies securityLevel filter when provided', async () => {
       const qb = makeQueryBuilder([], 0);
       documentRepo.createQueryBuilder.mockReturnValue(qb as unknown as ReturnType<typeof documentRepo.createQueryBuilder>);
 
-      await service.findDocuments({ source: 'upload' });
+      await service.findDocuments({ securityLevel: 'PUBLIC' });
 
-      expect(qb.andWhere).toHaveBeenCalledWith('doc.source = :source', { source: 'upload' });
+      expect(qb.andWhere).toHaveBeenCalledWith('doc.securityLevel = :securityLevel', { securityLevel: 'PUBLIC' });
     });
 
     it('does not apply filters when not provided', async () => {
@@ -167,6 +165,7 @@ describe('KnowledgeService', () => {
       const doc = makeDocument();
       documentRepo.findOne.mockResolvedValue(doc);
       chunkRepo.count.mockResolvedValue(7);
+      (documentRepo.manager.query as jest.Mock).mockResolvedValue([]);
 
       const result = await service.findDocumentById('doc-uuid-1');
 
@@ -180,21 +179,26 @@ describe('KnowledgeService', () => {
       const doc = makeDocument();
       documentRepo.findOne.mockResolvedValue(doc);
       chunkRepo.count.mockResolvedValue(0);
+      (documentRepo.manager.query as jest.Mock).mockResolvedValue([]);
 
       await service.findDocumentById('doc-uuid-1');
 
       expect(chunkRepo.count).toHaveBeenCalledWith({ where: { documentId: 'doc-uuid-1' } });
     });
 
-    it('includes all document fields in detail', async () => {
-      const doc = makeDocument({ content: 'detailed content', filePath: '/file.pdf' });
+    it('assembles content from chunks', async () => {
+      const doc = makeDocument();
       documentRepo.findOne.mockResolvedValue(doc);
-      chunkRepo.count.mockResolvedValue(3);
+      chunkRepo.count.mockResolvedValue(2);
+      (documentRepo.manager.query as jest.Mock).mockResolvedValue([
+        { content: 'chunk1' },
+        { content: 'chunk2' },
+      ]);
 
       const result = await service.findDocumentById('doc-uuid-1');
 
-      expect(result!.content).toBe('detailed content');
-      expect(result!.filePath).toBe('/file.pdf');
+      expect(result!.content).toBe('chunk1\n\nchunk2');
+      expect(result!.domainCode).toBe('사주명리');
     });
   });
 
@@ -202,37 +206,27 @@ describe('KnowledgeService', () => {
     it('returns stats with correct structure', async () => {
       const managerQuery = documentRepo.manager.query as jest.Mock;
       managerQuery
-        .mockResolvedValueOnce([{
-          total_documents: 10,
-          pending_documents: 2,
-          completed_documents: 7,
-          failed_documents: 1,
-        }])
+        .mockResolvedValueOnce([{ total_documents: 10 }])
         .mockResolvedValueOnce([{ total_chunks: 50 }])
         .mockResolvedValueOnce([
-          { status: 'completed', count: 7 },
-          { status: 'pending', count: 2 },
-          { status: 'failed', count: 1 },
+          { domain: '사주명리', count: 6 },
+          { domain: '보험', count: 4 },
         ])
-        .mockResolvedValueOnce([
-          { source: 'upload', count: 6 },
-          { source: 'api', count: 4 },
-        ]);
+        .mockResolvedValueOnce([{ level: 'PUBLIC', count: 10 }]);
 
       const result = await service.getStats();
 
       expect(result.totalDocuments).toBe(10);
-      expect(result.pendingDocuments).toBe(2);
-      expect(result.completedDocuments).toBe(7);
-      expect(result.failedDocuments).toBe(1);
       expect(result.totalChunks).toBe(50);
       expect(result.avgChunksPerDocument).toBe(5);
+      expect(result.documentsByDomain).toHaveLength(2);
+      expect(result.documentsBySecurityLevel[0]).toEqual({ level: 'PUBLIC', count: 10 });
     });
 
     it('computes avgChunksPerDocument as 0 when totalDocuments is 0', async () => {
       const managerQuery = documentRepo.manager.query as jest.Mock;
       managerQuery
-        .mockResolvedValueOnce([{ total_documents: 0, pending_documents: 0, completed_documents: 0, failed_documents: 0 }])
+        .mockResolvedValueOnce([{ total_documents: 0 }])
         .mockResolvedValueOnce([{ total_chunks: 0 }])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
@@ -251,18 +245,18 @@ describe('KnowledgeService', () => {
       expect(result.totalDocuments).toBe(0);
     });
 
-    it('maps documentsByStatus correctly', async () => {
+    it('maps documentsByDomain correctly', async () => {
       const managerQuery = documentRepo.manager.query as jest.Mock;
       managerQuery
-        .mockResolvedValueOnce([{ total_documents: 3, pending_documents: 1, completed_documents: 2, failed_documents: 0 }])
+        .mockResolvedValueOnce([{ total_documents: 3 }])
         .mockResolvedValueOnce([{ total_chunks: 10 }])
-        .mockResolvedValueOnce([{ status: 'completed', count: 2 }, { status: 'pending', count: 1 }])
-        .mockResolvedValueOnce([{ source: 'upload', count: 3 }]);
+        .mockResolvedValueOnce([{ domain: '사주명리', count: 2 }, { domain: '보험', count: 1 }])
+        .mockResolvedValueOnce([{ level: 'PUBLIC', count: 3 }]);
 
       const result = await service.getStats();
 
-      expect(result.documentsByStatus).toHaveLength(2);
-      expect(result.documentsByStatus[0]).toEqual({ status: 'completed', count: 2 });
+      expect(result.documentsByDomain).toHaveLength(2);
+      expect(result.documentsByDomain[0]).toEqual({ domain: '사주명리', count: 2 });
     });
   });
 

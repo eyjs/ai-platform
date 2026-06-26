@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, ParseUUIDPipe, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Param, NotFoundException, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RequestLogsService } from './request-logs.service';
 import {
@@ -40,7 +40,7 @@ export class RequestLogsController {
    * GET /bff/request-logs/:id
    */
   @Get(':id')
-  async getLog(@Param('id', ParseUUIDPipe) id: string): Promise<RequestLogItemDto> {
+  async getLog(@Param('id') id: string): Promise<RequestLogItemDto> {
     const log = await this.requestLogsService.findLogById(id);
 
     if (!log) {

@@ -1,40 +1,36 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
 
 /**
  * documents 테이블 매핑.
- * apps/api Knowledge Pipeline 소유 테이블.
+ * apps/api Knowledge Pipeline 소유 테이블. **Read-only.**
  *
- * **Read-only.** BFF는 쿼리만 수행.
+ * 실제 컬럼: id, external_id, title, file_name, file_hash, domain_code,
+ *           security_level, source_url, metadata, created_at, tenant_id.
+ * (content는 document_chunks에, status/file_size/mime_type 컬럼은 없음 — 선언 금지.)
  */
 @Entity('documents')
 export class Document {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: false })
+  @Column({ type: 'varchar', nullable: false })
   title: string;
 
-  @Column({ type: 'text', nullable: true })
-  content: string | null;
+  @Column({ name: 'file_name', type: 'varchar', nullable: true })
+  fileName: string | null;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  source: string | null;
+  @Column({ name: 'domain_code', type: 'varchar', nullable: true })
+  domainCode: string | null;
 
-  @Column({ type: 'varchar', length: 50, default: 'pending' })
-  status: string;
+  @Column({ name: 'security_level', type: 'varchar', nullable: true })
+  securityLevel: string | null;
 
-  @Column({ name: 'file_path', type: 'varchar', length: 512, nullable: true })
-  filePath: string | null;
+  @Column({ name: 'source_url', type: 'varchar', nullable: true })
+  sourceUrl: string | null;
 
-  @Column({ name: 'file_size', type: 'int', nullable: true })
-  fileSize: number | null;
-
-  @Column({ name: 'mime_type', type: 'varchar', length: 100, nullable: true })
-  mimeType: string | null;
+  @Column({ type: 'jsonb', nullable: true })
+  metadata: Record<string, unknown> | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
-
-  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
-  updatedAt: Date;
 }
