@@ -111,7 +111,6 @@ export class ProfilesService {
       id: parsed.id as string,
       name: parsed.name as string,
       description: (parsed.description as string) || null,
-      mode: parsed.mode as string,
       config: parsed,
       isActive: true,
     });
@@ -162,7 +161,6 @@ export class ProfilesService {
 
     profile.name = (parsed.name as string) || profile.name;
     profile.description = (parsed.description as string) || profile.description;
-    profile.mode = (parsed.mode as string) || profile.mode;
     profile.config = parsed;
 
     await this.profileRepo.save(profile);
@@ -260,7 +258,6 @@ export class ProfilesService {
 
     profile.name = (parsed.name as string) || profile.name;
     profile.description = (parsed.description as string) || profile.description;
-    profile.mode = (parsed.mode as string) || profile.mode;
     profile.config = parsed;
 
     await this.profileRepo.save(profile);
@@ -297,7 +294,7 @@ export class ProfilesService {
       id: p.id,
       name: p.name,
       description: p.description,
-      mode: p.mode,
+      mode: (config.mode as string) || '',
       domainScopes: (config.domain_scopes as string[]) || [],
       securityLevelMax: (config.security_level_max as string) || 'PUBLIC',
       isActive: p.isActive,
