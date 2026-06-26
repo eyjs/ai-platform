@@ -19,7 +19,7 @@ export function ChatMessageList({
   onFeedback,
 }: ChatMessageListProps) {
   const { scrollRef, bottomRef, showScrollButton, scrollToBottom, handleScroll } =
-    useScrollAnchor();
+    useScrollAnchor(messages);
 
   if (messages.length === 0) {
     return <ChatEmptyState profileName={profileName} />;
