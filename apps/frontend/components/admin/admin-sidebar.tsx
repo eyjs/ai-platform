@@ -18,6 +18,15 @@ const menuItems = [
     ),
   },
   {
+    label: '채팅 (RAG 검증)',
+    href: '/admin/chat',
+    icon: (
+      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      </svg>
+    ),
+  },
+  {
     label: 'Profiles',
     href: '/admin/profiles',
     icon: (
@@ -71,15 +80,12 @@ const menuItems = [
       </svg>
     ),
   },
-];
-
-const bottomItems = [
   {
-    label: '채팅',
-    href: '/',
+    label: '시스템 아키텍처',
+    href: '/admin/architecture',
     icon: (
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V9m4 8V5m4 12v-6M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -138,22 +144,6 @@ export function AdminSidebar() {
               </Link>
             );
           })}
-        </div>
-
-        <div className="my-3 border-t border-[var(--color-neutral-200)]" />
-
-        <div className="flex flex-col gap-1">
-          {bottomItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-neutral-600)] hover:bg-[var(--color-neutral-200)]"
-              title={collapsed ? item.label : undefined}
-            >
-              {item.icon}
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          ))}
         </div>
       </nav>
 

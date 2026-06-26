@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-context';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,6 +13,9 @@ export default function AdminLayout({
 }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  // 채팅은 풀높이(입력 하단 고정)라 패딩 컨테이너 없이 풀블리드로 렌더.
+  const fullBleed = pathname === '/admin/chat';
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -21,8 +24,9 @@ export default function AdminLayout({
   }, [isLoading, isAuthenticated, router]);
 
   useEffect(() => {
+    // 비-ADMIN은 로그인으로(루트는 /admin으로 리다이렉트되므로 루프 방지).
     if (!isLoading && user && user.role !== 'ADMIN') {
-      router.push('/');
+      router.push('/login');
     }
   }, [isLoading, user, router]);
 
@@ -41,10 +45,16 @@ export default function AdminLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <AdminSidebar />
-      <main className="flex-1 overflow-y-auto bg-[var(--surface-page)]">
-        <div className="mx-auto max-w-[var(--admin-content-max-width)] p-6">
-          {children}
-        </div>
+      <main className="flex-1 overflow-hidden bg-[var(--surface-page)]">
+        {fullBleed ? (
+          children
+        ) : (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-[var(--admin-content-max-width)] p-6">
+              {children}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
