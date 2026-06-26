@@ -11,8 +11,8 @@ export class AgentProfile {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ type: 'text' })
-  mode: string;
+  // NOTE: agent_profiles 테이블엔 mode 컬럼이 없다(api/alembic 소유). mode는 config(JSONB)에 저장.
+  // 가짜 컬럼을 두면 TypeORM이 SELECT "mode" → Postgres가 mode() 집계로 해석해 500.
 
   @Column({ type: 'jsonb', nullable: true })
   config: Record<string, unknown> | null;
