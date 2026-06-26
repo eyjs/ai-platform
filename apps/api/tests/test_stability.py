@@ -14,48 +14,27 @@ from src.observability.metrics import MetricsCollector
 
 
 class TestFaithfulnessLoopPrevention:
-    """Faithfulness guard가 무한 루프를 방지하는지 검증."""
+    """Faithfulness guard는 자기-비활성화하지 않는다.
 
-    async def test_max_checks_auto_passes(self):
+    과거: GuardrailContext에 session_id가 없어 전역 'default' 카운터가 누적 →
+    3회 후 영구 비활성화되는 버그(이전 테스트는 MagicMock에 session_id를 직접 주입해
+    이 버그를 가렸다). 무한 재생성 방지는 nodes.py의 _regen_count(요청당 1회)가 담당한다.
+    """
+
+    async def test_faithfulness_does_not_self_disable(self):
         from src.safety.faithfulness import FaithfulnessGuard
         from src.safety.base import GuardrailContext
 
         guard = FaithfulnessGuard(router_llm=None)
-        ctx = MagicMock(spec=GuardrailContext)
-        ctx.session_id = "test-session"
-        ctx.source_documents = [{"content": "some source text 12345"}]
-        ctx.response_policy = "balanced"
-
-        for i in range(guard.MAX_FAITHFULNESS_CHECKS):
-            result = await guard.check("answer text", ctx)
-
-        assert guard._check_count["test-session"] == guard.MAX_FAITHFULNESS_CHECKS
-
-        result = await guard.check("answer text", ctx)
-        assert result.action == "pass"
-        assert guard._check_count["test-session"] == guard.MAX_FAITHFULNESS_CHECKS
-
-    async def test_different_sessions_tracked_independently(self):
-        from src.safety.faithfulness import FaithfulnessGuard
-        from src.safety.base import GuardrailContext
-
-        guard = FaithfulnessGuard(router_llm=None)
-
-        ctx_a = MagicMock(spec=GuardrailContext)
-        ctx_a.session_id = "session-a"
-        ctx_a.source_documents = []
-        ctx_a.response_policy = "balanced"
-
-        ctx_b = MagicMock(spec=GuardrailContext)
-        ctx_b.session_id = "session-b"
-        ctx_b.source_documents = []
-        ctx_b.response_policy = "balanced"
-
-        await guard.check("text", ctx_a)
-        await guard.check("text", ctx_b)
-
-        assert guard._check_count.get("session-a", 0) == 1
-        assert guard._check_count.get("session-b", 0) == 1
+        # 실제 GuardrailContext 사용(MagicMock 금지) — 소스에 없는 숫자(500만원)로 매번 warn 되어야 함
+        ctx = GuardrailContext(
+            question="q",
+            source_documents=[{"content": "상해 8급에 해당합니다.", "file_name": "a.pdf"}],
+            response_policy="balanced",
+        )
+        for i in range(6):
+            result = await guard.check("8급 상해는 500만원입니다.", ctx)
+            assert result.action == "warn", f"{i + 1}회째 검증이 비활성화됨(action={result.action})"
 
 
 class TestMetricsCollectorStability:
