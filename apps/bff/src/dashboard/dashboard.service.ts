@@ -305,11 +305,12 @@ export class DashboardService {
       `SELECT
          COUNT(*)::int AS today_requests,
          SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)::int AS error_count,
-         COALESCE(AVG(latency_ms), 0)::int AS avg_latency_ms
+         COALESCE(AVG(latency_ms), 0)::int AS avg_latency_ms,
+         COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms), 0)::int AS p95_latency_ms
        FROM api_request_logs
        WHERE ts >= $1`,
       [todayStart],
-    ).catch(() => [{ today_requests: 0, error_count: 0, avg_latency_ms: 0 }]);
+    ).catch(() => [{ today_requests: 0, error_count: 0, avg_latency_ms: 0, p95_latency_ms: 0 }]);
 
     // API Key 통계
     const apiKeyResult = await manager.query(
@@ -332,6 +333,15 @@ export class DashboardService {
       [last24h],
     ).catch(() => []);
 
+    // 최근 요청 로그(전역, api_request_logs 기준 — getLogs()의 conversation 기반과 분리)
+    const recentRows = await manager.query(
+      `SELECT ts, profile_id, status_code, latency_ms, error_code,
+              request_preview, response_preview
+       FROM api_request_logs
+       ORDER BY ts DESC
+       LIMIT 20`,
+    ).catch(() => []);
+
     const profiles = profileResult[0];
     const requests = requestResult[0];
     const apiKeys = apiKeyResult[0];
@@ -345,6 +355,7 @@ export class DashboardService {
       todayRequests,
       errorRate: todayRequests > 0 ? errorCount / todayRequests : 0,
       avgLatencyMs: Number(requests.avg_latency_ms),
+      p95LatencyMs: Number(requests.p95_latency_ms),
       apiKeys: {
         total: Number(apiKeys.total_api_keys),
         active: Number(apiKeys.active_api_keys),
@@ -352,6 +363,15 @@ export class DashboardService {
       requests24h: hourlyResult.map((row: Record<string, unknown>) => ({
         hour: new Date(row.hour as string).toISOString(),
         count: Number(row.count),
+      })),
+      recentLogs: recentRows.map((r: Record<string, unknown>) => ({
+        ts: new Date(r.ts as string).toISOString(),
+        profileId: r.profile_id ? String(r.profile_id) : null,
+        statusCode: Number(r.status_code),
+        latencyMs: Number(r.latency_ms),
+        errorCode: r.error_code ? String(r.error_code) : null,
+        requestPreview: r.request_preview ? String(r.request_preview) : null,
+        responsePreview: r.response_preview ? String(r.response_preview) : null,
       })),
     };
   }

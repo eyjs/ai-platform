@@ -18,6 +18,11 @@ import {
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
+  @Get('overview')
+  getOverview() {
+    return this.dashboardService.getPlatformOverview();
+  }
+
   @Get('summary')
   getSummary() {
     return this.dashboardService.getSummary();

@@ -169,3 +169,21 @@ async def test_no_llm_skips_deep_eval():
     docs = [_chunk("8급 상해는 200만원입니다.")]
     result = await guard.check("8급은 200만원.", _ctx(docs, policy="strict"))
     assert result.action == "pass"
+
+
+# --- 회귀: 전역 카운터 자기-비활성화 버그 ---
+
+
+@pytest.mark.asyncio
+async def test_not_self_disabled_after_repeated_checks():
+    """버그 회귀 방지: 동일 guard 인스턴스로 여러 번 호출해도 매번 검증한다.
+
+    과거엔 GuardrailContext에 session_id가 없어 전역 'default' 카운터가 누적 →
+    3회 초과 시 score=None(검증 비활성)이었다. 이제 매 요청 정상 동작해야 한다.
+    """
+    guard = FaithfulnessGuard()
+    docs = [_chunk("상해 8급에 해당합니다.")]
+    # 소스에 없는 숫자(500만원) → 매번 warn 되어야 함
+    for i in range(6):
+        result = await guard.check("8급 상해는 500만원입니다.", _ctx(docs))
+        assert result.action == "warn", f"{i + 1}회째 검증이 비활성화됨(action={result.action})"
