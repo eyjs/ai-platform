@@ -1,6 +1,6 @@
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -52,23 +52,23 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function fetchSummary(): Promise<DashboardSummary> {
-  const res = await fetch(`${BFF_URL}/bff/dashboard/summary`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/dashboard/summary`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function fetchUsage(period: string = 'today'): Promise<UsageData> {
-  const res = await fetch(`${BFF_URL}/bff/dashboard/usage?period=${period}`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/dashboard/usage?period=${period}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function fetchLatency(period: string = 'today'): Promise<LatencyData> {
-  const res = await fetch(`${BFF_URL}/bff/dashboard/latency?period=${period}`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/dashboard/latency?period=${period}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function fetchLogs(page = 1, size = 10, sort = 'timestamp:desc'): Promise<LogsData> {
   const res = await fetch(
-    `${BFF_URL}/bff/dashboard/logs?page=${page}&size=${size}&sort=${sort}`,
+    `${BFF_URL}/dashboard/logs?page=${page}&size=${size}&sort=${sort}`,
     { headers: authHeaders() },
   );
   return handleResponse(res);

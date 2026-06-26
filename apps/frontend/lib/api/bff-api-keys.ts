@@ -7,7 +7,7 @@ import type {
 } from '@/types/api-key';
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -26,19 +26,19 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function listApiKeys(): Promise<ApiKey[]> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/api-keys`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function getApiKey(id: string): Promise<ApiKey> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys/${id}`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/api-keys/${id}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function createApiKey(
   dto: ApiKeyCreateRequest,
 ): Promise<ApiKeyCreateResponse> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys`, {
+  const res = await fetch(`${BFF_URL}/api-keys`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(dto),
@@ -50,7 +50,7 @@ export async function updateApiKey(
   id: string,
   dto: ApiKeyUpdateRequest,
 ): Promise<ApiKey> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys/${id}`, {
+  const res = await fetch(`${BFF_URL}/api-keys/${id}`, {
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify(dto),
@@ -59,7 +59,7 @@ export async function updateApiKey(
 }
 
 export async function revokeApiKey(id: string): Promise<ApiKey> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys/${id}/revoke`, {
+  const res = await fetch(`${BFF_URL}/api-keys/${id}/revoke`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -67,7 +67,7 @@ export async function revokeApiKey(id: string): Promise<ApiKey> {
 }
 
 export async function rotateApiKey(id: string): Promise<ApiKeyCreateResponse> {
-  const res = await fetch(`${BFF_URL}/bff/api-keys/${id}/rotate`, {
+  const res = await fetch(`${BFF_URL}/api-keys/${id}/rotate`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -76,7 +76,7 @@ export async function rotateApiKey(id: string): Promise<ApiKeyCreateResponse> {
 
 export async function getAuditLog(id: string, limit = 50): Promise<ApiKeyAuditEntry[]> {
   const res = await fetch(
-    `${BFF_URL}/bff/api-keys/${id}/audit?limit=${limit}`,
+    `${BFF_URL}/api-keys/${id}/audit?limit=${limit}`,
     { headers: authHeaders() },
   );
   return handleResponse(res);

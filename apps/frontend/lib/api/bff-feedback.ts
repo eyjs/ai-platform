@@ -6,7 +6,7 @@ import type {
   SubmitFeedbackResponse,
 } from '@/types/feedback';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -33,7 +33,7 @@ async function handleResponse<T>(res: Response, label: string): Promise<T> {
 export async function submitFeedback(
   body: SubmitFeedbackBody,
 ): Promise<SubmitFeedbackResponse> {
-  const res = await fetch(`${BFF_URL}/bff/feedback`, {
+  const res = await fetch(`${BFF_URL}/feedback`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(body),
@@ -55,7 +55,7 @@ export async function fetchAdminFeedback(
   if (query.keyword) params.set('keyword', query.keyword);
 
   const qs = params.toString();
-  const url = `${BFF_URL}/bff/admin/feedback${qs ? `?${qs}` : ''}`;
+  const url = `${BFF_URL}/admin/feedback${qs ? `?${qs}` : ''}`;
   const res = await fetch(url, { headers: authHeaders() });
   return handleResponse<AdminFeedbackPage>(res, 'admin feedback list');
 }

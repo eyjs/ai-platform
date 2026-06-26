@@ -1,6 +1,6 @@
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -108,7 +108,7 @@ export interface RequestLogStats {
 }
 
 export async function fetchPlatformOverview(): Promise<PlatformOverview> {
-  const res = await fetch(`${BFF_URL}/bff/dashboard/overview`, {
+  const res = await fetch(`${BFF_URL}/dashboard/overview`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
@@ -125,21 +125,21 @@ export async function fetchRequestLogs(
   params.set('page', String(filters.page ?? 1));
   params.set('size', String(filters.size ?? 20));
 
-  const res = await fetch(`${BFF_URL}/bff/request-logs?${params}`, {
+  const res = await fetch(`${BFF_URL}/request-logs?${params}`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function fetchRequestLogDetail(id: string): Promise<RequestLogDetail> {
-  const res = await fetch(`${BFF_URL}/bff/request-logs/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${BFF_URL}/request-logs/${encodeURIComponent(id)}`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function fetchRequestLogStats(): Promise<RequestLogStats> {
-  const res = await fetch(`${BFF_URL}/bff/request-logs/stats`, {
+  const res = await fetch(`${BFF_URL}/request-logs/stats`, {
     headers: authHeaders(),
   });
   return handleResponse(res);

@@ -19,7 +19,7 @@ interface ProfileStatsPanelProps {
   profileId: string;
 }
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 export function ProfileStatsPanel({ profileId }: ProfileStatsPanelProps) {
   const [stats, setStats] = useState<ProfileStats | null>(null);
@@ -31,7 +31,7 @@ export function ProfileStatsPanel({ profileId }: ProfileStatsPanelProps) {
       ? { Authorization: `Bearer ${token}` }
       : {};
 
-    fetch(`${BFF_URL}/bff/dashboard/usage?profile_id=${encodeURIComponent(profileId)}`, { headers })
+    fetch(`${BFF_URL}/dashboard/usage?profile_id=${encodeURIComponent(profileId)}`, { headers })
       .then((res) => {
         if (!res.ok) throw new Error('stats fetch failed');
         return res.json() as Promise<ProfileStats>;

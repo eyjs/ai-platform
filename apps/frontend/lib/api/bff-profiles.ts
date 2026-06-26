@@ -1,7 +1,7 @@
 import type { ProfileListItem, ProfileDetail, ProfileHistoryItem, ToolItem } from '@/types/profile';
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -26,7 +26,7 @@ export interface ProfileDiffResult {
 }
 
 export async function fetchProfileSchema(): Promise<Record<string, unknown>> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/schema`, {
+  const res = await fetch(`${BFF_URL}/profiles/schema`, {
     headers: authHeaders(),
   });
   const data = await handleResponse<{ schema: Record<string, unknown> }>(res);
@@ -42,7 +42,7 @@ export async function fetchProfileHistoryDiff(
   diff: ProfileDiffResult;
 }> {
   const res = await fetch(
-    `${BFF_URL}/bff/profiles/${profileId}/history/${historyId}/diff`,
+    `${BFF_URL}/profiles/${profileId}/history/${historyId}/diff`,
     { headers: authHeaders() },
   );
   return handleResponse(res);
@@ -53,24 +53,24 @@ export async function restoreProfileHistory(
   historyId: string,
 ): Promise<ProfileDetail> {
   const res = await fetch(
-    `${BFF_URL}/bff/profiles/${profileId}/restore/${historyId}`,
+    `${BFF_URL}/profiles/${profileId}/restore/${historyId}`,
     { method: 'POST', headers: authHeaders() },
   );
   return handleResponse(res);
 }
 
 export async function fetchProfiles(): Promise<ProfileListItem[]> {
-  const res = await fetch(`${BFF_URL}/bff/profiles`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/profiles`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function fetchProfile(id: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/profiles/${id}`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function createProfile(yamlContent: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles`, {
+  const res = await fetch(`${BFF_URL}/profiles`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ yamlContent }),
@@ -79,7 +79,7 @@ export async function createProfile(yamlContent: string): Promise<ProfileDetail>
 }
 
 export async function updateProfile(id: string, yamlContent: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}`, {
+  const res = await fetch(`${BFF_URL}/profiles/${id}`, {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify({ yamlContent }),
@@ -88,7 +88,7 @@ export async function updateProfile(id: string, yamlContent: string): Promise<Pr
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}`, {
+  const res = await fetch(`${BFF_URL}/profiles/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -96,7 +96,7 @@ export async function deleteProfile(id: string): Promise<void> {
 }
 
 export async function activateProfile(id: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}/activate`, {
+  const res = await fetch(`${BFF_URL}/profiles/${id}/activate`, {
     method: 'PATCH',
     headers: authHeaders(),
   });
@@ -104,7 +104,7 @@ export async function activateProfile(id: string): Promise<ProfileDetail> {
 }
 
 export async function deactivateProfile(id: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}/deactivate`, {
+  const res = await fetch(`${BFF_URL}/profiles/${id}/deactivate`, {
     method: 'PATCH',
     headers: authHeaders(),
   });
@@ -112,12 +112,12 @@ export async function deactivateProfile(id: string): Promise<ProfileDetail> {
 }
 
 export async function fetchProfileHistory(id: string): Promise<ProfileHistoryItem[]> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}/history`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/profiles/${id}/history`, { headers: authHeaders() });
   return handleResponse(res);
 }
 
 export async function restoreProfile(id: string, historyId: string): Promise<ProfileDetail> {
-  const res = await fetch(`${BFF_URL}/bff/profiles/${id}/restore`, {
+  const res = await fetch(`${BFF_URL}/profiles/${id}/restore`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ historyId }),
@@ -126,6 +126,6 @@ export async function restoreProfile(id: string, historyId: string): Promise<Pro
 }
 
 export async function fetchTools(): Promise<ToolItem[]> {
-  const res = await fetch(`${BFF_URL}/bff/tools`, { headers: authHeaders() });
+  const res = await fetch(`${BFF_URL}/tools`, { headers: authHeaders() });
   return handleResponse(res);
 }

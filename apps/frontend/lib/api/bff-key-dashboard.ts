@@ -8,7 +8,7 @@ import type {
 } from '@/types/key-dashboard';
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -27,7 +27,7 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 export function getSummary(id: string, range: DashboardRange): Promise<KeySummary> {
-  return fetch(`${BFF_URL}/bff/dashboard/api-keys/${id}/summary?range=${range}`, {
+  return fetch(`${BFF_URL}/dashboard/api-keys/${id}/summary?range=${range}`, {
     headers: authHeaders(),
   }).then((r) => handle<KeySummary>(r));
 }
@@ -37,7 +37,7 @@ export function getProfileBreakdown(
   range: DashboardRange,
 ): Promise<ProfileBreakdownItem[]> {
   return fetch(
-    `${BFF_URL}/bff/dashboard/api-keys/${id}/profile-breakdown?range=${range}`,
+    `${BFF_URL}/dashboard/api-keys/${id}/profile-breakdown?range=${range}`,
     { headers: authHeaders() },
   ).then((r) => handle<ProfileBreakdownItem[]>(r));
 }
@@ -48,13 +48,13 @@ export function getTimeline(
   bucket: DashboardBucket,
 ): Promise<TimelineBucket[]> {
   return fetch(
-    `${BFF_URL}/bff/dashboard/api-keys/${id}/timeline?range=${range}&bucket=${bucket}`,
+    `${BFF_URL}/dashboard/api-keys/${id}/timeline?range=${range}&bucket=${bucket}`,
     { headers: authHeaders() },
   ).then((r) => handle<TimelineBucket[]>(r));
 }
 
 export function getRecentLogs(id: string, limit = 100): Promise<RecentLogItem[]> {
-  return fetch(`${BFF_URL}/bff/dashboard/api-keys/${id}/recent?limit=${limit}`, {
+  return fetch(`${BFF_URL}/dashboard/api-keys/${id}/recent?limit=${limit}`, {
     headers: authHeaders(),
   }).then((r) => handle<RecentLogItem[]>(r));
 }

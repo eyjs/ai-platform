@@ -1,6 +1,6 @@
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -57,7 +57,7 @@ export interface KnowledgeDocumentDetail {
 }
 
 export async function fetchKnowledgeStats(): Promise<KnowledgeStats> {
-  const res = await fetch(`${BFF_URL}/bff/knowledge/stats`, {
+  const res = await fetch(`${BFF_URL}/knowledge/stats`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
@@ -75,21 +75,21 @@ export async function fetchKnowledgeDocuments(params: {
   if (params.domainCode) query.set('domain_code', params.domainCode);
   if (params.status) query.set('status', params.status);
 
-  const res = await fetch(`${BFF_URL}/bff/knowledge/documents?${query}`, {
+  const res = await fetch(`${BFF_URL}/knowledge/documents?${query}`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function fetchKnowledgeDocumentDetail(id: string): Promise<KnowledgeDocumentDetail> {
-  const res = await fetch(`${BFF_URL}/bff/knowledge/documents/${id}`, {
+  const res = await fetch(`${BFF_URL}/knowledge/documents/${id}`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
 }
 
 export async function reindexDocument(id: string): Promise<{ success: boolean }> {
-  const res = await fetch(`${BFF_URL}/bff/knowledge/reindex/${id}`, {
+  const res = await fetch(`${BFF_URL}/knowledge/reindex/${id}`, {
     method: 'POST',
     headers: authHeaders(),
   });

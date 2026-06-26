@@ -1,6 +1,6 @@
 import { getAccessToken } from '@/lib/auth/token-storage';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
+const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
 
 function authHeaders(): Record<string, string> {
   const token = getAccessToken();
@@ -28,7 +28,7 @@ export interface ProviderStatus {
 }
 
 export async function fetchProviderStatus(): Promise<ProviderStatus[]> {
-  const res = await fetch(`${BFF_URL}/bff/providers/status`, {
+  const res = await fetch(`${BFF_URL}/providers/status`, {
     headers: authHeaders(),
   });
   return handleResponse(res);
