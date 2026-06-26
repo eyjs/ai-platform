@@ -146,6 +146,10 @@ async def chat(req: ChatRequest, request: Request):
                         # Task 014: 응답 식별자 + faithfulness 스코어 영속화
                         response_id=response_id,
                         faithfulness_score=captured_faithfulness_score,
+                        # Phase 3: 관측성 — IP·user_id·레이어별 처리시간
+                        client_ip=(request.client.host if request.client else None),
+                        user_id=getattr(user_ctx, "user_id", None),
+                        latency_breakdown=(setup.trace.summary() if setup and setup.trace else None),
                     ),
                 )
             if setup:
@@ -180,6 +184,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                     error_code=f"http_{he.status_code}",
                     request_preview=RequestLogEntry.truncate_preview(req.question),
                     response_id=response_id,
+                    client_ip=(request.client.host if request.client else None),
+                    user_id=getattr(user_ctx, "user_id", None),
                 ),
             )
         decrement_active()
@@ -197,6 +203,8 @@ async def chat_stream(req: ChatRequest, request: Request):
                     error_code="internal_error",
                     request_preview=RequestLogEntry.truncate_preview(req.question),
                     response_id=response_id,
+                    client_ip=(request.client.host if request.client else None),
+                    user_id=getattr(user_ctx, "user_id", None),
                 ),
             )
         decrement_active()
@@ -340,6 +348,10 @@ async def chat_stream(req: ChatRequest, request: Request):
                         # Task 014: 응답 식별자 + faithfulness 스코어 영속화
                         response_id=response_id,
                         faithfulness_score=captured_faithfulness_score,
+                        # Phase 3: 관측성 — IP·user_id·레이어별 처리시간(trace)
+                        client_ip=(request.client.host if request.client else None),
+                        user_id=getattr(user_ctx, "user_id", None),
+                        latency_breakdown=(setup.trace.summary() if setup and setup.trace else None),
                     ),
                 )
             # SSE 제너레이터는 별도 Task에서 실행되므로

@@ -6,6 +6,7 @@ import {
   QueryRequestLogsDto,
   RequestLogsResponseDto,
   RequestLogItemDto,
+  LatencyBreakdown,
   RequestLogsStatsDto,
 } from './dto/query-request-logs.dto';
 
@@ -110,7 +111,8 @@ export class RequestLogsService {
     const result = await manager.query(
       `SELECT id, ts, api_key_id, profile_id, provider_id, status_code,
               latency_ms, prompt_tokens, completion_tokens, cache_hit,
-              error_code, request_preview, response_preview
+              error_code, request_preview, response_preview,
+              client_ip, user_id, latency_breakdown
        FROM api_request_logs
        WHERE id = $1`,
       [id],
@@ -135,6 +137,9 @@ export class RequestLogsService {
       errorCode: row.error_code ? String(row.error_code) : null,
       requestPreview: row.request_preview ? String(row.request_preview) : null,
       responsePreview: row.response_preview ? String(row.response_preview) : null,
+      clientIp: row.client_ip ? String(row.client_ip) : null,
+      userId: row.user_id ? String(row.user_id) : null,
+      latencyBreakdown: (row.latency_breakdown as LatencyBreakdown) ?? null,
     };
   }
 

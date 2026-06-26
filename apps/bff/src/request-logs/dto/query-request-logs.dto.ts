@@ -53,6 +53,11 @@ export class RequestLogsResponseDto {
 /**
  * 요청 로그 단건 응답 DTO
  */
+export interface LatencyBreakdown {
+  total_ms: number;
+  nodes: Array<{ node: string; ms: number } & Record<string, unknown>>;
+}
+
 export class RequestLogItemDto {
   id: string;
   ts: string;
@@ -67,6 +72,10 @@ export class RequestLogItemDto {
   errorCode: string | null;
   requestPreview: string | null;
   responsePreview: string | null;
+  // Phase 3: 상세에서만 채워진다(목록은 undefined).
+  clientIp?: string | null;
+  userId?: string | null;
+  latencyBreakdown?: LatencyBreakdown | null;
 }
 
 /**

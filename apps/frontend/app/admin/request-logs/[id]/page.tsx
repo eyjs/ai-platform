@@ -109,6 +109,12 @@ export default function RequestLogDetailPage() {
       <Card variant="section">
         <div className="flex flex-wrap gap-x-8 gap-y-2 text-[var(--font-size-sm)]">
           <span className="text-[var(--color-neutral-600)]">
+            IP: <span className="font-mono text-[var(--color-neutral-800)]">{detail.clientIp ?? '-'}</span>
+          </span>
+          <span className="text-[var(--color-neutral-600)]">
+            User: <span className="font-mono text-[var(--color-neutral-800)]">{detail.userId ?? '-'}</span>
+          </span>
+          <span className="text-[var(--color-neutral-600)]">
             Provider: <span className="text-[var(--color-neutral-800)]">{detail.providerId ?? '-'}</span>
           </span>
           <span className="text-[var(--color-neutral-600)]">
@@ -119,6 +125,40 @@ export default function RequestLogDetailPage() {
           )}
         </div>
       </Card>
+
+      {/* 레이어별 처리시간 (RAG 파이프라인 트레이스) */}
+      {detail.latencyBreakdown && detail.latencyBreakdown.nodes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>레이어별 처리시간</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2">
+              {detail.latencyBreakdown.nodes.map((n, i) => {
+                const total = detail.latencyBreakdown!.total_ms || 1;
+                const pct = Math.min(100, Math.round((n.ms / total) * 100));
+                return (
+                  <div key={i} className="flex items-center gap-3 text-[var(--font-size-xs)]">
+                    <span className="w-40 shrink-0 truncate font-mono text-[var(--color-neutral-700)]">{n.node}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--color-neutral-200)]">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${pct}%`, backgroundColor: latencyColor(n.ms) }}
+                      />
+                    </div>
+                    <span
+                      className="w-16 shrink-0 text-right font-mono font-medium"
+                      style={{ color: latencyColor(n.ms) }}
+                    >
+                      {formatDuration(n.ms)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 질문 / 응답 */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -144,9 +184,6 @@ export default function RequestLogDetailPage() {
         </Card>
       </div>
 
-      <p className="text-[var(--font-size-xs)] text-[var(--color-neutral-400)]">
-        ※ 레이어별 처리시간(라우팅/RAG/Guard/LLM) 분석은 다음 단계(요청 레이어 관측성)에서 추가됩니다.
-      </p>
     </div>
   );
 }
