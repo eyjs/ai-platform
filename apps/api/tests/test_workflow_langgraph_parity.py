@@ -1,4 +1,4 @@
-"""LangGraph 이전 안전망: legacy 엔진 동작 parity 스냅샷 (T1).
+"""LangGraph 이전 안전망: legacy 엔진 동작 parity 스냅샷 (T1) + T5 양 backend 파라미터화.
 
 이 테스트는 신엔진(LangGraph)으로 교체하기 전에 현 legacy 엔진의 관찰 가능한
 동작을 공개 API로만 스냅샷한다.
@@ -11,6 +11,96 @@ T5에서 신엔진(flag=langgraph)에도 그대로 적용되어 동등성을 증
 필드만 단언한다.
 
 각 단언 블록에 "이 단언은 legacy·langgraph 양 엔진에서 동일해야 함" 주석을 달았다.
+
+[T5 SOURCE BUG REPORT]
+======================================================================
+Bug: message 노드가 completed/concluded 플래그를 설정하지 않음
+
+파일: src/workflow/graph_builder.py
+함수: WorkflowGraphBuilder._make_message_node
+
+증상:
+  워크플로우의 terminal message 스텝(next 없음)에서 LangGraph 엔진이
+  completed=False, concluded=False를 반환한다. legacy 엔진은 동일 상황에서
+  completed=True, concluded=True를 반환한다.
+
+원인 분석:
+  _make_message_node 클로저는 message_parts/report_hint/current_step_id만
+  state dict에 업데이트하고, completed 채널을 업데이트하지 않는다.
+  (graph_builder.py:248-260 참조)
+  _make_action_node는 terminal 조건 시 completed=True를 명시적으로 설정한다.
+  (graph_builder.py:339-345)
+  _make_message_node에는 이에 상응하는 처리가 없다.
+
+  _lg_read_last_result(engine.py:515-524)의 최후 폴백 경로도
+  `"completed": bool(values.get("completed", False))`를 사용하므로,
+  state.completed가 False면 StepResult.completed도 False가 된다.
+
+영향 범위:
+  - S1: test_full_flow_completes_with_collected (completed=True 단언)
+  - S5: test_valid_phone_recovers (completed=True 단언)
+  - S10: test_terminal_message_concluded_true (completed+concluded 단언)
+  - S8: action 성공 후 done(message) 스텝 도달 시 completed 반환 여부
+
+수정 방향 (source는 수정하지 않음):
+  _make_message_node에서 step.next가 없거나 다음 스텝이 END일 때
+  `completed=True`와 `last_result` 설정 로직을 추가해야 한다.
+  _make_action_node의 terminal 처리 패턴을 참고.
+
+영향받는 테스트: langgraph backend에 대해 xfail 마킹.
+======================================================================
+
+[T5 SOURCE BUG REPORT #2]
+======================================================================
+Bug: _make_action_node이 action_client=None을 하드코딩한다
+
+파일: src/workflow/graph_builder.py
+함수: WorkflowGraphBuilder._make_action_node
+
+증상:
+  LangGraph 경로에서 WorkflowEngine(action_client=stub)을 주입해도
+  action step 실행 시 stub이 호출되지 않는다. execute_action_step은
+  action_client=None으로 호출되어 "외부 연동 기능이 비활성화되어 있습니다."
+  오류 메시지를 반환한다.
+
+원인 분석:
+  graph_builder.py:312 에서 execute_action_step 세 번째 인자를 항상 None으로
+  하드코딩한다. 코드 주석에 "T4에서 연결"이라 명시되어 미구현 상태다.
+  WorkflowEngine._action_client는 legacy 경로에서만 step_executors.py에 전달된다.
+  LangGraph 경로에서는 그래프 컴파일 시 action_client가 클로저로 캡처되어야 한다.
+
+수정 방향 (source는 수정하지 않음):
+  WorkflowGraphBuilder.__init__에 action_client 파라미터를 추가하고,
+  _make_action_node 클로저에서 self._action_client로 참조해야 한다.
+
+영향받는 테스트: S8 langgraph backend에 대해 xfail 마킹.
+======================================================================
+
+[T5 SOURCE BUG REPORT #3]
+======================================================================
+Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작한다
+
+파일: src/workflow/engine.py
+함수: WorkflowEngine._lg_resume
+
+증상:
+  engine.resume(wf_id, sess_id, step_id="step_2", collected={...}) 호출 시
+  반환되는 StepResult.step_id가 "step_2"가 아니라 워크플로우의 첫 step_id이다.
+  collected도 resume에 주입한 값이 아닌 빈 상태로 초기화된다.
+
+원인 분석:
+  _lg_resume은 make_initial_state(workflow_id, step_id)로 initial_state를 만들어
+  state 채널 current_step_id=step_id를 설정하지만, LangGraph 그래프 구조는 항상
+  START → definition.entry_step_id 엣지로 고정된다. graph.ainvoke는 current_step_id
+  채널값이 아니라 START 엣지를 따라 entry_step부터 실행한다.
+
+수정 방향 (source는 수정하지 않음):
+  resume을 위해서는 ① step_id를 entry로 하는 별도 서브그래프 컴파일, 또는
+  ② 체크포인터에 직접 step_id에서의 중간 상태를 기록하는 방식이 필요하다.
+  현재 _lg_resume 구현은 실질적으로 _lg_start와 동일하게 동작한다.
+
+영향받는 테스트: S9 langgraph backend에 대해 xfail 마킹.
+======================================================================
 """
 
 from __future__ import annotations
@@ -37,12 +127,33 @@ def _build_store(*definitions: WorkflowDefinition) -> WorkflowStore:
 
 
 def make_engine(store: WorkflowStore, action_client=None, classifier=None) -> WorkflowEngine:
-    """엔진 factory.
+    """레거시 엔진 factory.
 
     T5에서 신엔진 backend를 파라미터화할 때 이 factory만 교체하면 된다.
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
     return WorkflowEngine(store, action_client=action_client, classifier=classifier)
+
+
+def make_lg_engine(store: WorkflowStore, action_client=None, classifier=None) -> WorkflowEngine:
+    """LangGraph 신엔진 factory.
+
+    InMemorySaver를 체크포인터로 사용해 DB 없이 in-process로 동작한다.
+    graph_builder 캐시는 인스턴스별이므로 각 테스트에서 독립적으로 동작한다.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from src.workflow.graph_builder import WorkflowGraphBuilder
+
+    checkpointer = MemorySaver()
+    builder = WorkflowGraphBuilder(store, classifier=classifier)
+    return WorkflowEngine(
+        store,
+        graph_builder=builder,
+        checkpointer=checkpointer,
+        engine_backend="langgraph",
+        action_client=action_client,
+    )
 
 
 # ── 경량 액션 스텁 ──────────────────────────────────────────────────────────
@@ -212,6 +323,49 @@ def _structured_signals_workflow() -> WorkflowDefinition:
     )
 
 
+# ── 파라미터화 마커 ──────────────────────────────────────────────────────────
+# pytest.mark.parametrize id: "legacy" / "langgraph"
+_BOTH_BACKENDS = pytest.mark.parametrize(
+    "engine_factory",
+    [
+        pytest.param(make_engine, id="legacy"),
+        pytest.param(make_lg_engine, id="langgraph"),
+    ],
+)
+
+
+def _is_lg(engine_factory) -> bool:
+    """엔진 factory가 langgraph 백엔드인지 확인하는 헬퍼."""
+    return engine_factory is make_lg_engine
+
+
+def _xfail_if_lg(engine_factory, reason: str) -> None:
+    """langgraph backend에서만 pytest.xfail()을 호출한다.
+
+    테스트 함수 내에서 호출하여 xfail 이유를 동적으로 설정한다.
+    legacy backend에서는 아무 동작도 하지 않는다.
+    """
+    if _is_lg(engine_factory):
+        pytest.xfail(reason)
+
+
+# ── 공통 xfail 이유 문자열 ────────────────────────────────────────────────────
+_BUG1_MESSAGE_COMPLETED = (
+    "LangGraph #1 Bug: _make_message_node가 terminal message에서 completed/concluded를 "
+    "state에 설정하지 않아 StepResult.completed=False 반환 — "
+    "graph_builder.py:_make_message_node 수정 필요"
+)
+_BUG2_ACTION_CLIENT = (
+    "LangGraph #2 Bug: _make_action_node가 action_client=None을 하드코딩해 "
+    "주입된 action_client stub이 호출되지 않음 — "
+    "graph_builder.py:_make_action_node T4 미구현"
+)
+_BUG3_RESUME_STEP = (
+    "LangGraph #3 Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — "
+    "engine.py:_lg_resume에서 LangGraph 그래프가 항상 START→entry_step으로 고정됨"
+)
+
+
 # ── S1: Happy Path ───────────────────────────────────────────────────────────
 
 class TestS1HappyPath:
@@ -220,9 +374,10 @@ class TestS1HappyPath:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_start_shows_first_step(self):
+    @_BOTH_BACKENDS
+    async def test_start_shows_first_step(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
 
         # Act
         result = await engine.start("parity_simple", "s1-s1")
@@ -232,9 +387,10 @@ class TestS1HappyPath:
         assert result.options == ["A", "B"]
         assert not result.completed
 
-    async def test_full_flow_completes_with_collected(self):
+    @_BOTH_BACKENDS
+    async def test_full_flow_completes_with_collected(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s1-full")
 
         # Act
@@ -242,16 +398,20 @@ class TestS1HappyPath:
         await engine.advance("s1-full", "홍길동")      # input → confirm
         result = await engine.advance("s1-full", "예") # confirm → done
 
+        # LangGraph #1 Bug: terminal message completed 미설정 — langgraph만 xfail
+        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
+
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed
         assert "홍길동" in result.bot_message           # 템플릿 렌더링 확인
         assert result.collected["name"] == "홍길동"
         assert result.collected["type"] == "A"
 
-    async def test_step_result_fields_present(self):
+    @_BOTH_BACKENDS
+    async def test_step_result_fields_present(self, engine_factory):
         """StepResult 12종 필드가 존재하는지 스냅샷."""
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
 
         # Act
         result = await engine.start("parity_simple", "s1-fields")
@@ -280,9 +440,10 @@ class TestS2ConfirmRejectLoopback:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_confirm_reject_returns_to_first_step(self):
+    @_BOTH_BACKENDS
+    async def test_confirm_reject_returns_to_first_step(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s2")
         await engine.advance("s2", "A")
         await engine.advance("s2", "홍길동")
@@ -303,9 +464,10 @@ class TestS3SelectUnmatchedReprompt:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_freetext_on_select_reprompts_same_step(self):
+    @_BOTH_BACKENDS
+    async def test_freetext_on_select_reprompts_same_step(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_branching_workflow()))
+        engine = engine_factory(_build_store(_branching_workflow()))
         await engine.start("parity_branch", "s3")
 
         # Act
@@ -327,9 +489,10 @@ class TestS4SelectUnmatchedEscape:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_unmatched_reprompts_until_max_retries(self):
+    @_BOTH_BACKENDS
+    async def test_unmatched_reprompts_until_max_retries(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_branching_workflow()))
+        engine = engine_factory(_build_store(_branching_workflow()))
         await engine.start("parity_branch", "s4")
 
         # Act
@@ -340,9 +503,10 @@ class TestS4SelectUnmatchedEscape:
         assert not r1.completed
         assert not r2.completed
 
-    async def test_max_retries_escape(self):
+    @_BOTH_BACKENDS
+    async def test_max_retries_escape(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_branching_workflow()))
+        engine = engine_factory(_build_store(_branching_workflow()))
         await engine.start("parity_branch", "s4-escape")
         await engine.advance("s4-escape", "아무거나1")
         await engine.advance("s4-escape", "아무거나2")
@@ -364,9 +528,10 @@ class TestS5ValidationRepromptAndRecovery:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_invalid_phone_reprompts(self):
+    @_BOTH_BACKENDS
+    async def test_invalid_phone_reprompts(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_phone_validation_workflow()))
+        engine = engine_factory(_build_store(_phone_validation_workflow()))
         await engine.start("parity_phone", "s5-reprompt")
 
         # Act
@@ -376,21 +541,26 @@ class TestS5ValidationRepromptAndRecovery:
         assert "전화번호" in result.bot_message
         assert not result.completed
 
-    async def test_valid_phone_recovers(self):
+    @_BOTH_BACKENDS
+    async def test_valid_phone_recovers(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_phone_validation_workflow()))
+        engine = engine_factory(_build_store(_phone_validation_workflow()))
         await engine.start("parity_phone", "s5-recover")
         await engine.advance("s5-recover", "abc")  # 1회 실패
 
         # Act
         result = await engine.advance("s5-recover", "010-1234-5678")  # 올바른 입력
 
+        # LangGraph #1 Bug: terminal message completed 미설정 — langgraph만 xfail
+        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
+
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed  # done 스텝(message)으로 진행하고 완료
 
-    async def test_three_failures_auto_cancel(self):
+    @_BOTH_BACKENDS
+    async def test_three_failures_auto_cancel(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_phone_validation_workflow()))
+        engine = engine_factory(_build_store(_phone_validation_workflow()))
         await engine.start("parity_phone", "s5-autocancel")
         await engine.advance("s5-autocancel", "abc")  # 1회 실패
         await engine.advance("s5-autocancel", "xyz")  # 2회 실패
@@ -413,9 +583,10 @@ class TestS6Back:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_back_returns_to_previous_step(self):
+    @_BOTH_BACKENDS
+    async def test_back_returns_to_previous_step(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s6")
         await engine.advance("s6", "A")      # ask_type → ask_name (type="A" 수집)
 
@@ -425,9 +596,10 @@ class TestS6Back:
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert "유형을 선택하세요" in result.bot_message  # ask_type 재노출
 
-    async def test_back_rolls_back_collected(self):
+    @_BOTH_BACKENDS
+    async def test_back_rolls_back_collected(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s6-rollback")
         await engine.advance("s6-rollback", "A")  # type="A" 수집
 
@@ -449,9 +621,10 @@ class TestS7EscapeKeyword:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_escape_keyword_exits_workflow(self):
+    @_BOTH_BACKENDS
+    async def test_escape_keyword_exits_workflow(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s7")
         await engine.advance("s7", "A")  # type="A" 수집
 
@@ -462,9 +635,10 @@ class TestS7EscapeKeyword:
         assert result.completed
         assert result.escaped
 
-    async def test_escape_preserves_collected(self):
+    @_BOTH_BACKENDS
+    async def test_escape_preserves_collected(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_simple_workflow()))
+        engine = engine_factory(_build_store(_simple_workflow()))
         await engine.start("parity_simple", "s7-collect")
         await engine.advance("s7-collect", "A")  # type="A" 수집
 
@@ -485,10 +659,11 @@ class TestS8ActionSuccessFailure:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_action_success_carries_action_result(self):
+    @_BOTH_BACKENDS
+    async def test_action_success_carries_action_result(self, engine_factory):
         # Arrange
         stub = _SuccessActionStub({"ok": True, "contract_id": "C-001"})
-        engine = make_engine(_build_store(_action_workflow()), action_client=stub)
+        engine = engine_factory(_build_store(_action_workflow()), action_client=stub)
         await engine.start("parity_action", "s8-success")
 
         # Act
@@ -501,25 +676,34 @@ class TestS8ActionSuccessFailure:
         # action step 처리 후 on_success_message 또는 다음 스텝으로 이동
         assert result_at_submit.completed or "완료" in result_at_submit.bot_message
 
-    async def test_action_success_with_fresh_start(self):
+    @_BOTH_BACKENDS
+    async def test_action_success_with_fresh_start(self, engine_factory):
         # Arrange
         stub = _SuccessActionStub({"ok": True, "contract_id": "C-001"})
-        engine = make_engine(_build_store(_action_workflow()), action_client=stub)
+        engine = engine_factory(_build_store(_action_workflow()), action_client=stub)
         await engine.start("parity_action", "s8-fresh")
         await engine.advance("s8-fresh", "홍길동")  # ask_name → submit(action step)
+
+        # LangGraph #2 Bug: action_client가 전달되지 않아 stub 미호출 — langgraph만 xfail
+        _xfail_if_lg(engine_factory, _BUG2_ACTION_CLIENT)
 
         # Assert: stub이 적어도 한 번 호출됐음
         # 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert stub.called >= 1
 
-    async def test_action_failure_returns_error_message(self):
+    @_BOTH_BACKENDS
+    async def test_action_failure_returns_error_message(self, engine_factory):
         # Arrange
         fail_stub = _FailActionStub()
-        engine = make_engine(_build_store(_action_workflow()), action_client=fail_stub)
+        engine = engine_factory(_build_store(_action_workflow()), action_client=fail_stub)
         await engine.start("parity_action", "s8-fail")
 
         # Act
         result = await engine.advance("s8-fail", "홍길동")  # ask_name → submit(실패)
+
+        # LangGraph #2 Bug: action_client가 전달되지 않아 on_error_message 대신
+        # "외부 연동 기능이 비활성화되어 있습니다." 반환 — langgraph만 xfail
+        _xfail_if_lg(engine_factory, _BUG2_ACTION_CLIENT)
 
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed
@@ -535,11 +719,12 @@ class TestS9ResumeThenAdvance:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_resume_then_advance_accumulates_collected(self):
+    @_BOTH_BACKENDS
+    async def test_resume_then_advance_accumulates_collected(self, engine_factory):
         # Arrange
         store = WorkflowStore()
         store._cache["parity_resume"] = _resume_workflow()
-        engine = make_engine(store)
+        engine = engine_factory(store)
 
         # Act: step_2에서 이름이 이미 수집된 상태로 resume
         await engine.resume(
@@ -550,6 +735,9 @@ class TestS9ResumeThenAdvance:
         )
         result = await engine.advance("s9", "010-9999-8888")  # step_2 → step_3
 
+        # LangGraph #3 Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
+        _xfail_if_lg(engine_factory, _BUG3_RESUME_STEP)
+
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.step_id == "step_3"
         session = await engine.get_session("s9")
@@ -557,11 +745,12 @@ class TestS9ResumeThenAdvance:
         assert session.collected["name"] == "이순신"       # resume으로 주입된 값 유지
         assert session.collected["phone"] == "010-9999-8888"  # advance로 추가 수집
 
-    async def test_resume_restores_correct_step(self):
+    @_BOTH_BACKENDS
+    async def test_resume_restores_correct_step(self, engine_factory):
         # Arrange
         store = WorkflowStore()
         store._cache["parity_resume"] = _resume_workflow()
-        engine = make_engine(store)
+        engine = engine_factory(store)
 
         # Act
         result = await engine.resume(
@@ -570,6 +759,9 @@ class TestS9ResumeThenAdvance:
             step_id="step_2",
             collected={"name": "김유신"},
         )
+
+        # LangGraph #3 Bug: _lg_resume이 step_id를 무시하고 entry_step부터 재시작 — xfail
+        _xfail_if_lg(engine_factory, _BUG3_RESUME_STEP)
 
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.step_id == "step_2"
@@ -585,9 +777,10 @@ class TestS10StructuredSignals:
     이 단언은 legacy·langgraph 양 엔진에서 동일해야 함.
     """
 
-    async def test_confirm_step_emits_intent_confirm(self):
+    @_BOTH_BACKENDS
+    async def test_confirm_step_emits_intent_confirm(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_structured_signals_workflow()))
+        engine = engine_factory(_build_store(_structured_signals_workflow()))
         await engine.start("parity_signals", "s10-confirm")
 
         # Act: ask_name → ask_confirm 스텝 도달
@@ -600,9 +793,10 @@ class TestS10StructuredSignals:
         assert result.intent_confirm["yes_label"] == "응"
         assert result.intent_confirm["no_label"] == "아니"
 
-    async def test_collection_field_pending_then_filled(self):
+    @_BOTH_BACKENDS
+    async def test_collection_field_pending_then_filled(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_structured_signals_workflow()))
+        engine = engine_factory(_build_store(_structured_signals_workflow()))
 
         # Act: 첫 스텝(ask_name)에서 collection 스냅샷
         result_start = await engine.start("parity_signals", "s10-collection")
@@ -622,22 +816,28 @@ class TestS10StructuredSignals:
         # (confirm 스텝은 collection_field 없음 → collection == {})
         # 중요한 것은 start 시점에 pending이었다는 것 → 이미 위에서 검증됨
 
-    async def test_terminal_message_concluded_true(self):
+    @_BOTH_BACKENDS
+    async def test_terminal_message_concluded_true(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_structured_signals_workflow()))
+        engine = engine_factory(_build_store(_structured_signals_workflow()))
         await engine.start("parity_signals", "s10-terminal")
         await engine.advance("s10-terminal", "홍길동")  # → ask_confirm
 
         # Act: 확인 → done(message, terminal)
         result = await engine.advance("s10-terminal", "예")
 
+        # LangGraph #1 Bug: _make_message_node가 completed=True / last_result를 상태에
+        # 기록하지 않아 terminal message step이 completed=False 로 반환됨 — xfail
+        _xfail_if_lg(engine_factory, _BUG1_MESSAGE_COMPLETED)
+
         # Assert — 이 단언은 legacy·langgraph 양 엔진에서 동일해야 함
         assert result.completed is True
         assert result.concluded is True
 
-    async def test_in_progress_step_not_concluded(self):
+    @_BOTH_BACKENDS
+    async def test_in_progress_step_not_concluded(self, engine_factory):
         # Arrange
-        engine = make_engine(_build_store(_structured_signals_workflow()))
+        engine = engine_factory(_build_store(_structured_signals_workflow()))
 
         # Act
         result = await engine.start("parity_signals", "s10-inprogress")
