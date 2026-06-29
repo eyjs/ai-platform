@@ -96,7 +96,13 @@ async def run_worker() -> None:
         document_id = payload.get("document_id", "")
 
         if action == "sync":
-            return await kms_sync.sync_document(document_id, payload.get("data", {}))
+            result = await kms_sync.sync_document(document_id, payload.get("data", {}))
+            # fast 파싱 성공 + PDF 면 비동기 VLM 보강 큐에 적재(테이블 구조 복원).
+            # 별도 큐/워커라 fast 인제스트를 막지 않는다.
+            if result.get("mime_type") == "application/pdf" and result.get("status") != "skipped":
+                await job_queue.enqueue("vlm_enhance", {"document_id": document_id})
+                logger.info("vlm_enhance_enqueued", document_id=document_id)
+            return result
         elif action == "delete":
             return await kms_sync.delete_document(document_id)
         elif action == "lifecycle":
@@ -104,6 +110,10 @@ async def run_worker() -> None:
         else:
             logger.warning("kms_sync_unknown_action", action=action)
             return {"status": "ignored", "action": action}
+
+    async def vlm_enhance_handler(payload: dict) -> dict:
+        # 비동기 VLM 보강: fast 결과를 기다리지 않고 백그라운드로 테이블 보정 → KMS 본문 교체.
+        return await kms_sync.enhance_document(payload.get("document_id", ""), payload.get("data", {}))
 
     ingest_worker = QueueWorker(
         queue=job_queue,
@@ -119,6 +129,16 @@ async def run_worker() -> None:
         handler=kms_sync_handler,
         poll_interval=2.0,
         max_concurrent=2,
+    )
+
+    # VLM 보강 전용 워커: full-page VLM 은 문서당 수십 분 → 동시성 1로 제한해
+    # 일반 인제스트(ingest/kms_sync)를 굶기지 않는다. 완료 시 KMS 본문 교체.
+    vlm_enhance_worker = QueueWorker(
+        queue=job_queue,
+        queue_name="vlm_enhance",
+        handler=vlm_enhance_handler,
+        poll_interval=5.0,
+        max_concurrent=1,
     )
 
     # 6. Stale job 주기적 정리
@@ -148,7 +168,8 @@ async def run_worker() -> None:
     # 8. 워커 시작 + 종료 대기
     ingest_task = asyncio.create_task(ingest_worker.start())
     kms_sync_task = asyncio.create_task(kms_sync_worker.start())
-    logger.info("workers_ready", queues=["ingest", "kms_sync"])
+    vlm_enhance_task = asyncio.create_task(vlm_enhance_worker.start())
+    logger.info("workers_ready", queues=["ingest", "kms_sync", "vlm_enhance"])
 
     await shutdown_event.wait()
 
@@ -156,7 +177,8 @@ async def run_worker() -> None:
     logger.info("worker_draining")
     await ingest_worker.stop(timeout=30.0)
     await kms_sync_worker.stop(timeout=30.0)
-    for task in (ingest_task, kms_sync_task):
+    await vlm_enhance_worker.stop(timeout=30.0)
+    for task in (ingest_task, kms_sync_task, vlm_enhance_task):
         task.cancel()
         try:
             await task
