@@ -155,6 +155,9 @@ class IngestPipeline:
             "status": "success",
             "chunks": chunk_count,
             "chars": chars,
+            # 조립된 마크다운 원문 — KMS 콜백(원본↔MD 비교 표시)용으로 끌어올린다.
+            # 청크엔 "[문서: title]" 헤더가 붙지만 content 는 깨끗한 파싱 결과다.
+            "markdown": content,
         }
 
     def _calculate_batch_size(self, total_chunks: int) -> int:
