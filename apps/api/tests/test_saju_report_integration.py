@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.domain.agent_context import AgentContext
-from src.services.saju_report_service import SajuReportService
+from src.services.consumers.saju.saju_report_service import SajuReportService
 from src.tools.base import ToolResult
 from src.tools.internal.saju_career_prompts import CAREER_V2_SECTION_KEYS
 from src.tools.internal.saju_prompts import COMPAT_V4_SECTION_KEYS, PAPER_V2_SECTION_KEYS

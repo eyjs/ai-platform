@@ -466,12 +466,12 @@ async def create_app_state(settings: Settings) -> AppState:
 
     # Fortune 해석 서비스 (동기 — DB 불필요)
     # 무료·패턴 콘텐츠($0)는 로컬 LLM(MLX)로 라우팅, 고난도는 main_llm(상용).
-    from src.services.fortune_service import FortuneService
+    from src.services.consumers.saju.fortune_service import FortuneService
     fortune_service = FortuneService(main_llm=main_llm, local_llm=provider_factory.get_local_llm())
     logger.info("fortune_service_initialized")
 
     # Task 004: Saju Report Service + QueueWorker
-    from src.services.saju_report_service import SajuReportService
+    from src.services.consumers.saju.saju_report_service import SajuReportService
     from src.infrastructure.job_queue import QueueWorker
 
     # 리포트는 report_llm(14B)로 — 9B JSON 반복붕괴 회피. 채팅은 main_llm(9B) 유지.

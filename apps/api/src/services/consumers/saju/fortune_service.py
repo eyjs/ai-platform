@@ -12,13 +12,13 @@ from typing import Any, Dict, Optional
 
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
-from src.services.fortune_prompts import (
+from src.services.consumers.saju.fortune_prompts import (
     FORTUNE_SYSTEM_PROMPT,
     build_today_prompt,
     build_tojeong_prompt,
     build_yearly_prompt,
 )
-from src.services.myo_play_prompts import (
+from src.services.consumers.saju.myo_play_prompts import (
     MYO_PLAY_SYSTEM,
     build_charm_prompt,
     build_compare_prompt,
