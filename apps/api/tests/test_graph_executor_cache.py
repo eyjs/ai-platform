@@ -8,8 +8,8 @@ import pytest
 
 from src.agent.graph_executor import GraphExecutor
 from src.domain.models import AgentMode, SearchScope
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
-from src.router.graph_cache import GraphCache
+from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+from src.agent.graph_cache import GraphCache
 
 
 def _make_executor(chat_model=None, graph_cache=None) -> GraphExecutor:

@@ -22,7 +22,7 @@ import pytest
 
 from src.agent.graph_executor import GraphExecutor
 from src.domain.models import AgentMode, SearchScope
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 
 
 # ---------------------------------------------------------------------------

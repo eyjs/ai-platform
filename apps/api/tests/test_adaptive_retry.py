@@ -12,7 +12,7 @@ from src.agent.nodes import (
 )
 from src.agent.state import AgentState, create_initial_state
 from src.domain.models import AgentMode, SearchScope
-from src.router.execution_plan import (
+from src.domain.execution_plan import (
     ExecutionPlan,
     QuestionStrategy,
     QuestionType,

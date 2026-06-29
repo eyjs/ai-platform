@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from src.domain.models import AgentMode
-from src.router.execution_plan import ExecutionPlan
+from src.domain.execution_plan import ExecutionPlan
 
 
 class AgentState(TypedDict):

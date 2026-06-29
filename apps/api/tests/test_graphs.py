@@ -7,7 +7,7 @@ from src.agent.graph_executor import GraphExecutor
 from src.agent.graphs import build_deterministic_graph
 from src.agent.state import AgentState, create_initial_state
 from src.domain.models import AgentMode, SearchScope
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 
 
 def test_build_deterministic_graph_compiles():

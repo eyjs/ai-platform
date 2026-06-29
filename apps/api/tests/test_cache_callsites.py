@@ -33,7 +33,7 @@ def _make_profile(system_prompt: str = "페르소나 텍스트") -> MagicMock:
 def test_strategy_builder_date_goes_to_volatile():
     """날짜 주입이 volatile_system_prompt 에 들어가고 system_prompt(cacheable)에는 없다."""
     from src.router.strategy_builder import StrategyBuilder
-    from src.router.execution_plan import QuestionType, QuestionStrategy
+    from src.domain.execution_plan import QuestionType, QuestionStrategy
     from src.domain.models import AgentMode
 
     builder = StrategyBuilder()
@@ -62,7 +62,7 @@ def test_strategy_builder_date_goes_to_volatile():
 def test_strategy_builder_persona_stays_cacheable():
     """persona 텍스트(profile.system_prompt)가 system_prompt(cacheable)에 유지된다."""
     from src.router.strategy_builder import StrategyBuilder
-    from src.router.execution_plan import QuestionType, QuestionStrategy
+    from src.domain.execution_plan import QuestionType, QuestionStrategy
     from src.domain.models import AgentMode
 
     builder = StrategyBuilder()
@@ -84,7 +84,7 @@ def test_strategy_builder_persona_stays_cacheable():
 def test_strategy_builder_external_context_in_cacheable():
     """external_context 가 system_prompt(cacheable)에 포함되고 volatile 에는 없다."""
     from src.router.strategy_builder import StrategyBuilder
-    from src.router.execution_plan import QuestionType, QuestionStrategy
+    from src.domain.execution_plan import QuestionType, QuestionStrategy
     from src.domain.models import AgentMode
 
     builder = StrategyBuilder()
@@ -108,7 +108,7 @@ def test_strategy_builder_external_context_in_cacheable():
 def test_strategy_builder_no_system_prompt_no_volatile():
     """system_prompt 가 없으면 volatile_system_prompt 도 없다."""
     from src.router.strategy_builder import StrategyBuilder
-    from src.router.execution_plan import QuestionType, QuestionStrategy
+    from src.domain.execution_plan import QuestionType, QuestionStrategy
     from src.domain.models import AgentMode
 
     builder = StrategyBuilder()
@@ -133,7 +133,7 @@ def test_strategy_builder_no_system_prompt_no_volatile():
 
 def _make_plan(system_prompt: str = "페르소나", volatile: str = "") -> MagicMock:
     """테스트용 ExecutionPlan 목업."""
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
     from src.domain.models import AgentMode, SearchScope
     return ExecutionPlan(
         mode=AgentMode.DETERMINISTIC,
@@ -368,7 +368,7 @@ async def test_engine_generate_dynamic_no_llm_returns_fallback():
 
 def test_execution_plan_has_volatile_system_prompt_field():
     """ExecutionPlan 에 volatile_system_prompt 필드가 기본값 '' 로 존재한다."""
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
     from src.domain.models import AgentMode, SearchScope
 
     plan = ExecutionPlan(
@@ -381,7 +381,7 @@ def test_execution_plan_has_volatile_system_prompt_field():
 
 def test_execution_plan_volatile_system_prompt_settable():
     """ExecutionPlan 생성 시 volatile_system_prompt 를 지정할 수 있다."""
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
     from src.domain.models import AgentMode, SearchScope
 
     plan = ExecutionPlan(

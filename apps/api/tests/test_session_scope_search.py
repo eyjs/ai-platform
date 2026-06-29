@@ -10,7 +10,7 @@ import pytest
 
 from src.domain.models import SearchScope
 from src.router.strategy_builder import STRATEGY_MATRIX, StrategyBuilder
-from src.router.execution_plan import QuestionType
+from src.domain.execution_plan import QuestionType
 from src.infrastructure.vector_store import VectorStore
 
 

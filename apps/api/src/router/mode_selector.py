@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from src.domain.agent_profile import AgentProfile
 from src.domain.models import AgentMode
-from src.router.execution_plan import QuestionType
+from src.domain.execution_plan import QuestionType
 from src.router.semantic_classifier import Candidate, SemanticClassifier
 
 logger = logging.getLogger(__name__)

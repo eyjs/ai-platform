@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 from src.router.intent_classifier import IntentClassifier
-from src.router.execution_plan import QuestionType
+from src.domain.execution_plan import QuestionType
 
 
 def _make_profile():

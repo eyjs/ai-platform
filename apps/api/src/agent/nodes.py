@@ -14,7 +14,7 @@ from src.config import settings
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
 from src.observability.logging import get_logger
-from src.router.execution_plan import ToolCall
+from src.domain.execution_plan import ToolCall
 from src.safety.base import Guardrail, GuardrailContext
 from src.domain.agent_context import AgentContext
 from src.tools.registry import ToolRegistry

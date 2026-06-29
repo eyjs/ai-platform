@@ -2,7 +2,7 @@
 
 from src.agent.profile import AgentMode
 from src.domain.models import COMMON_DOMAIN, SearchScope, resolve_domain_hierarchy
-from src.router.execution_plan import (
+from src.domain.execution_plan import (
     ExecutionPlan,
     QuestionStrategy,
     QuestionType,

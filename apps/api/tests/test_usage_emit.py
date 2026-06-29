@@ -23,7 +23,7 @@ from src.infrastructure.providers.llm.anthropic import AnthropicStubProvider
 def _make_stream_executor():
     """테스트용 GraphExecutor (agentic 스트리밍)."""
     from src.agent.graph_executor import GraphExecutor
-    from src.router.graph_cache import GraphCache
+    from src.agent.graph_cache import GraphCache
 
     mock_llm = AsyncMock()
     mock_llm.generate = AsyncMock(return_value="test answer")
@@ -45,7 +45,7 @@ def _agentic_plan(system_prompt: str = "You are a test assistant."):
     """agentic 모드 ExecutionPlan."""
     from src.agent.graph_executor import AgentMode
     from src.domain.models import SearchScope
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 
     return ExecutionPlan(
         mode=AgentMode.AGENTIC,
@@ -345,9 +345,9 @@ def test_extract_usage_partial_attrs():
 async def test_workflow_done_preserves_existing_fields():
     """_stream_workflow done 봉투의 기존 workflow{} 필드가 유지된다."""
     from src.agent.graph_executor import GraphExecutor
-    from src.router.graph_cache import GraphCache
+    from src.agent.graph_cache import GraphCache
     from src.domain.models import AgentMode, SearchScope
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
     from src.workflow.engine import StepResult
 
     mock_llm = AsyncMock()

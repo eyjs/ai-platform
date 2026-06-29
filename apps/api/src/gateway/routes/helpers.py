@@ -23,7 +23,7 @@ from src.infrastructure.memory.memory_extractor import MemoryExtractor
 from src.observability.logging import RequestContext, get_logger, request_context
 from src.observability.trace_logger import RequestTrace
 from src.orchestrator.models import OrchestratorResult
-from src.router.execution_plan import ExecutionPlan
+from src.domain.execution_plan import ExecutionPlan
 from src.workflow.engine import StepResult
 
 APP_VERSION = "0.1.0"

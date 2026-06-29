@@ -19,7 +19,7 @@ from src.common.exceptions import AIError, RouterAIError
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.router.context_resolver import ChainResolver, ResolutionResult
-from src.router.execution_plan import ExecutionPlan, QuestionType
+from src.domain.execution_plan import ExecutionPlan, QuestionType
 from src.router.intent_classifier import IntentClassifier
 from src.router.mode_selector import ModeSelector
 from src.router.semantic_classifier import SemanticClassifier

@@ -210,7 +210,7 @@ class TestModelWiringIntegration:
     def test_plan_main_model_from_strategy_builder(self):
         """StrategyBuilder.build 가 profile.main_model 을 plan 에 전달한다."""
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType
+        from src.domain.execution_plan import QuestionType
         from src.domain.models import AgentMode
 
         profile = self._make_profile(main_model="opus", router_model="sonnet")
@@ -229,7 +229,7 @@ class TestModelWiringIntegration:
     def test_plan_router_model_from_strategy_builder(self):
         """StrategyBuilder.build 가 profile.router_model 을 plan 에 전달한다."""
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType
+        from src.domain.execution_plan import QuestionType
         from src.domain.models import AgentMode
 
         profile = self._make_profile(main_model="sonnet", router_model="haiku")
@@ -248,7 +248,7 @@ class TestModelWiringIntegration:
     def test_plan_empty_model_when_profile_unset(self):
         """profile.main_model 이 기본 "sonnet" 일 때 plan 에 "sonnet" 이 들어온다."""
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType
+        from src.domain.execution_plan import QuestionType
         from src.domain.models import AgentMode
 
         profile = self._make_profile(main_model="sonnet")
@@ -305,7 +305,7 @@ def _make_executor_with_override(
 
 def _agentic_plan_with_model(main_model: str = "sonnet"):
     from src.domain.models import AgentMode, SearchScope
-    from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
     return ExecutionPlan(
         mode=AgentMode.AGENTIC,
         scope=SearchScope(),

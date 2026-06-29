@@ -13,7 +13,7 @@ import pytest
 from src.domain.models import AgentMode, SearchScope
 from src.gateway.models import ChatRequest
 from src.gateway.routes.helpers import _inject_directive
-from src.router.execution_plan import ExecutionPlan
+from src.domain.execution_plan import ExecutionPlan
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ class TestContextFlowsToExternalContext:
     def test_external_context_appears_in_system_prompt(self):
         """external_context가 있으면 system_prompt에 '참고 컨텍스트' 블록이 생성된다."""
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType, QuestionStrategy
+        from src.domain.execution_plan import QuestionType, QuestionStrategy
         from src.domain.agent_profile import AgentProfile
 
         builder = StrategyBuilder()
@@ -191,7 +191,7 @@ class TestContextFlowsToExternalContext:
     def test_no_external_context_no_injection(self):
         """external_context가 없으면 참고 컨텍스트 블록이 없다."""
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType, QuestionStrategy
+        from src.domain.execution_plan import QuestionType, QuestionStrategy
         from src.domain.agent_profile import AgentProfile
 
         builder = StrategyBuilder()
@@ -230,7 +230,7 @@ class TestCachingPositionSeparation:
         directive → _inject_directive (volatile_system_prompt, 캐시 밖)
         """
         from src.router.strategy_builder import StrategyBuilder
-        from src.router.execution_plan import QuestionType, QuestionStrategy
+        from src.domain.execution_plan import QuestionType, QuestionStrategy
         from src.domain.agent_profile import AgentProfile
 
         builder = StrategyBuilder()

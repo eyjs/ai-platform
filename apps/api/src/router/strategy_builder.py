@@ -13,7 +13,7 @@ from src.domain.models import (
     AgentMode, ResponsePolicy, SearchScope, SecurityLevel,
     SECURITY_HIERARCHY, resolve_domain_hierarchy,
 )
-from src.router.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
+from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType, ToolCall
 from src.tools.base import ScopedTool, Tool
 
 logger = logging.getLogger(__name__)

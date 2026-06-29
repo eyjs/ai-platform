@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.router.graph_cache import GraphCache, CacheKey
+from src.agent.graph_cache import GraphCache, CacheKey
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def test_ttl_expiry(cache: GraphCache):
     cache.put(key, graph)
 
     # TTL 1초 설정 — 시간 조작
-    with patch("src.router.graph_cache.time.time", return_value=time.time() + 2.0):
+    with patch("src.agent.graph_cache.time.time", return_value=time.time() + 2.0):
         result = cache.get(key)
 
     assert result is None

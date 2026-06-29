@@ -7,7 +7,7 @@ P0-2: CROSS_DOC_INTEGRATION max_vector_chunks=10
 import pytest
 
 from src.router.strategy_builder import STRATEGY_MATRIX, StrategyBuilder
-from src.router.execution_plan import QuestionType, QuestionStrategy
+from src.domain.execution_plan import QuestionType, QuestionStrategy
 
 
 class TestStrategyMatrixValues:

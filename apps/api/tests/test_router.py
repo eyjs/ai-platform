@@ -1,7 +1,7 @@
 """Router 컴포넌트 테스트."""
 
 from src.agent.profile import AgentMode, AgentProfile, HybridTrigger
-from src.router.execution_plan import QuestionType
+from src.domain.execution_plan import QuestionType
 from src.router.mode_selector import ModeSelector
 from src.router.semantic_classifier import ClassifyResult
 

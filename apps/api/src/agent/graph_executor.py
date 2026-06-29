@@ -20,8 +20,8 @@ from src.infrastructure.providers.model_aliases import resolve_model_alias
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.observability.trace_logger import RequestTrace
-from src.router.execution_plan import ExecutionPlan
-from src.router.graph_cache import GraphCache
+from src.domain.execution_plan import ExecutionPlan
+from src.agent.graph_cache import GraphCache
 from src.safety.base import GuardrailContext
 from src.safety.base import Guardrail
 from src.services.kms_graph_client import KmsGraphClient

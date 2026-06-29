@@ -12,7 +12,7 @@ from src.config import settings
 from src.domain.agent_profile import AgentProfile, IntentHint
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
-from src.router.execution_plan import QuestionType
+from src.domain.execution_plan import QuestionType
 
 logger = logging.getLogger(__name__)
 

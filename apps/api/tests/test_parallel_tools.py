@@ -6,7 +6,7 @@ import time
 import pytest
 from unittest.mock import AsyncMock
 
-from src.router.execution_plan import ToolCall, ExecutionPlan, QuestionStrategy, QuestionType
+from src.domain.execution_plan import ToolCall, ExecutionPlan, QuestionStrategy, QuestionType
 from src.domain.models import AgentMode, SearchScope
 from src.agent.state import create_initial_state
 from src.observability.trace_logger import RequestTrace

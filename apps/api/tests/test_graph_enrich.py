@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.agent.graph_enrich import create_graph_enrich, GRAPH_CONTEXT_HEADER
 from src.domain.models import SearchScope
-from src.router.execution_plan import ExecutionPlan, QuestionType
+from src.domain.execution_plan import ExecutionPlan, QuestionType
 
 
 def _make_plan(security_level_max="PUBLIC"):
