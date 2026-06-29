@@ -105,16 +105,28 @@ apps/api/
 │   ├── gateway/          # C1: 인증, SSE, 엔드포인트
 │   ├── router/           # C2: 4-Layer Router
 │   ├── agent/            # C3: Universal Agent, Profile
+│   │   ├── graph_cache.py        # in-process TTL 캐시 (LangGraph 컴파일 그래프)
+│   │   └── executors/            # 모드별 실행 러너 (Mixin 합성)
+│   │       ├── workflow_executor.py
+│   │       ├── deterministic_executor.py
+│   │       ├── agentic_executor.py
+│   │       └── _helpers.py       # 공유 헬퍼 함수
 │   ├── workflow/         # C4: Workflow Engine
 │   ├── tools/            # C5: Tool Protocol, Registry
 │   │   └── internal/     # 내장 도구 (rag_search, fact_lookup)
 │   ├── domain/           # C6: Context Builder, SearchScope
+│   │   └── execution_plan.py     # ExecutionPlan, QuestionType, QuestionStrategy, ToolCall
 │   ├── infrastructure/   # C7: PostgreSQL 기반 전체 인프라
+│   │   ├── vector_store.py       # 연결/CRUD 코어
+│   │   ├── vector_search.py      # VectorSearchMixin: 검색 파이프라인 16메서드
 │   │   ├── providers/    # LLM/Embedding/Reranker
 │   │   └── memory/       # Session, Cache (PostgreSQL)
 │   ├── safety/           # C8: Guardrail Chain
 │   ├── observability/    # C9: 메트릭, 로그
-│   └── pipeline/         # C10: Knowledge Pipeline
+│   ├── pipeline/         # C10: Knowledge Pipeline
+│   └── services/         # 범용 cross-cutting 서비스 (feedback, kms, cache 등)
+│       └── consumers/
+│           └── saju/     # saju consumer 전용 모듈 (fortune, myo_play, report)
 ├── seeds/
 │   ├── profiles/         # Profile YAML
 │   └── workflows/        # Workflow YAML
