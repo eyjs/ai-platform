@@ -3,8 +3,9 @@
 import asyncio
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
+from src.domain.models import UserRole
 from src.gateway.routes.helpers import APP_VERSION, _authenticate, _get_app_state
 
 router = APIRouter()
@@ -34,7 +35,10 @@ async def health(request: Request):
 @router.get("/health/hardware")
 async def health_hardware(request: Request):
     """하드웨어 모니터링 — MLX 서버 /health 동시 폴링 → GPU 메모리·호스트 CPU/메모리 집계."""
-    await _authenticate(request)  # 인증 필수 (인프라 정보 보호)
+    # 인프라 정보 노출 → ADMIN 전용 (형제 admin 엔드포인트와 게이트 일치).
+    user_ctx = await _authenticate(request)
+    if user_ctx.user_role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="ADMIN 권한이 필요합니다")
     settings = _get_app_state(request).settings
 
     seen: dict[str, str] = {}  # url → 표시명 (중복 url 제거)
