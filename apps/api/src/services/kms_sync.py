@@ -131,7 +131,8 @@ class KmsSyncService:
         # 파싱결과(조립 MD)를 KMS 로 콜백 — 원본↔MD 비교 표시용(Path B).
         # markdown 은 job 큐 로그에 싣지 않도록 pop 후 별도 전송한다.
         markdown = result.pop("markdown", None)
-        await self._post_parse_result(document_id, markdown, parse_status="success")
+        # KMS 정본 ParseStatus 값(PARSED) — 프론트 '파싱 비교' 탭 활성 조건과 일치해야 한다.
+        await self._post_parse_result(document_id, markdown, parse_status="PARSED")
 
         logger.info(
             "kms_sync_complete",
@@ -205,7 +206,7 @@ class KmsSyncService:
         self,
         document_id: str,
         markdown: str | None,
-        parse_status: str = "success",
+        parse_status: str = "PARSED",
         error: str | None = None,
     ) -> None:
         """파싱된 마크다운을 KMS 로 콜백 전송한다 (POST /processing/:id/content).
