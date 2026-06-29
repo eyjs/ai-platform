@@ -47,8 +47,8 @@ def _agentic_plan(
     )
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_cache_miss_builds_and_stores(mock_convert, mock_build):
     """캐시 미스 시 build_agentic_graph를 호출하고 캐시에 저장한다."""
     # mock tool
@@ -76,8 +76,8 @@ async def test_cache_miss_builds_and_stores(mock_convert, mock_build):
     assert cache.size == 1
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_cache_hit_skips_build(mock_convert, mock_build):
     """동일 (system_prompt, tool_names) 요청은 캐시 히트로 build를 건너뛴다."""
     mock_lc_tool = MagicMock()
@@ -106,8 +106,8 @@ async def test_cache_hit_skips_build(mock_convert, mock_build):
     assert cache.size == 1
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_different_prompt_causes_cache_miss(mock_convert, mock_build):
     """system_prompt가 다르면 캐시 미스로 새로 빌드한다."""
     mock_lc_tool = MagicMock()
@@ -133,8 +133,8 @@ async def test_different_prompt_causes_cache_miss(mock_convert, mock_build):
     assert cache.size == 2
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_different_tools_causes_cache_miss(mock_convert, mock_build):
     """tool_names가 다르면 캐시 미스로 새로 빌드한다."""
     call_count = [0]
@@ -171,8 +171,8 @@ async def test_different_tools_causes_cache_miss(mock_convert, mock_build):
     assert cache.size == 2
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_invalidate_clears_cache_for_profile(mock_convert, mock_build):
     """profile_id 기반 invalidate가 해당 캐시를 제거한다."""
     mock_lc_tool = MagicMock()

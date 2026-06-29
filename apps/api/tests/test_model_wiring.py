@@ -317,9 +317,9 @@ def _agentic_plan_with_model(main_model: str = "sonnet"):
     )
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
-@patch("src.agent.graph_executor.resolve_model_alias")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.resolve_model_alias")
 async def test_executor_override_calls_factory_with_resolved_model(
     mock_resolve, mock_convert, mock_build,
 ):
@@ -355,9 +355,9 @@ async def test_executor_override_calls_factory_with_resolved_model(
     assert call_kwargs is not None
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
-@patch("src.agent.graph_executor.resolve_model_alias")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.resolve_model_alias")
 async def test_executor_override_bypasses_cache(
     mock_resolve, mock_convert, mock_build,
 ):
@@ -394,8 +394,8 @@ async def test_executor_override_bypasses_cache(
 # ---------------------------------------------------------------------------
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_regression_empty_main_model_uses_default_chat_model(
     mock_convert, mock_build,
 ):
@@ -431,8 +431,8 @@ async def test_regression_empty_main_model_uses_default_chat_model(
     assert call_kwargs.kwargs.get("chat_model") is default_chat or call_kwargs.args[0] is default_chat
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_regression_no_provider_factory_uses_default_path(
     mock_convert, mock_build,
 ):
@@ -462,8 +462,8 @@ async def test_regression_no_provider_factory_uses_default_path(
     mock_build.assert_called_once()
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_regression_no_settings_uses_default_path(
     mock_convert, mock_build,
 ):
@@ -492,9 +492,9 @@ async def test_regression_no_settings_uses_default_path(
     mock_build.assert_called_once()
 
 
-@patch("src.agent.graph_executor.resolve_model_alias")
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.resolve_model_alias")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_regression_unresolvable_alias_uses_default_path(
     mock_convert, mock_build, mock_resolve,
 ):

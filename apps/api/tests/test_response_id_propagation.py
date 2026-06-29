@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agent.graph_executor import _extract_faithfulness_score
+from src.agent.executors._helpers import _extract_faithfulness_score
 from src.agent.nodes import run_guardrail_chain
 from src.domain.models import AgentResponse
 from src.observability.request_log_models import RequestLogEntry

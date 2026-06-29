@@ -365,9 +365,9 @@ async def test_regression_default_plan_normal_execution(caplog):
 # ---------------------------------------------------------------------------
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
-@patch("src.agent.graph_executor.resolve_model_alias")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.resolve_model_alias")
 @pytest.mark.asyncio
 async def test_task_b_model_override_seam_intact(mock_resolve, mock_convert, mock_build, caplog):
     """Task C 패치 후에도 _effective_agentic_app 오버라이드 seam 이 작동해야 한다.

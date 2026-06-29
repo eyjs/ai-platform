@@ -92,8 +92,8 @@ def _make_token_event(text: str):
 # 테스트 1: agentic done 봉투에 usage 키 + 구조
 # ──────────────────────────────────────────────────────────────────────────────
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_agentic_done_has_usage_key(mock_convert, mock_build):
     """agentic _stream_agentic done 봉투에 usage 키가 있고 필수 필드를 포함한다."""
     mock_lc_tool = MagicMock()
@@ -140,8 +140,8 @@ async def test_agentic_done_has_usage_key(mock_convert, mock_build):
     assert "workflow" not in done_data, "agentic done에 workflow 키 없음"
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_agentic_done_usage_structure_types(mock_convert, mock_build):
     """usage 필드 값은 int 타입이어야 한다."""
     mock_lc_tool = MagicMock()
@@ -180,8 +180,8 @@ async def test_agentic_done_usage_structure_types(mock_convert, mock_build):
 # 테스트 2: usage 미가용 시 throw 없음, 0값 포함
 # ──────────────────────────────────────────────────────────────────────────────
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_agentic_done_usage_absent_graceful(mock_convert, mock_build):
     """usage 정보가 없는 이벤트만 올 때 throw 없이 usage 0값 포함."""
     mock_lc_tool = MagicMock()
@@ -217,8 +217,8 @@ async def test_agentic_done_usage_absent_graceful(mock_convert, mock_build):
     assert usage["cache_read_input_tokens"] == 0
 
 
-@patch("src.agent.graph_executor.build_agentic_graph")
-@patch("src.agent.graph_executor.convert_tools_to_langchain")
+@patch("src.agent.executors.agentic_executor.build_agentic_graph")
+@patch("src.agent.executors.agentic_executor.convert_tools_to_langchain")
 async def test_agentic_done_empty_event_stream_graceful(mock_convert, mock_build):
     """이벤트 스트림이 완전히 비어있어도 done 봉투 정상 방출 + throw 없음."""
     mock_lc_tool = MagicMock()
