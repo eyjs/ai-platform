@@ -39,6 +39,9 @@ class KmsSyncService:
     ):
         self._kms_url = settings.kms_api_url
         self._internal_key = settings.kms_internal_key
+        # VLM 보강 큐 전용: DocForge /v1/parse/sync 를 vlm_mode=full 로 직접 호출(긴 대기).
+        self._docforge_url = settings.docforge_url
+        self._docforge_internal_key = settings.docforge_internal_key
         self._store = vector_store
         self._pipeline = ingest_pipeline
         # 테넌트 격리(A2): tenant_id 는 NOT NULL. webhook 페이로드엔 테넌트가 없으므로
@@ -131,8 +134,13 @@ class KmsSyncService:
         # 파싱결과(조립 MD)를 KMS 로 콜백 — 원본↔MD 비교 표시용(Path B).
         # markdown 은 job 큐 로그에 싣지 않도록 pop 후 별도 전송한다.
         markdown = result.pop("markdown", None)
-        # KMS 정본 ParseStatus 값(PARSED) — 프론트 '파싱 비교' 탭 활성 조건과 일치해야 한다.
-        await self._post_parse_result(document_id, markdown, parse_status="PARSED")
+        # PDF 는 비동기 VLM 보강 큐 대상 → fast 결과와 함께 vlm_status=PENDING 으로 표시.
+        # (워커가 enhance job 적재, enhance_document 가 PROCESSING→DONE 으로 전이)
+        is_pdf = mime_type == "application/pdf"
+        await self._post_parse_result(
+            document_id, markdown, parse_status="PARSED",
+            vlm_status="PENDING" if is_pdf else None,
+        )
 
         logger.info(
             "kms_sync_complete",
@@ -140,6 +148,8 @@ class KmsSyncService:
             aip_doc_id=result.get("document_id"),
             chunks=result.get("chunks", 0),
         )
+        # 워커가 PDF 일 때만 vlm_enhance 큐에 적재하도록 mime 을 노출한다.
+        result["mime_type"] = mime_type
         return result
 
     async def delete_document(self, document_id: str) -> dict:
@@ -208,6 +218,7 @@ class KmsSyncService:
         markdown: str | None,
         parse_status: str = "PARSED",
         error: str | None = None,
+        vlm_status: str | None = None,
     ) -> None:
         """파싱된 마크다운을 KMS 로 콜백 전송한다 (POST /processing/:id/content).
 
@@ -224,6 +235,8 @@ class KmsSyncService:
             "parseStatus": parse_status,
             "parsedAt": datetime.now(timezone.utc).isoformat(),
         }
+        if vlm_status is not None:
+            payload["vlmStatus"] = vlm_status
         if error:
             payload["error"] = error
         try:
@@ -236,10 +249,99 @@ class KmsSyncService:
                 "kms_parse_callback_ok",
                 document_id=document_id,
                 parse_status=parse_status,
+                vlm_status=vlm_status,
                 chars=len(markdown or ""),
             )
         except httpx.HTTPError as e:
             logger.warning("kms_parse_callback_failed", document_id=document_id, error=str(e))
+
+    async def _post_vlm_status(
+        self, document_id: str, vlm_status: str, error: str | None = None,
+    ) -> None:
+        """VLM 보강 상태만 KMS 에 부분 업데이트한다 (markdown 미포함 → 기존 본문 보존).
+
+        rawText 키를 보내지 않으므로 KMS 부분 업데이트가 parsed_markdown 을 건드리지 않는다.
+        """
+        if not self._kms_url or not self._internal_key:
+            return
+        url = f"{self._kms_url}/processing/{document_id}/content"
+        payload = {"vlmStatus": vlm_status}
+        if error:
+            payload["error"] = error
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    url, json=payload, headers={"X-Internal-Key": self._internal_key},
+                )
+                resp.raise_for_status()
+            logger.info("kms_vlm_status_ok", document_id=document_id, vlm_status=vlm_status)
+        except httpx.HTTPError as e:
+            logger.warning("kms_vlm_status_failed", document_id=document_id, error=str(e))
+
+    async def enhance_document(self, document_id: str, data: dict) -> dict:
+        """비동기 VLM 보강: PDF 를 DocForge full-page VLM 으로 재파싱 → KMS 본문 교체.
+
+        fast 파싱과 분리된 백그라운드 큐('vlm_enhance')에서 실행되므로 동기 타임아웃이 없다.
+        상태 전이: PENDING(적재) → PROCESSING(시작) → DONE(완료) / FAILED(실패).
+        """
+        doc_meta = await self._fetch_document_meta(document_id)
+        if not doc_meta:
+            return {"status": "skipped", "reason": "document not found"}
+        file_type = doc_meta.get("fileType", "")
+        mime_type = doc_meta.get("mimeType") or _FILETYPE_TO_MIME.get(file_type, "")
+        if mime_type != "application/pdf":
+            # PDF 만 VLM 보강 대상 (CSV/MD 는 테이블 구조 복원 불필요)
+            return {"status": "skipped", "reason": f"not a pdf ({mime_type})"}
+
+        file_name = doc_meta.get("fileName") or f"{document_id}.pdf"
+        await self._post_vlm_status(document_id, "PROCESSING")
+
+        file_bytes = await self._download_file(document_id)
+        if not file_bytes:
+            await self._post_vlm_status(document_id, "FAILED", error="file download failed")
+            return {"status": "failed", "reason": "file download failed"}
+
+        markdown = await self._docforge_parse_vlm(file_bytes, file_name, mime_type)
+        if not markdown:
+            await self._post_vlm_status(document_id, "FAILED", error="docforge vlm parse failed")
+            return {"status": "failed", "reason": "docforge vlm parse failed"}
+
+        # 본문 교체 + DONE
+        await self._post_parse_result(
+            document_id, markdown, parse_status="PARSED", vlm_status="DONE",
+        )
+        logger.info("kms_vlm_enhance_complete", document_id=document_id, chars=len(markdown))
+        return {"status": "enhanced", "document_id": document_id, "chars": len(markdown)}
+
+    async def _docforge_parse_vlm(
+        self, file_bytes: bytes, file_name: str, mime_type: str,
+    ) -> str | None:
+        """DocForge /v1/parse/sync 를 vlm_mode=full 로 호출(긴 대기). 마크다운 반환."""
+        if not self._docforge_url:
+            logger.warning("docforge_url_missing")
+            return None
+        url = f"{self._docforge_url}/v1/parse/sync"
+        headers = {}
+        if self._docforge_internal_key:
+            headers["X-Internal-Key"] = self._docforge_internal_key
+        try:
+            # 백그라운드 잡이라 긴 타임아웃 허용(full-page VLM 은 문서당 수십 분 가능).
+            async with httpx.AsyncClient(timeout=httpx.Timeout(2400.0)) as client:
+                resp = await client.post(
+                    url,
+                    files={"file": (file_name, file_bytes, mime_type)},
+                    data={"vlm_mode": "full"},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                body = resp.json()
+            if not body.get("success"):
+                logger.warning("docforge_vlm_parse_error", body=str(body)[:200])
+                return None
+            return (body.get("data") or {}).get("markdown")
+        except httpx.HTTPError as e:
+            logger.warning("docforge_vlm_http_error", error=str(e))
+            return None
 
     async def _delete_by_external_id(self, external_id: str) -> int:
         """external_id로 문서와 청크를 삭제한다."""
