@@ -5,6 +5,7 @@ KMS API에서 문서 메타데이터와 파일을 조회하고 IngestPipeline으
 """
 
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 
@@ -127,6 +128,11 @@ class KmsSyncService:
         if result.get("document_id"):
             await self._set_external_id(result["document_id"], document_id)
 
+        # 파싱결과(조립 MD)를 KMS 로 콜백 — 원본↔MD 비교 표시용(Path B).
+        # markdown 은 job 큐 로그에 싣지 않도록 pop 후 별도 전송한다.
+        markdown = result.pop("markdown", None)
+        await self._post_parse_result(document_id, markdown, parse_status="success")
+
         logger.info(
             "kms_sync_complete",
             document_id=document_id,
@@ -194,6 +200,45 @@ class KmsSyncService:
         except httpx.HTTPError as e:
             logger.error("kms_download_error", url=url, error=str(e))
             return None
+
+    async def _post_parse_result(
+        self,
+        document_id: str,
+        markdown: str | None,
+        parse_status: str = "success",
+        error: str | None = None,
+    ) -> None:
+        """파싱된 마크다운을 KMS 로 콜백 전송한다 (POST /processing/:id/content).
+
+        graceful: 콜백 실패가 ingest 를 실패시키지 않는다. KMS 가 비교 표시용으로만 쓰므로
+        전송 실패 시 WARN 후 통과한다(다음 재처리 때 갱신).
+        """
+        if not self._kms_url or not self._internal_key:
+            logger.warning("kms_parse_callback_skipped", document_id=document_id, reason="no kms url/key")
+            return
+
+        url = f"{self._kms_url}/processing/{document_id}/content"
+        payload = {
+            "rawText": markdown,
+            "parseStatus": parse_status,
+            "parsedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        if error:
+            payload["error"] = error
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    url, json=payload, headers={"X-Internal-Key": self._internal_key},
+                )
+                resp.raise_for_status()
+            logger.info(
+                "kms_parse_callback_ok",
+                document_id=document_id,
+                parse_status=parse_status,
+                chars=len(markdown or ""),
+            )
+        except httpx.HTTPError as e:
+            logger.warning("kms_parse_callback_failed", document_id=document_id, error=str(e))
 
     async def _delete_by_external_id(self, external_id: str) -> int:
         """external_id로 문서와 청크를 삭제한다."""
