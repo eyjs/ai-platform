@@ -11,6 +11,7 @@ import { usePolling } from '@/hooks/use-polling';
 import { StatsCard } from '@/components/admin/stats-card';
 import { UsageChart } from '@/components/admin/dashboard/usage-chart';
 import { LatencyChart } from '@/components/admin/dashboard/latency-chart';
+import { HardwarePanel } from '@/components/admin/dashboard/hardware-panel';
 import { fetchUsage, fetchLatency } from '@/lib/api/bff-dashboard';
 import { fetchPlatformOverview, type PlatformOverview } from '@/lib/api/admin';
 import { formatDuration, latencyColor } from '@/lib/format';
@@ -160,6 +161,9 @@ export default function DashboardPage() {
           <LatencyChart data={latency} isLoading={latencyLoading} />
         </div>
       </div>
+
+      {/* 하드웨어 · GPU 모니터링 (api /health/hardware 직접 폴링) */}
+      <HardwarePanel />
 
       {/* 최근 요청 로그 (api_request_logs) */}
       <Card>
