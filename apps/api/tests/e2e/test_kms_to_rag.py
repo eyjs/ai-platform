@@ -5,8 +5,9 @@
   2. 배치        POST :3001/api/placements (domainCode=DB-DAMAGE)
   3. ai-platform documents 테이블에 external_id=KMS id · domain_code=DB-DAMAGE 단일행
 
-추가 단언:
-  - document.created(배치 전, domain 빈값) → skip / document.updated(배치 후) → success
+추가 단언 (임베딩·배치 분리 설계):
+  - document.created(배치 전) → holding 도메인(__unplaced__)으로 즉시 적재
+    / document.updated(배치 후) → 재임베딩 없이 domain_code 만 재태깅
   - 멱등: 동일 배치 재전송 → 행 수 불변 (Step 25 (external_id, domain_code) UPSERT)
 
 게이트: AIP_E2E_LIVE 미설정 시 conftest 가 전체 skip (조용한 통과 아님).
@@ -51,31 +52,34 @@ async def test_golden_path_single_row(
 
 @pytest.mark.e2e
 @pytest.mark.live
-async def test_created_skips_updated_succeeds(
+async def test_created_embeds_unplaced_then_placement_retags(
     kms_client, kms_jwt, aip_db, cleanup_external_ids
 ):
-    """document.created(배치 전) → skip / document.updated(배치 후) → success.
+    """document.created(배치 전) → holding 적재 / document.updated(배치 후) → 재태깅.
 
-    업로드 직후(배치 전)에는 domain 이 없어 kms_sync 가 'awaiting placement' skip.
-    → ai-platform documents 에 행이 생기지 않아야 한다.
-    배치 후 document.updated 로 비로소 적재된다.
+    임베딩·배치 분리 설계: 업로드 즉시 파싱·청킹·임베딩하되 아직 도메인이 없으므로
+    holding 도메인(__unplaced__)으로 적재된다("업로드=청크 생성" 보장, 단 검색 스코프
+    밖이라 비노출). 배치가 오면 **재임베딩 없이** 같은 행의 domain_code 만 상품도메인으로
+    in-place 재태깅된다(행 수 불변).
     """
     kms_doc_id = await H.kms_upload_document(kms_client, kms_jwt)
     cleanup_external_ids(kms_doc_id)
 
-    # 배치 전: created 이벤트만 발생 → domain 빈값 → 적재 보류(skip)
-    pre = await H.assert_no_sync(aip_db, kms_doc_id, settle_sec=8.0)
-    assert pre == [], (
-        f"배치 전 적재 발생(이중적재 의심): {pre}. "
-        "document.created(domain 빈값)는 skip 되어야 한다."
+    # 배치 전: created → 즉시 임베딩, 단 holding 도메인(__unplaced__)
+    pre = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=90.0)
+    assert len(pre) == 1, f"업로드 후 단일 적재 기대, 실제 {len(pre)}건: {pre}"
+    assert pre[0]["domain_code"] == H.UNPLACED_DOMAIN, (
+        f"배치 전에는 holding 도메인(__unplaced__) 기대, 실제 {pre[0]['domain_code']}"
     )
 
-    # 배치 후: updated → success
+    # 배치 후: updated → 재임베딩 없이 domain_code 만 상품도메인으로 재태깅 (행 수 불변)
     resp = await H.kms_create_placement(kms_client, kms_jwt, kms_doc_id)
     assert resp.status_code in (200, 201), f"배치 실패: {resp.status_code} {resp.text}"
 
-    post = await H.wait_for_sync(aip_db, kms_doc_id, expected_count=1, timeout_sec=90.0)
-    assert len(post) == 1, f"배치 후 단일 적재 기대, 실제 {len(post)}건: {post}"
+    post = await H.wait_for_domain(
+        aip_db, kms_doc_id, H.DEFAULT_DOMAIN_CODE, timeout_sec=90.0
+    )
+    assert len(post) == 1, f"재태깅 후 단일행 기대, 실제 {len(post)}건: {post}"
     assert post[0]["domain_code"] == H.DEFAULT_DOMAIN_CODE
 
 

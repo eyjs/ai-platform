@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 import textwrap
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 import src.services.domain_mapping as dm
-from src.services.kms_sync import KmsSyncService
+from src.services.kms_sync import UNPLACED_DOMAIN, KmsSyncService
 
 
 # ---- 테스트용 매핑 YAML 픽스처 (실 seed 와 격리) ----
@@ -106,6 +107,8 @@ def _make_service() -> KmsSyncService:
             "kms_api_url": "http://kms.local",
             "kms_internal_key": "key",
             "default_tenant_id": "default",
+            "docforge_url": "http://docforge.local",
+            "docforge_internal_key": "dfkey",
         },
     )()
     vector_store = AsyncMock()
@@ -119,6 +122,13 @@ def _make_service() -> KmsSyncService:
     svc._download_file = AsyncMock(return_value=b"%PDF-1.4 stub")  # type: ignore[method-assign]
     svc._delete_by_external_id = AsyncMock(return_value=0)  # type: ignore[method-assign]
     svc._set_external_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    # 미적재 상태(fresh ingest)로 고정 — 매핑 분기만 검증. 재태깅/스킵 분기는 별도 테스트.
+    svc._get_existing = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    # advisory lock 은 no-op 으로 스텁 (mock pool 로 실 SQL 실행 방지).
+    @asynccontextmanager
+    async def _noop_lock(_document_id: str):
+        yield
+    svc._doc_lock = _noop_lock  # type: ignore[method-assign]
     return svc
 
 
@@ -176,3 +186,88 @@ class TestSyncDocumentMapping:
 
         assert svc._pipeline.ingest_text.await_args.kwargs["domain_code"] == "DB-DAMAGE"
         assert any("kms_sync_domain_unmapped" in r.getMessage() for r in caplog.records)
+
+
+# ---- 임베딩·배치 분리 설계 테스트 ----
+
+
+class TestEmbedPlacementSeparation:
+    """업로드 즉시 임베딩(holding) + 배치 시 재태깅 분기."""
+
+    @pytest.mark.asyncio
+    async def test_배치전_created_holding_도메인으로_임베딩(self, mapping_env):
+        # domainCodes 없는 업로드(document.created) → __unplaced__ 로 즉시 적재
+        svc = _make_service()
+        data: dict = {}  # 배치 전: 도메인 없음
+
+        await svc.sync_document("doc-new", data, event="document.created")
+
+        svc._pipeline.ingest_text.assert_awaited_once()
+        assert svc._pipeline.ingest_text.await_args.kwargs["domain_code"] == UNPLACED_DOMAIN
+
+    @pytest.mark.asyncio
+    async def test_배치시_재임베딩없이_재태깅(self, mapping_env):
+        # 이미 holding 으로 적재된 문서 + 배치(document.updated) → 재태깅만, ingest X
+        svc = _make_service()
+        svc._get_existing = AsyncMock(  # type: ignore[method-assign]
+            return_value={"id": "aip-1", "domain_code": UNPLACED_DOMAIN, "security_level": "PUBLIC"}
+        )
+        svc._retag_and_refresh = AsyncMock(return_value=3)  # type: ignore[method-assign]
+        data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
+
+        result = await svc.sync_document("doc-1", data, event="document.updated")
+
+        # doc_id(재사용) + 상품도메인 + 보안등급 으로 재태깅. ingest 는 호출 안 됨.
+        svc._retag_and_refresh.assert_awaited_once_with("aip-1", "자동차보험", "PUBLIC")
+        svc._pipeline.ingest_text.assert_not_awaited()
+        assert result["status"] == "retagged"
+        assert result["domain_code"] == "자동차보험"
+
+    @pytest.mark.asyncio
+    async def test_보안등급_변경은_재임베딩없이_청크까지_전파(self, mapping_env):
+        # 동일 도메인이라도 securityLevel 변경 시 재태깅으로 청크까지 전파(다운그레이드 누출 방지)
+        svc = _make_service()
+        svc._fetch_document_meta = AsyncMock(  # type: ignore[method-assign]
+            return_value={"fileName": "약관.pdf", "fileType": "pdf", "securityLevel": "CONFIDENTIAL"}
+        )
+        svc._get_existing = AsyncMock(  # type: ignore[method-assign]
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+        )
+        svc._retag_and_refresh = AsyncMock(return_value=5)  # type: ignore[method-assign]
+        data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
+
+        result = await svc.sync_document("doc-1", data, event="document.updated")
+
+        svc._retag_and_refresh.assert_awaited_once_with("aip-1", "자동차보험", "CONFIDENTIAL")
+        svc._pipeline.ingest_text.assert_not_awaited()
+        assert result["status"] == "retagged"
+
+    @pytest.mark.asyncio
+    async def test_변경없는_메타이벤트는_스킵(self, mapping_env):
+        # 이미 배치된 문서 + 도메인·보안등급 모두 불변 → 스킵(재임베딩·재태깅 X, 멱등)
+        svc = _make_service()
+        svc._get_existing = AsyncMock(  # type: ignore[method-assign]
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+        )
+        svc._retag_and_refresh = AsyncMock(return_value=0)  # type: ignore[method-assign]
+        data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
+
+        result = await svc.sync_document("doc-1", data, event="document.updated")
+
+        assert result["status"] == "skipped"
+        svc._pipeline.ingest_text.assert_not_awaited()
+        svc._retag_and_refresh.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_파일재업로드는_기존도메인_보존하며_재적재(self, mapping_env):
+        # 이미 적재된 문서 + file_uploaded(콘텐츠 변경) → 재적재, 기존 도메인 보존
+        svc = _make_service()
+        svc._get_existing = AsyncMock(  # type: ignore[method-assign]
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+        )
+        data: dict = {}  # 재업로드 이벤트엔 도메인 없음 → 기존값 보존
+
+        await svc.sync_document("doc-1", data, event="document.file_uploaded")
+
+        svc._pipeline.ingest_text.assert_awaited_once()
+        assert svc._pipeline.ingest_text.await_args.kwargs["domain_code"] == "자동차보험"

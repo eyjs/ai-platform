@@ -5,11 +5,13 @@ KMS API에서 문서 메타데이터와 파일을 조회하고 IngestPipeline으
 """
 
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import httpx
 
 from src.config import Settings
+from src.domain.models import UNPLACED_DOMAIN
 from src.infrastructure.vector_store import VectorStore
 from src.observability.logging import get_logger
 from src.pipeline.ingest import IngestPipeline
@@ -26,6 +28,9 @@ _FILETYPE_TO_MIME = {
     "md": "text/markdown",
     "csv": "text/csv",
 }
+
+# holding 도메인(UNPLACED_DOMAIN)은 domain/models 에 정의 — 검색 계층(vector_search)이
+# 동일 상수로 항상 제외하여 "임베딩됨·비노출" 불변식을 보장한다. 여기선 재노출(import)만.
 
 
 class KmsSyncService:
@@ -49,8 +54,15 @@ class KmsSyncService:
         # webhook data 로 전달하면 data 우선으로 확장.
         self._default_tenant_id = settings.default_tenant_id or "default"
 
-    async def sync_document(self, document_id: str, data: dict) -> dict:
-        """KMS에서 문서를 가져와 벡터 DB에 동기화한다."""
+    async def sync_document(self, document_id: str, data: dict, event: str = "") -> dict:
+        """KMS 문서를 벡터 DB에 동기화한다 (임베딩·배치 분리 설계).
+
+        업로드(document.created)는 도메인 없이 오지만 **즉시** 파싱·청킹·임베딩하여
+        holding 도메인(__unplaced__)으로 적재한다("업로드=청크 생성" 보장). 배치
+        (document.updated + domainCodes)가 오면 **재임베딩 없이** doc/chunks 의
+        domain_code 만 in-place 재태깅한다(임베딩은 콘텐츠당 1회). 파일 재업로드
+        (document.file_uploaded)만 재적재하고, 순수 메타 갱신은 스킵한다.
+        """
         if not self._kms_url or not self._internal_key:
             raise RuntimeError("KMS API URL or Internal Key not configured")
 
@@ -59,45 +71,78 @@ class KmsSyncService:
             logger.warning("kms_document_not_found", document_id=document_id)
             return {"status": "skipped", "reason": "document not found in KMS"}
 
+        # 배치 이벤트가 실은 회사도메인 → 상품도메인 해석 (미배치=None)
+        resolved_domain = self._resolve_domain(document_id, data)
+
+        # 같은 문서의 create/placement 동시 처리를 직렬화한다(이중 행 방지) — PG advisory lock.
+        # max_concurrent 워커에서 create(→__unplaced__)와 placement(→상품도메인)가 동시에
+        # 존재확인을 통과하면 external_id 가 같아도 domain_code 가 달라 2행이 생길 수 있다.
+        async with self._doc_lock(document_id):
+            return await self._sync_locked(
+                document_id, data, event, doc_meta, resolved_domain,
+            )
+
+    async def _sync_locked(
+        self,
+        document_id: str,
+        data: dict,
+        event: str,
+        doc_meta: dict,
+        resolved_domain: str | None,
+    ) -> dict:
+        """advisory lock 하에서 실행되는 존재확인 + (재)적재/재태깅 본체."""
+        existing = await self._get_existing(document_id)
+
         file_name = doc_meta.get("fileName") or doc_meta.get("originalName", "")
         title = doc_meta.get("title") or file_name or "Untitled"
         file_type = doc_meta.get("fileType", "")
         mime_type = doc_meta.get("mimeType") or _FILETYPE_TO_MIME.get(file_type, "")
-        security_level = doc_meta.get("securityLevel", "PUBLIC")
+        raw_security = doc_meta.get("securityLevel", "PUBLIC")
+        security_level = raw_security if raw_security in _SECURITY_MAP else "PUBLIC"
         status = doc_meta.get("lifecycle") or doc_meta.get("status", "DRAFT")
 
-        # 도메인 코드: webhook data에서 가져오거나 빈 문자열
-        domain_codes = data.get("domainCodes", [])
-        domain_code = domain_codes[0] if domain_codes else ""
-
-        # 배치(placement) 전이면 도메인이 없다 — 검색 스코프가 정해지지 않았으므로
-        # 적재를 보류한다. PlacementsService 가 배치 후 dispatch 하는
-        # document.updated(domainCodes 포함)가 실제 적재를 트리거한다.
-        # 이로써 생성 시점의 빈-도메인 document.created 가 스푸리어스 문서를 만드는
-        # 이중 적재를 방지한다 (create+placement 경쟁 제거).
-        if not domain_code:
-            logger.info("kms_sync_awaiting_placement", document_id=document_id)
-            return {"status": "skipped", "reason": "awaiting placement (no domain)"}
-
-        # ── 도메인 매핑 (근본해결) ─────────────────────────────────────────
-        # KMS 는 회사중심 도메인(DB-DAMAGE)으로 배치하지만, 챗봇 프로필은 상품중심
-        # 도메인(자동차보험/건강보험/…)으로 검색 스코프를 건다. KMS 가 webhook 으로
-        # 전달한 categoryPath(["DB-DAMAGE","자동차보험","개인용"])로 상품도메인을 해석한다.
-        # KMS=분류 SoT(ADR-009), ai-platform 은 해석만 — 매핑은 seeds/domain_mapping.yaml.
-        company_domain = domain_code
-        category_path = data.get("categoryPath", []) or []
-        product_domain = resolve_product_domain(company_domain, category_path)
-        if product_domain:
-            domain_code = product_domain
-        else:
-            # 미매핑/부재(구 KMS·타 consumer·매핑 미정의 카테고리) → 회사도메인 fallback.
-            # 조용한 누락 0: 반드시 WARN 으로 가시화한다(메트릭/로그 신호).
-            logger.warning(
-                "kms_sync_domain_unmapped",
-                company_domain=company_domain,
-                category_path=category_path,
-                document_id=document_id,
+        # ── 이미 적재됨 & 콘텐츠 불변(파일 재업로드 아님) → 재임베딩 없이 메타만 갱신 ──
+        # 배치(placement)=도메인 재태깅, 보안등급 변경=청크까지 전파(다운그레이드 누출 방지).
+        # domain·security 둘 다 그대로면 스킵(멱등). 파일 재업로드는 아래 (재)적재로 간다.
+        if existing and event != "document.file_uploaded":
+            target_domain = resolved_domain or existing["domain_code"]
+            unchanged = (
+                target_domain == existing["domain_code"]
+                and security_level == existing["security_level"]
             )
+            if unchanged:
+                return {
+                    "status": "skipped",
+                    "reason": "already synced (no change)",
+                    "document_id": document_id,
+                    "domain_code": existing["domain_code"],
+                }
+            updated_rows = await self._retag_and_refresh(
+                existing["id"], target_domain, security_level,
+            )
+            logger.info(
+                "kms_sync_retagged",
+                document_id=document_id,
+                domain_code=target_domain,
+                prev_domain=existing["domain_code"],
+                security_level=security_level,
+                updated_rows=updated_rows,
+            )
+            return {
+                "status": "retagged",
+                "document_id": document_id,
+                "domain_code": target_domain,
+                # placed PDF 는 배치 시점에 워커가 VLM 보강 큐잉을 판단한다.
+                "mime_type": mime_type,
+            }
+
+        # ── (재)적재: 신규 업로드 또는 파일 재업로드 ──
+        # 대상 도메인: 해석된 상품도메인 > 기존 도메인 > holding(미배치)
+        domain_code = (
+            resolved_domain
+            or (existing["domain_code"] if existing else None)
+            or UNPLACED_DOMAIN
+        )
 
         # 파일 다운로드
         file_bytes = await self._download_file(document_id)
@@ -119,7 +164,7 @@ class KmsSyncService:
             title=title,
             domain_code=domain_code,
             file_name=file_name,
-            security_level=security_level if security_level in _SECURITY_MAP else "PUBLIC",
+            security_level=security_level,
             metadata=metadata,
             file_bytes=file_bytes,
             mime_type=mime_type,
@@ -134,22 +179,28 @@ class KmsSyncService:
         # 파싱결과(조립 MD)를 KMS 로 콜백 — 원본↔MD 비교 표시용(Path B).
         # markdown 은 job 큐 로그에 싣지 않도록 pop 후 별도 전송한다.
         markdown = result.pop("markdown", None)
-        # PDF 는 비동기 VLM 보강 큐 대상 → fast 결과와 함께 vlm_status=PENDING 으로 표시.
-        # (워커가 enhance job 적재, enhance_document 가 PROCESSING→DONE 으로 전이)
+        # PDF 는 비동기 VLM 보강 큐 대상. 단 **배치된(placed) 문서만** — 미배치(__unplaced__)
+        # 는 승인 전이므로 KMS 본문 변조·수분짜리 VLM 낭비를 막고 vlm_status 도 PENDING 으로
+        # 표시하지 않는다. 배치 시점(document.updated)에 워커가 다시 판단한다.
         is_pdf = mime_type == "application/pdf"
+        placed = domain_code != UNPLACED_DOMAIN
+        vlm_pending = is_pdf and placed
         await self._post_parse_result(
             document_id, markdown, parse_status="PARSED",
-            vlm_status="PENDING" if is_pdf else None,
+            vlm_status="PENDING" if vlm_pending else None,
         )
 
         logger.info(
             "kms_sync_complete",
             document_id=document_id,
             aip_doc_id=result.get("document_id"),
+            domain_code=domain_code,
+            unplaced=(domain_code == UNPLACED_DOMAIN),
             chunks=result.get("chunks", 0),
         )
-        # 워커가 PDF 일 때만 vlm_enhance 큐에 적재하도록 mime 을 노출한다.
+        # 워커가 배치된 PDF 일 때만 vlm_enhance 큐잉하도록 mime·domain 을 노출한다.
         result["mime_type"] = mime_type
+        result["domain_code"] = domain_code
         return result
 
     async def delete_document(self, document_id: str) -> dict:
@@ -364,6 +415,94 @@ class KmsSyncService:
                 # 문서 삭제
                 await conn.execute("DELETE FROM documents WHERE id = $1", doc_id)
                 return chunk_count
+
+    @asynccontextmanager
+    async def _doc_lock(self, document_id: str):
+        """문서 단위 PG 세션 advisory lock — create/placement 동시 처리 직렬화.
+
+        PostgreSQL 단일 스택 원칙 준수(별도 락 인프라 없음). hashtextextended 로
+        document_id(text) → bigint 락 키. pool 미연결이면 no-op(테스트/부트스트랩).
+        """
+        if not self._store.pool:
+            yield
+            return
+        async with self._store.pool.acquire() as conn:
+            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", document_id)
+            try:
+                yield
+            finally:
+                await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", document_id)
+
+    def _resolve_domain(self, document_id: str, data: dict) -> str | None:
+        """webhook data 의 domainCodes+categoryPath 를 상품도메인으로 해석한다.
+
+        배치 전(domainCodes 부재)이면 None 을 반환한다(→ holding 도메인 적재).
+        domainCodes 는 있으나 매핑 미정의면 회사도메인으로 fallback + WARN(조용한 누락 0).
+
+        KMS 는 회사중심 도메인(DB-DAMAGE)으로 배치하지만 챗봇 프로필은 상품중심
+        도메인(자동차보험/건강보험/…)으로 검색 스코프를 건다. categoryPath
+        (["DB-DAMAGE","자동차보험","개인용"])로 상품도메인을 해석한다.
+        KMS=분류 SoT(ADR-009), ai-platform 은 해석만 — 매핑은 seeds/domain_mapping.yaml.
+        """
+        domain_codes = data.get("domainCodes", [])
+        if not domain_codes:
+            return None
+        company_domain = domain_codes[0]
+        category_path = data.get("categoryPath", []) or []
+        product_domain = resolve_product_domain(company_domain, category_path)
+        if product_domain:
+            return product_domain
+        logger.warning(
+            "kms_sync_domain_unmapped",
+            company_domain=company_domain,
+            category_path=category_path,
+            document_id=document_id,
+        )
+        return company_domain
+
+    async def _get_existing(self, external_id: str) -> dict | None:
+        """external_id 로 이미 적재된 aip 문서(id, domain_code, security_level)를 조회한다."""
+        if not self._store.pool:
+            return None
+        async with self._store.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, domain_code, security_level FROM documents WHERE external_id = $1",
+                external_id,
+            )
+        return (
+            {
+                "id": row["id"],
+                "domain_code": row["domain_code"],
+                "security_level": row["security_level"],
+            }
+            if row
+            else None
+        )
+
+    async def _retag_and_refresh(
+        self, doc_id, domain_code: str, security_level: str,
+    ) -> int:
+        """재임베딩 없이 doc+chunks 의 domain_code·security_level 만 in-place 갱신한다.
+
+        임베딩(비싼 연산)은 콘텐츠당 1회만. 배치(도메인 재태깅)와 보안등급 변경 전파를
+        메타 갱신으로 처리한다 — 특히 security 변경을 청크까지 반영해야 다운그레이드
+        누출을 막는다. doc_id 는 호출측 _get_existing 결과를 재사용(중복 SELECT 제거).
+        반환값은 갱신된 chunk 행 수.
+        """
+        if not self._store.pool:
+            return 0
+        async with self._store.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE documents SET domain_code = $2, security_level = $3 WHERE id = $1",
+                    doc_id, domain_code, security_level,
+                )
+                result = await conn.execute(
+                    "UPDATE document_chunks SET domain_code = $2, security_level = $3 "
+                    "WHERE document_id = $1",
+                    doc_id, domain_code, security_level,
+                )
+                return int(result.split()[-1])
 
     async def _set_external_id(self, aip_doc_id: str, kms_doc_id: str) -> None:
         """ai-platform 문서에 KMS external_id를 설정한다."""

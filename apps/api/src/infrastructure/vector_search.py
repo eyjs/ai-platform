@@ -12,7 +12,7 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
-from src.domain.models import SECURITY_HIERARCHY
+from src.domain.models import SECURITY_HIERARCHY, UNPLACED_DOMAIN
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +222,7 @@ class VectorSearchMixin:
         tenant_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> Tuple[str, list]:
-        conditions = ["c.embedding IS NOT NULL"]
+        conditions = ["c.embedding IS NOT NULL", f"c.domain_code <> '{UNPLACED_DOMAIN}'"]
         params: list = [np.array(embedding, dtype=np.float32), limit]
         param_idx = 3
 
@@ -278,7 +278,10 @@ class VectorSearchMixin:
         if not tsquery:
             return []
 
-        conditions = ["c.search_vector @@ to_tsquery('simple', $1)"]
+        conditions = [
+            "c.search_vector @@ to_tsquery('simple', $1)",
+            f"c.domain_code <> '{UNPLACED_DOMAIN}'",
+        ]
         params: list = [tsquery, limit]
         param_idx = 3
 
@@ -334,7 +337,10 @@ class VectorSearchMixin:
             return []
 
         search_text = " ".join(terms[:TRIGRAM_MAX_TERMS])
-        conditions = [f"similarity(c.content, $1::text) > {TRIGRAM_MIN_SIMILARITY}"]
+        conditions = [
+            f"similarity(c.content, $1::text) > {TRIGRAM_MIN_SIMILARITY}",
+            f"c.domain_code <> '{UNPLACED_DOMAIN}'",
+        ]
         params: list = [search_text, limit]
         param_idx = 3
 

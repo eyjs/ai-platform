@@ -13,8 +13,12 @@ import uuid
 
 import httpx
 
+from src.services.kms_sync import UNPLACED_DOMAIN as _UNPLACED_DOMAIN
+
 #: 골든패스 도메인 (핸드오프 §6 시나리오 D).
 DEFAULT_DOMAIN_CODE = "DB-DAMAGE"
+#: 배치 전 holding 도메인 — 진실원천(kms_sync)에서 가져와 드리프트 방지.
+UNPLACED_DOMAIN = _UNPLACED_DOMAIN
 
 
 def _auth_headers(jwt: str) -> dict[str, str]:
@@ -131,6 +135,30 @@ async def wait_for_sync(
     while time.time() < deadline:
         rows = await fetch_aip_documents_by_external_id(conn, external_id)
         if len(rows) >= expected_count:
+            return rows
+        await asyncio.sleep(poll_interval)
+    return rows
+
+
+async def wait_for_domain(
+    conn,
+    external_id: str,
+    domain_code: str,
+    *,
+    timeout_sec: float = 30.0,
+    poll_interval: float = 1.0,
+) -> list[dict]:
+    """배치(재태깅) 반영 대기 — 단일행의 domain_code 가 목표값이 될 때까지 폴링.
+
+    임베딩·배치 분리 설계에서 배치는 재임베딩 없이 domain_code 만 in-place UPDATE
+    하므로, 행 수(1)는 그대로이고 domain_code 만 __unplaced__ → 상품도메인으로 바뀐다.
+    timeout 시 현재 상태로 반환(호출측이 단언).
+    """
+    deadline = time.time() + timeout_sec
+    rows: list[dict] = []
+    while time.time() < deadline:
+        rows = await fetch_aip_documents_by_external_id(conn, external_id)
+        if rows and all(r["domain_code"] == domain_code for r in rows):
             return rows
         await asyncio.sleep(poll_interval)
     return rows

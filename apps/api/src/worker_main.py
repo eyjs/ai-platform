@@ -13,6 +13,7 @@ import os
 import signal
 
 from src.config import settings
+from src.domain.models import UNPLACED_DOMAIN
 from src.infrastructure.job_queue import JobQueue, QueueWorker
 from src.infrastructure.providers.factory import ProviderFactory
 from src.infrastructure.vector_store import VectorStore
@@ -96,10 +97,15 @@ async def run_worker() -> None:
         document_id = payload.get("document_id", "")
 
         if action == "sync":
-            result = await kms_sync.sync_document(document_id, payload.get("data", {}))
-            # fast 파싱 성공 + PDF 면 비동기 VLM 보강 큐에 적재(테이블 구조 복원).
+            result = await kms_sync.sync_document(
+                document_id, payload.get("data", {}), event=payload.get("event", ""),
+            )
+            # 배치된(placed) PDF 만 비동기 VLM 보강 큐에 적재(테이블 구조 복원).
+            # 미배치(__unplaced__)는 승인 전이라 제외 — 승인 전 KMS 본문 변조·VLM 낭비 방지.
             # 별도 큐/워커라 fast 인제스트를 막지 않는다.
-            if result.get("mime_type") == "application/pdf" and result.get("status") != "skipped":
+            is_pdf = result.get("mime_type") == "application/pdf"
+            placed = result.get("domain_code") not in (None, UNPLACED_DOMAIN)
+            if is_pdf and placed and result.get("status") != "skipped":
                 await job_queue.enqueue("vlm_enhance", {"document_id": document_id})
                 logger.info("vlm_enhance_enqueued", document_id=document_id)
             return result

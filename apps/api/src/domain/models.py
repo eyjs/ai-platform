@@ -74,6 +74,11 @@ class ResponsePolicy(str, Enum):
 
 COMMON_DOMAIN = "_common"
 
+# holding 도메인: 업로드 즉시 임베딩됐으나 아직 배치(도메인 할당) 전인 문서의 domain_code.
+# 검색에서 **항상 제외**된다(빈 domain_scopes 프로필이라도) — 임베딩됨·비노출 불변식.
+# 배치가 오면 kms_sync 가 실제 상품도메인으로 재태깅하여 검색에 편입된다.
+UNPLACED_DOMAIN = "__unplaced__"
+
 
 def resolve_domain_hierarchy(
     domain_codes: list[str],
