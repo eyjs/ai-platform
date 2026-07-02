@@ -23,7 +23,7 @@ export default function ProfileEditPage({
   }, [id]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-[var(--color-neutral-200)] bg-[var(--surface-card)] px-4 py-3">
         <ProfileStatsPanel profileId={id} />
         {connectedKeys.length > 0 && (

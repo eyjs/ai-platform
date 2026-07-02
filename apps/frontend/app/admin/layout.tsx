@@ -14,8 +14,11 @@ export default function AdminLayout({
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  // 채팅은 풀높이(입력 하단 고정)라 패딩 컨테이너 없이 풀블리드로 렌더.
-  const fullBleed = pathname === '/admin/chat';
+  // 채팅·프로필 에디터는 풀높이(에디터/입력 하단 고정)라 패딩·max-width 컨테이너
+  // 없이 풀블리드로 렌더한다. 프로필 목록/이력은 일반 패딩 레이아웃 유지.
+  const isProfileEditor =
+    pathname.startsWith('/admin/profiles/') && !pathname.endsWith('/history');
+  const fullBleed = pathname === '/admin/chat' || isProfileEditor;
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {

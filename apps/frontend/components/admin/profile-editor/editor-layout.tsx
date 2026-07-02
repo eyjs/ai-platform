@@ -124,14 +124,14 @@ export function EditorLayout({ profileId }: EditorLayoutProps) {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-full items-center justify-center">
         <span className="text-[var(--color-neutral-400)]">로딩 중...</span>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
       <EditorToolbar
         profileName={profileName}
         hasChanges={hasChanges}
