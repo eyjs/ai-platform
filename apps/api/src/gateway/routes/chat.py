@@ -339,6 +339,35 @@ async def chat_stream(req: ChatRequest, request: Request):
                         captured_faithfulness_score = float(score_value)
                     yield {"event": "done", "data": json.dumps(done_data, ensure_ascii=False)}
 
+            # C: 스트림이 정상 종료됐는데 토큰이 하나도 없는 경우(예: LLM 생성이 done 을
+            # 방출하지 못하고 빈 결과로 끝남) 위 done-핸들러 폴백이 걸리지 않아 빈 말풍선이
+            # 남는다. 여기서 최종 방어로 폴백을 발화한다(token + done). done 이벤트가 이미
+            # 나왔다면 answer_parts 가 비어있지 않으므로 이 블록은 건너뛴다.
+            used_empty_fallback = False
+            if not "".join(answer_parts).strip():
+                used_empty_fallback = True
+                fallback = (
+                    (stream_profile and stream_profile.empty_response_fallback)
+                    or "죄송해요, 방금 응답을 만들지 못했어요. 다시 한 번 말씀해 주시겠어요?"
+                )
+                answer_parts.clear()
+                answer_parts.append(fallback)
+                yield {"event": "token", "data": json.dumps({"delta": fallback}, ensure_ascii=False)}
+                yield {"event": "done", "data": json.dumps({
+                    "answer": fallback,
+                    "profile_id": setup.profile_id,
+                    "orchestrated": setup.orchestrated,
+                    "response_id": response_id,
+                    "confidence": None,
+                    "traversal_path": [],
+                    "empty_fallback": True,
+                }, ensure_ascii=False)}
+                logger.warning(
+                    "stream_empty_fallback",
+                    request_id=setup.trace.request_id,
+                    profile_id=setup.profile_id,
+                )
+
             full_answer = "".join(answer_parts)
             await state.session_memory.add_turn(setup.session_id, "user", req.question)
             await state.session_memory.add_turn(setup.session_id, "assistant", full_answer)
@@ -362,8 +391,9 @@ async def chat_stream(req: ChatRequest, request: Request):
             )
             gen_response_preview = RequestLogEntry.truncate_preview(full_answer)
 
-            # 스트림 완료 후 응답 캐시 저장 (miss 였던 경우만; 빈 답변 제외).
-            if cacheable and full_answer.strip():
+            # 스트림 완료 후 응답 캐시 저장 (miss 였던 경우만; 빈 답변·폴백 제외).
+            # 폴백은 일시적 생성 실패의 플레이스홀더라 캐시하면 1시간 오답이 고정된다.
+            if cacheable and full_answer.strip() and not used_empty_fallback:
                 await try_cache_put(
                     cache_svc, setup.profile_id, mode_str, req.question, full_answer,
                     tenant_id=stream_tenant_id,
