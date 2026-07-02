@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dropdown, type DropdownOption } from '@/components/ui/dropdown';
 import { SessionList } from '@/components/chat/session-list';
@@ -20,6 +20,9 @@ export default function AdminChatPage() {
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedProfileName, setSelectedProfileName] = useState('자동 선택');
   const [profiles, setProfiles] = useState<ChatProfileOption[]>([]);
+  // 스트림 콜백은 handleSend 호출 시점의 세션 id 가 필요하다. state 는 비동기라
+  // 새 세션의 첫 메시지에서 stale null 이 잡히므로 ref 로 활성 세션을 추적한다.
+  const activeSessionIdRef = useRef<string | null>(null);
 
   const {
     sessions,
@@ -47,16 +50,19 @@ export default function AdminChatPage() {
   const streamCallbacks = useMemo(
     () => ({
       onToken: (text: string) => {
-        if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({ ...msg, content: msg.content + text }));
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => ({ ...msg, content: msg.content + text }));
       },
       onReplace: (text: string) => {
-        if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({ ...msg, content: text }));
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => ({ ...msg, content: text }));
       },
       onTrace: (data: Record<string, unknown>) => {
-        if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => ({
           ...msg,
           traceData: data,
           traceEvents: [...(msg.traceEvents ?? []), data],
@@ -67,8 +73,9 @@ export default function AdminChatPage() {
         sources?: Array<{ title: string; url?: string }>;
         response_id?: string;
       }) => {
-        if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => ({
           ...msg,
           isStreaming: false,
           content: data.answer && data.answer.length > 0 ? data.answer : msg.content,
@@ -77,8 +84,9 @@ export default function AdminChatPage() {
         }));
       },
       onError: (error: Error) => {
-        if (!currentSessionId) return;
-        updateLastMessage(currentSessionId, (msg) => ({
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => ({
           ...msg,
           isStreaming: false,
           isError: true,
@@ -86,7 +94,7 @@ export default function AdminChatPage() {
         }));
       },
     }),
-    [currentSessionId, updateLastMessage],
+    [updateLastMessage],
   );
 
   const { sendMessage, isStreaming, abort } = useChatStream(streamCallbacks);
@@ -100,6 +108,9 @@ export default function AdminChatPage() {
         session = createSession(selectedProfileId, selectedProfileName);
         activeSessionId = session.id;
       }
+
+      // 스트림 콜백이 참조할 활성 세션 id. state 반영을 기다리지 않고 즉시 세팅.
+      activeSessionIdRef.current = activeSessionId ?? null;
 
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
