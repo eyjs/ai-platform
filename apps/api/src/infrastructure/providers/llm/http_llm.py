@@ -4,6 +4,7 @@ Qwen3 등 thinking 모델의 <think>...</think> 블록을
 답변과 분리하여 별도 스트림 이벤트로 전달한다.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -12,6 +13,7 @@ from typing import AsyncIterator
 import httpx
 
 from ..base import LLMProvider, ProviderCapability, StreamChunk
+from .._resilience import CircuitBreaker, CircuitOpenError, is_transient, retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +21,42 @@ _THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
 
 
 class HttpLLMProvider(LLMProvider):
-    def __init__(self, base_url: str, system_prefix: str = "", max_tokens: int = 4096):
+    def __init__(
+        self,
+        base_url: str,
+        system_prefix: str = "",
+        max_tokens: int = 4096,
+        retry_attempts: int = 2,
+        circuit_fail_threshold: int = 5,
+        circuit_cooldown_seconds: float = 15.0,
+    ):
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=120.0)
         self._system_prefix = system_prefix
         self._max_tokens = max_tokens
+        self._retry_attempts = retry_attempts
+        # 서버 다운 시 매 요청이 120초 타임아웃까지 hang 하는 것을 막는다(로그 617류 지연).
+        self._breaker = CircuitBreaker(
+            fail_threshold=circuit_fail_threshold,
+            cooldown_seconds=circuit_cooldown_seconds,
+            name=f"llm:{self._base_url}",
+        )
+
+    async def _post_completion(self, system_msg: str, prompt: str) -> str:
+        """비스트리밍 chat completion 1회 호출 — 재시도/서킷은 호출부가 감싼다."""
+        response = await self._client.post(
+            f"{self._base_url}/v1/chat/completions",
+            json={
+                "messages": [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "max_tokens": self._max_tokens,
+            },
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
 
     @property
     def capability(self) -> ProviderCapability:
@@ -68,19 +101,12 @@ class HttpLLMProvider(LLMProvider):
         system_msg = self._build_system(
             self._combine_system(system, cacheable_system, volatile_system)
         )
-        response = await self._client.post(
-            f"{self._base_url}/v1/chat/completions",
-            json={
-                "messages": [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-                "max_tokens": self._max_tokens,
-            },
+        text = await retry_async(
+            lambda: self._post_completion(system_msg, prompt),
+            attempts=self._retry_attempts,
+            breaker=self._breaker,
+            name="llm",
         )
-        response.raise_for_status()
-        text = response.json()["choices"][0]["message"]["content"]
         _, answer = self.split_thinking(text)
         return answer
 
@@ -91,19 +117,12 @@ class HttpLLMProvider(LLMProvider):
             (thinking, answer) 튜플.
         """
         system_msg = self._build_system(system)
-        response = await self._client.post(
-            f"{self._base_url}/v1/chat/completions",
-            json={
-                "messages": [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-                "max_tokens": self._max_tokens,
-            },
+        text = await retry_async(
+            lambda: self._post_completion(system_msg, prompt),
+            attempts=self._retry_attempts,
+            breaker=self._breaker,
+            name="llm",
         )
-        response.raise_for_status()
-        text = response.json()["choices"][0]["message"]["content"]
         return self.split_thinking(text)
 
     async def generate_json(
@@ -133,10 +152,40 @@ class HttpLLMProvider(LLMProvider):
         self, prompt: str, system: str = "",
         cacheable_system: str = "", volatile_system: str = "",
     ) -> AsyncIterator[StreamChunk]:
-        """thinking/answer를 StreamChunk로 구분하여 yield."""
+        """thinking/answer를 StreamChunk로 구분하여 yield.
+
+        회복력: 서킷이 열려 있으면 즉시 fast-fail. 첫 청크 방출 이전의 일시적
+        실패만 재시도한다(부분 출력 후 재시도는 중복 위험이라 금지). 첫 청크가
+        나온 뒤의 실패는 그대로 전파한다.
+        """
         system_msg = self._build_system(
             self._combine_system(system, cacheable_system, volatile_system)
         )
+        if self._breaker.is_open:
+            raise CircuitOpenError(f"llm circuit open: {self._base_url}")
+
+        attempt = 0
+        while True:
+            attempt += 1
+            emitted = False
+            try:
+                async for chunk in self._stream_once(system_msg, prompt):
+                    emitted = True
+                    yield chunk
+                self._breaker.record_success()
+                return
+            except Exception as e:
+                # 첫 청크 이전의 일시적 오류만 재시도(중복 방출 방지).
+                if not emitted and is_transient(e) and attempt < self._retry_attempts:
+                    await asyncio.sleep(0.2 * (2 ** (attempt - 1)))
+                    continue
+                self._breaker.record_failure()
+                raise
+
+    async def _stream_once(
+        self, system_msg: str, prompt: str
+    ) -> AsyncIterator[StreamChunk]:
+        """스트리밍 chat completion 1회 — 파싱 로직. 재시도/서킷은 호출부가 감싼다."""
         in_thinking = False
 
         async with self._client.stream(
@@ -151,6 +200,7 @@ class HttpLLMProvider(LLMProvider):
                 "max_tokens": self._max_tokens,
             },
         ) as response:
+            response.raise_for_status()
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue

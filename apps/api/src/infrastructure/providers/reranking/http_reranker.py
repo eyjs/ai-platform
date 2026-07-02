@@ -7,12 +7,20 @@ from typing import List, Optional
 import httpx
 
 from ..base import RerankerProvider
+from .._resilience import CircuitBreaker, retry_async
 
 logger = logging.getLogger(__name__)
 
 
 class HttpRerankerProvider(RerankerProvider):
-    def __init__(self, base_url: str, fallback_model: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: str,
+        fallback_model: Optional[str] = None,
+        retry_attempts: int = 2,
+        circuit_fail_threshold: int = 5,
+        circuit_cooldown_seconds: float = 10.0,
+    ):
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=30.0)
         self._fallback_model = fallback_model
@@ -20,26 +28,44 @@ class HttpRerankerProvider(RerankerProvider):
         # 로컬 폴백(CrossEncoder)이 이 환경에서 사용 불가(sentence_transformers 미설치 등)로
         # 판명되면 True. 재시도마다 import 를 반복 시도하지 않도록 1회만 표시한다.
         self._fallback_unavailable = False
+        self._retry_attempts = retry_attempts
+        # 서킷 개방 시 매 검색이 30초 타임아웃까지 기다리지 않고 즉시 로컬/identity 로 우회.
+        self._breaker = CircuitBreaker(
+            fail_threshold=circuit_fail_threshold,
+            cooldown_seconds=circuit_cooldown_seconds,
+            name=f"reranker:{self._base_url}",
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def _http_rerank(
+        self, query: str, documents: List[str], top_k: int
+    ) -> List[dict]:
+        response = await self._client.post(
+            f"{self._base_url}/rerank",
+            json={"query": query, "texts": documents, "return_text": False},
+        )
+        response.raise_for_status()
+        raw = response.json()
+        results = []
+        for item in raw:
+            score = 1 / (1 + math.exp(-float(item["score"])))
+            results.append({"index": item["index"], "score": score})
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:top_k]
 
     async def rerank(
         self, query: str, documents: List[str], top_k: int = 10
     ) -> List[dict]:
         try:
-            response = await self._client.post(
-                f"{self._base_url}/rerank",
-                json={"query": query, "texts": documents, "return_text": False},
+            # 일시적 blip 은 재시도로 흡수, 서버 다운은 서킷이 열려 fast-fail → 아래 degrade.
+            return await retry_async(
+                lambda: self._http_rerank(query, documents, top_k),
+                attempts=self._retry_attempts,
+                breaker=self._breaker,
+                name="reranker",
             )
-            response.raise_for_status()
-            raw = response.json()
-            results = []
-            for item in raw:
-                score = 1 / (1 + math.exp(-float(item["score"])))
-                results.append({"index": item["index"], "score": score})
-            results.sort(key=lambda x: x["score"], reverse=True)
-            return results[:top_k]
         except Exception as e:
             logger.warning("HTTP reranker failed: %s, falling back to local", e)
             # 로컬 CrossEncoder 폴백 시도. 사용 불가(미설치)면 크래시 대신 원순서 유지로 degrade.

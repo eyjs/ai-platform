@@ -140,3 +140,90 @@ async def test_embedding_provider_retries_then_succeeds(monkeypatch):
     out = await provider.embed_batch(["a", "b"])
     assert len(out) == 2
     assert state["n"] == 2  # 1회 실패 후 재시도 성공
+
+
+@pytest.mark.asyncio
+async def test_reranker_retries_then_succeeds(monkeypatch):
+    from src.infrastructure.providers.reranking.http_reranker import HttpRerankerProvider
+
+    r = HttpRerankerProvider("http://mlx:8102", retry_attempts=3)
+    state = {"n": 0}
+
+    async def flaky_http(query, documents, top_k):
+        state["n"] += 1
+        if state["n"] < 2:
+            raise httpx.ConnectError("blip")
+        return [{"index": 0, "score": 0.9}]
+
+    monkeypatch.setattr(r, "_http_rerank", flaky_http)
+    out = await r.rerank("q", ["a", "b", "c"], top_k=1)
+    assert out == [{"index": 0, "score": 0.9}]
+    assert state["n"] == 2  # 재시도로 복구, degrade 안 함
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_retries_before_first_chunk(monkeypatch):
+    from src.infrastructure.providers.llm.http_llm import HttpLLMProvider
+    from src.infrastructure.providers.base import StreamChunk
+
+    p = HttpLLMProvider("http://mlx:8106", retry_attempts=3)
+    state = {"n": 0}
+
+    async def fake_stream_once(system_msg, prompt):
+        state["n"] += 1
+        if state["n"] < 2:
+            raise httpx.ConnectError("blip")
+            yield  # noqa — async generator 로 만들기 위한 unreachable yield
+        yield StreamChunk(kind="answer", content="hello")
+
+    monkeypatch.setattr(p, "_stream_once", fake_stream_once)
+    out = [c.content async for c in p.generate_stream_typed("q")]
+    assert out == ["hello"]
+    assert state["n"] == 2  # 첫 청크 이전 blip → 재시도
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_no_retry_after_first_chunk(monkeypatch):
+    """첫 청크 방출 후 실패는 재시도하지 않는다(중복 방출 방지)."""
+    from src.infrastructure.providers.llm.http_llm import HttpLLMProvider
+    from src.infrastructure.providers.base import StreamChunk
+
+    p = HttpLLMProvider("http://mlx:8106", retry_attempts=3)
+    state = {"n": 0}
+
+    async def fake_stream_once(system_msg, prompt):
+        state["n"] += 1
+        yield StreamChunk(kind="answer", content="partial")
+        raise httpx.ConnectError("mid-stream")
+
+    monkeypatch.setattr(p, "_stream_once", fake_stream_once)
+    collected = []
+    with pytest.raises(httpx.ConnectError):
+        async for c in p.generate_stream_typed("q"):
+            collected.append(c.content)
+    assert collected == ["partial"]  # 중복 방출 없음
+    assert state["n"] == 1  # 재시도 안 함
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_fast_fails_when_circuit_open(monkeypatch):
+    from src.infrastructure.providers.llm.http_llm import HttpLLMProvider
+
+    import time as _t
+
+    # cooldown(기본 15s) 내에서 열린 상태 유지되도록 opened_at 을 현재로 설정
+    p = HttpLLMProvider("http://mlx:8106")
+    p._breaker._opened_at = _t.monotonic()
+    assert p._breaker.is_open is True
+
+    called = {"n": 0}
+
+    async def fake_stream_once(system_msg, prompt):
+        called["n"] += 1
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(p, "_stream_once", fake_stream_once)
+    with pytest.raises(CircuitOpenError):
+        async for _ in p.generate_stream_typed("q"):
+            pass
+    assert called["n"] == 0  # fast-fail, 스트림 시작 안 함
