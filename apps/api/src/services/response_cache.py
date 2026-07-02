@@ -43,6 +43,9 @@ class ResponseCacheService:
         try:
             if profile is None:
                 cache_cfg = None
+            # AgentProfile: YAML `cache:` 블록이 cache_config 필드로 배선됨
+            elif hasattr(profile, "cache_config") and isinstance(profile.cache_config, dict):
+                cache_cfg = profile.cache_config or None
             elif hasattr(profile, "config") and isinstance(profile.config, dict):
                 cache_cfg = profile.config.get("cache")
             elif isinstance(profile, dict):

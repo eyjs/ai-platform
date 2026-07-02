@@ -103,6 +103,9 @@ class AgentProfile:
     cache_padding_text: str = ""
     # 토큰이 비어 응답이 빈 채로 끝날 때 대신 발화할 폴백 문구(프로필 톤). None이면 범용 기본값.
     empty_response_fallback: str | None = None
+    # 응답 캐시 정책 (YAML `cache:` 블록). ResponseCacheService.should_cache 가 읽는다.
+    # 예) {enabled: true, agentic_enabled: true}. 비면 기본 정책(deterministic 만 캐시).
+    cache_config: dict = field(default_factory=dict)
 
     # 커스텀 Intent
     intent_hints: list[IntentHint] = field(default_factory=list)

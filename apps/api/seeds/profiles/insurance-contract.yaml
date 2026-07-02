@@ -12,6 +12,12 @@ category_scopes:
   - "상품안내"
 security_level_max: "INTERNAL"
 
+# 응답 캐시: 동일 질문 반복 시 저장된 답변 재사용(TTL 1h).
+# hybrid — 워크플로우(가입/신청)는 캐시 부적합하나 RAG 질의(agentic)는 캐시 이득.
+cache:
+  enabled: true
+  agentic_enabled: true
+
 mode: "hybrid"
 workflow_id: null
 hybrid_triggers:

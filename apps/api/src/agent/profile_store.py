@@ -242,6 +242,7 @@ class ProfileStore:
             cache_padding_text=data.get("cache_padding_text", ""),
             empty_response_fallback=data.get("empty_response_fallback"),
             planning_disabled=data.get("planning_disabled", False),
+            cache_config=data.get("cache", data.get("cache_config", {})) or {},
         )
 
     @staticmethod
@@ -281,6 +282,7 @@ class ProfileStore:
             "cache_padding_text": profile.cache_padding_text,
             "empty_response_fallback": profile.empty_response_fallback,
             "planning_disabled": profile.planning_disabled,
+            "cache_config": profile.cache_config,
         }
 
     def start_watcher(self) -> None:

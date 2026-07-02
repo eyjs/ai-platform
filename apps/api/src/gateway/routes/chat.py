@@ -213,9 +213,31 @@ async def chat_stream(req: ChatRequest, request: Request):
     # 메모리 추출 대상 프로필 조회
     stream_profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
 
+    # 응답 캐시 세팅 (C: 스트리밍 경로 캐시 연결).
+    # 비스트리밍 /chat 과 동일 키(tenant|profile|mode|normalized) 로 조회/저장한다.
+    cache_svc = getattr(state, "response_cache_service", None)
+    plan_mode = getattr(setup.plan, "mode", None)
+    mode_str = plan_mode.value if hasattr(plan_mode, "value") else str(plan_mode or "")
+    stream_tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+    # per-turn override(directive/외부 context)가 있으면 질문 키만으로는 답이 달라져 캐시 부적합.
+    has_per_turn_override = bool(
+        (req.directive and req.directive.strip()) or (req.context and req.context.strip())
+    )
+    cacheable = (
+        bool(stream_profile)
+        and not has_per_turn_override
+        and should_use_cache(stream_profile, mode_str, cache_svc)
+    )
+    cached_answer: Optional[str] = None
+    if cacheable:
+        cached_answer = await try_cache_get(
+            cache_svc, setup.profile_id, mode_str, req.question,
+            tenant_id=stream_tenant_id,
+        )
+
     # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
     routing_task: Optional[asyncio.Task] = None
-    if setup.needs_routing:
+    if setup.needs_routing and cached_answer is None:
         async def _background_route():
             """백그라운드에서 오케스트레이터 라우팅을 실행하고 세션 메타에 결과를 기록한다."""
             try:
@@ -248,9 +270,29 @@ async def chat_stream(req: ChatRequest, request: Request):
         gen_status_code = 200
         gen_error_code: Optional[str] = None
         gen_response_preview: Optional[str] = None
+        gen_cache_hit = False
         # Task 014: done 이벤트에서 faithfulness_score 포집 (finally enqueue 에 사용)
         captured_faithfulness_score: Optional[float] = None
         try:
+            # 캐시 히트: 저장된 답변을 즉시 재생하고 full 파이프라인을 생략한다.
+            # token 1건(전문) + done 으로 흘려 프론트 렌더링을 기존 스트리밍과 동일하게 유지.
+            if cached_answer is not None:
+                gen_cache_hit = True
+                yield {"event": "token", "data": json.dumps({"delta": cached_answer}, ensure_ascii=False)}
+                yield {"event": "done", "data": json.dumps({
+                    "answer": cached_answer,
+                    "profile_id": setup.profile_id,
+                    "orchestrated": setup.orchestrated,
+                    "response_id": response_id,
+                    "confidence": None,
+                    "traversal_path": [],
+                    "cached": True,
+                }, ensure_ascii=False)}
+                await state.session_memory.add_turn(setup.session_id, "user", req.question)
+                await state.session_memory.add_turn(setup.session_id, "assistant", cached_answer)
+                gen_response_preview = RequestLogEntry.truncate_preview(cached_answer)
+                return
+
             answer_parts = []
             async for event in state.agent.execute_stream(
                 question=req.question, plan=setup.plan,
@@ -319,6 +361,13 @@ async def chat_stream(req: ChatRequest, request: Request):
                 total_ms=round(setup.trace.total_ms, 1),
             )
             gen_response_preview = RequestLogEntry.truncate_preview(full_answer)
+
+            # 스트림 완료 후 응답 캐시 저장 (miss 였던 경우만; 빈 답변 제외).
+            if cacheable and full_answer.strip():
+                await try_cache_put(
+                    cache_svc, setup.profile_id, mode_str, req.question, full_answer,
+                    tenant_id=stream_tenant_id,
+                )
         except Exception as stream_err:
             gen_status_code = 500
             gen_error_code = "stream_error"
@@ -342,6 +391,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                         profile_id=setup.profile_id or None,
                         status_code=gen_status_code,
                         latency_ms=elapsed_ms,
+                        cache_hit=gen_cache_hit,
                         error_code=gen_error_code,
                         request_preview=RequestLogEntry.truncate_preview(req.question),
                         response_preview=gen_response_preview,
