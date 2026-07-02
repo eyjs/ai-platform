@@ -170,10 +170,22 @@ class RAGSearchTool:
         candidates = await expand_neighbors(self._store, candidates)
 
         # L4. 리랭킹 (전체 후보 풀을 받아 정밀 판정)
+        # 리랭킹은 "정제" 단계다 — 실패해도 이미 성공한 검색(candidates)을 폐기하면 안 된다.
+        # 어떤 reranker 구현/융합 로직이 raise 하든 벡터 점수 순 top_k 로 degrade 하여
+        # 검색 레이어의 가용성을 보장한다(provider 레벨 degrade와 별개의 심층 방어).
         if self._reranker and len(candidates) > top_k:
-            results = await rerank_3tier(
-                self._reranker, query, candidates, top_k,
-            )
+            try:
+                results = await rerank_3tier(
+                    self._reranker, query, candidates, top_k,
+                )
+            except Exception as e:
+                logger.warning(
+                    "rerank_failed_degrade_to_vector_order",
+                    error=str(e),
+                    candidates=len(candidates),
+                    top_k=top_k,
+                )
+                results = candidates[:top_k]
         else:
             results = candidates[:top_k]
 

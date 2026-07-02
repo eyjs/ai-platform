@@ -120,6 +120,49 @@ async def test_pipeline_without_reranker():
 
 
 @pytest.mark.asyncio
+async def test_reranker_failure_degrades_to_vector_order():
+    """[회귀] 리랭커가 raise 해도 검색은 실패하면 안 된다 (로그 617).
+
+    벡터 검색은 성공(후보 확보)했는데 리랭킹(정제 단계) 실패가 rag_search 툴
+    전체를 죽여 0청크가 되던 문제. 리랭커 예외 시 candidates[:top_k]로 degrade.
+    """
+    from src.tools.internal.rag_search import RAGSearchTool
+
+    embedder = AsyncMock()
+    embedder.embed_batch.return_value = [[0.1] * 10]
+
+    store = AsyncMock()
+    # 높은 RRF → 확장 스킵, 후보 10개 (> top_k=5) → 리랭킹 분기 진입
+    store.hybrid_search.return_value = [
+        _mock_chunk(f"c{i}", 0.015 - i * 0.0005) for i in range(10)
+    ]
+    store.get_neighbor_chunks.return_value = []
+
+    reranker = AsyncMock()
+    # 로그 617 재현: 리랭커가 예외를 던짐 (HTTP 실패 + 로컬 폴백 크래시 등)
+    reranker.rerank.side_effect = Exception("No module named 'sentence_transformers'")
+
+    tool = RAGSearchTool(
+        embedding_provider=embedder,
+        vector_store=store,
+        reranker=reranker,
+        router_llm=None,  # probe 스킵
+    )
+
+    result = await tool.execute(
+        {"query": "자동차보험"},
+        _make_context(),
+        _make_scope(),
+    )
+
+    # 리랭킹은 실패했지만 검색 결과는 보존돼야 한다
+    assert result.success is True
+    assert len(result.data) > 0
+    assert len(result.data) <= 5
+    reranker.rerank.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_empty_query():
     from src.tools.internal.rag_search import RAGSearchTool
 
