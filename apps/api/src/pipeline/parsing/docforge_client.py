@@ -232,6 +232,7 @@ class DocForgeClient:
 
                 # 2) 폴링 — 짧은 요청 반복, 완료/실패까지
                 poll_url = f"{self._base_url}/v1/parse/async/{job_id}"
+                poll_disconnects = 0
                 while True:
                     if time.time() - t0 > self._max_wait:
                         raise ParseTimeoutError(
@@ -239,7 +240,20 @@ class DocForgeClient:
                             f"({self._max_wait:.0f}s): {file_name}"
                         )
                     await asyncio.sleep(self._poll_interval)
-                    presp = await client.get(poll_url, headers=headers)
+                    try:
+                        presp = await client.get(poll_url, headers=headers)
+                    except httpx.RemoteProtocolError:
+                        # keep-alive 레이스: gunicorn 이 닫은 유휴 연결을 재사용하다
+                        # "Server disconnected" — 폴은 멱등 GET 이므로 새 연결로
+                        # 즉시 재시도한다 (기존에는 잡 전체가 attempts 를 소모했다).
+                        poll_disconnects += 1
+                        if poll_disconnects > 5:
+                            raise
+                        logger.warning(
+                            "docforge_poll_reconnect",
+                            job_id=job_id, count=poll_disconnects,
+                        )
+                        continue
                     if presp.status_code == 404:
                         raise ParseError(f"DocForge 작업이 만료/소실되었습니다: {job_id}")
                     if presp.status_code != 200:
