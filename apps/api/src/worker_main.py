@@ -157,16 +157,18 @@ async def run_worker() -> None:
         max_concurrent=1,
     )
 
-    # 6. Stale job 주기적 정리
+    # 6. Stale job 주기적 정리 (lease 기반 — job_queue.cleanup_stale 참조).
+    # 첫 스윕을 sleep 없이 즉시 실행: 재기동 직후 이전 프로세스의 고아 잡을
+    # 바로 회수한다 (기존 300s 지연은 인시던트 복구를 그만큼 늦췄다).
     async def _periodic_cleanup():
         while True:
-            await asyncio.sleep(300)
             try:
                 recovered = await job_queue.cleanup_stale(stale_seconds=600)
                 if recovered > 0:
                     logger.info("worker_stale_recovered", count=recovered)
             except Exception as e:
                 logger.warning("worker_cleanup_failed", error=str(e))
+            await asyncio.sleep(120)
 
     cleanup_task = asyncio.create_task(_periodic_cleanup())
 

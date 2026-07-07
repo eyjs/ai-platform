@@ -51,7 +51,8 @@ class JobQueue:
         row = await self._pool.fetchrow(
             """
             UPDATE job_queue
-            SET status = 'processing', locked_by = $2, locked_at = NOW()
+            SET status = 'processing', locked_by = $2, locked_at = NOW(),
+                lease_expires_at = NOW() + interval '180 seconds'
             WHERE id = (
                 SELECT id FROM job_queue
                 WHERE queue_name = $1
@@ -163,16 +164,37 @@ class JobQueue:
         )
         return str(row["id"]) if row else None
 
+    async def extend_lease(self, job_id: str, seconds: int = 180) -> None:
+        """실행 중 잡의 lease 연장 (하트비트). 수십 분짜리 정상 잡을 보호한다."""
+        await self._pool.execute(
+            """
+            UPDATE job_queue
+            SET lease_expires_at = NOW() + make_interval(secs => $2)
+            WHERE id = $1 AND status = 'processing'
+            """,
+            uuid.UUID(job_id), float(seconds),
+        )
+
     async def cleanup_stale(self, stale_seconds: int = 600) -> int:
-        """오래된 processing 작업을 pending으로 복구 (워커 비정상 종료 대응)."""
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
+        """lease 가 만료된 processing 작업을 pending으로 복구.
+
+        하트비트(extend_lease)가 도는 정상 잡은 lease 가 계속 갱신되므로
+        절대 회수되지 않는다 — 크래시/강제종료된 워커의 잡만 lease 만료
+        (≤3분) 후 회수된다. 마이그레이션 이전의 구 행(lease NULL)은
+        locked_at + stale_seconds 폴백으로 처리.
+        """
         result = await self._pool.execute(
             """
             UPDATE job_queue
-            SET status = 'pending', locked_by = NULL, locked_at = NULL
-            WHERE status = 'processing' AND locked_at < $1
+            SET status = 'pending', locked_by = NULL, locked_at = NULL,
+                lease_expires_at = NULL
+            WHERE status = 'processing'
+              AND COALESCE(
+                    lease_expires_at,
+                    locked_at + make_interval(secs => $1)
+                  ) < NOW()
             """,
-            cutoff,
+            float(stale_seconds),
         )
         count = int(result.split()[-1])
         if count > 0:
@@ -221,8 +243,20 @@ class QueueWorker:
             await asyncio.wait(self._tasks, timeout=timeout)
         logger.info("QueueWorker[%s] stopped", self._worker_id)
 
+    async def _heartbeat(self, job_id: str, interval: float = 60.0) -> None:
+        """실행 중 lease 를 주기 연장 — cleanup_stale 의 오회수를 방지한다."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await self._queue.extend_lease(job_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:  # 하트비트 실패가 잡 자체를 죽이면 안 됨
+            logger.warning("Job %s heartbeat failed: %s", job_id, e)
+
     async def _process_job(self, job: dict) -> None:
         job_id = job["id"]
+        heartbeat = asyncio.create_task(self._heartbeat(job_id))
         try:
             payload = job["payload"]
             payload["job_id"] = str(job_id)
@@ -235,3 +269,5 @@ class QueueWorker:
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)
             await self._queue.fail(job_id, str(e))
+        finally:
+            heartbeat.cancel()
