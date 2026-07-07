@@ -3,13 +3,10 @@
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import type { KnowledgeDocument } from '@/lib/api/bff-knowledge';
 
 export interface DocumentTableProps {
   documents: KnowledgeDocument[];
-  onReindex: (id: string) => void;
-  reindexingId: string | null;
   className?: string;
 }
 
@@ -18,7 +15,7 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
-export function DocumentTable({ documents, onReindex, reindexingId, className }: DocumentTableProps) {
+export function DocumentTable({ documents, className }: DocumentTableProps) {
   if (documents.length === 0) {
     return <div className="py-12 text-center text-[var(--color-neutral-400)]">문서가 없습니다</div>;
   }
@@ -33,7 +30,6 @@ export function DocumentTable({ documents, onReindex, reindexingId, className }:
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">도메인</th>
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">보안등급</th>
             <th className="px-4 py-3 text-left font-medium text-[var(--color-neutral-600)]">생성 일자</th>
-            <th className="px-4 py-3 text-right font-medium text-[var(--color-neutral-600)]">작업</th>
           </tr>
         </thead>
         <tbody>
@@ -56,17 +52,6 @@ export function DocumentTable({ documents, onReindex, reindexingId, className }:
               </td>
               <td className="px-4 py-3 text-[var(--color-neutral-700)]">{doc.securityLevel ?? '-'}</td>
               <td className="px-4 py-3 text-[var(--color-neutral-500)]">{formatDate(doc.createdAt)}</td>
-              <td className="px-4 py-3 text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onReindex(doc.id)}
-                  loading={reindexingId === doc.id}
-                  aria-label={`${doc.title} 재인덱싱`}
-                >
-                  Reindex
-                </Button>
-              </td>
             </tr>
           ))}
         </tbody>

@@ -49,12 +49,6 @@ export interface KnowledgeDocumentDetail extends KnowledgeDocument {
   metadata: Record<string, unknown> | null;
 }
 
-export interface ReindexResponse {
-  jobId: string;
-  documentId: string;
-  status: string;
-  message: string;
-}
 
 export async function fetchKnowledgeStats(): Promise<KnowledgeStats> {
   const res = await fetch(`${BFF_URL}/knowledge/stats`, {
@@ -88,10 +82,3 @@ export async function fetchKnowledgeDocumentDetail(id: string): Promise<Knowledg
   return handleResponse(res);
 }
 
-export async function reindexDocument(id: string): Promise<ReindexResponse> {
-  const res = await fetch(`${BFF_URL}/knowledge/reindex/${id}`, {
-    method: 'POST',
-    headers: authHeaders(),
-  });
-  return handleResponse(res);
-}

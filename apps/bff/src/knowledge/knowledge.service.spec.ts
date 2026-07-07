@@ -2,7 +2,6 @@ import { Repository } from 'typeorm';
 import { KnowledgeService } from './knowledge.service';
 import { Document } from '../entities/document.entity';
 import { DocumentChunk } from '../entities/document-chunk.entity';
-import { JobQueue } from '../entities/job-queue.entity';
 
 function makeDate(): Date {
   return new Date();
@@ -48,32 +47,22 @@ function makeChunkRepo(): jest.Mocked<Repository<DocumentChunk>> {
   } as unknown as jest.Mocked<Repository<DocumentChunk>>;
 }
 
-function makeJobQueueRepo(): jest.Mocked<Repository<JobQueue>> {
-  return {
-    create: jest.fn(),
-    save: jest.fn(),
-  } as unknown as jest.Mocked<Repository<JobQueue>>;
-}
-
 function makeService(
   documentRepo: jest.Mocked<Repository<Document>>,
   chunkRepo: jest.Mocked<Repository<DocumentChunk>>,
-  jobQueueRepo: jest.Mocked<Repository<JobQueue>>,
 ): KnowledgeService {
-  return new KnowledgeService(documentRepo, chunkRepo, jobQueueRepo);
+  return new KnowledgeService(documentRepo, chunkRepo);
 }
 
 describe('KnowledgeService', () => {
   let documentRepo: jest.Mocked<Repository<Document>>;
   let chunkRepo: jest.Mocked<Repository<DocumentChunk>>;
-  let jobQueueRepo: jest.Mocked<Repository<JobQueue>>;
   let service: KnowledgeService;
 
   beforeEach(() => {
     documentRepo = makeDocumentRepo();
     chunkRepo = makeChunkRepo();
-    jobQueueRepo = makeJobQueueRepo();
-    service = makeService(documentRepo, chunkRepo, jobQueueRepo);
+    service = makeService(documentRepo, chunkRepo);
   });
 
   describe('findDocuments', () => {
@@ -260,49 +249,4 @@ describe('KnowledgeService', () => {
     });
   });
 
-  describe('requestReindex', () => {
-    it('creates and saves a pending reindex job', async () => {
-      const doc = makeDocument();
-      documentRepo.findOne.mockResolvedValue(doc);
-      const job: Partial<JobQueue> = {
-        id: 'job-uuid-1',
-        jobType: 'reindex_document',
-        status: 'pending',
-        priority: 10,
-      };
-      jobQueueRepo.create.mockReturnValue(job as JobQueue);
-      jobQueueRepo.save.mockResolvedValue({ ...job, id: 'job-uuid-1' } as JobQueue);
-
-      const result = await service.requestReindex('doc-uuid-1');
-
-      expect(result.jobId).toBe('job-uuid-1');
-      expect(result.documentId).toBe('doc-uuid-1');
-      expect(result.status).toBe('queued');
-      expect(result.message).toContain('Test Document');
-    });
-
-    it('throws when document not found', async () => {
-      documentRepo.findOne.mockResolvedValue(null);
-
-      await expect(service.requestReindex('nonexistent')).rejects.toThrow('not found');
-    });
-
-    it('creates job with correct payload', async () => {
-      const doc = makeDocument({ id: 'doc-uuid-1', title: 'My Doc' });
-      documentRepo.findOne.mockResolvedValue(doc);
-      jobQueueRepo.create.mockReturnValue({ id: 'job-1', jobType: 'reindex_document' } as JobQueue);
-      jobQueueRepo.save.mockResolvedValue({ id: 'job-1' } as JobQueue);
-
-      await service.requestReindex('doc-uuid-1');
-
-      expect(jobQueueRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          jobType: 'reindex_document',
-          payload: { document_id: 'doc-uuid-1', title: 'My Doc' },
-          status: 'pending',
-          priority: 10,
-        }),
-      );
-    });
-  });
 });

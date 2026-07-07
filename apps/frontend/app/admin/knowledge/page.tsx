@@ -7,11 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Dropdown } from '@/components/ui/dropdown';
 import { useToast } from '@/components/ui/toast';
 import { DocumentTable } from '@/components/admin/document-table';
-import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import {
   fetchKnowledgeStats,
   fetchKnowledgeDocuments,
-  reindexDocument,
   type KnowledgeStats,
   type KnowledgeDocument,
 } from '@/lib/api/bff-knowledge';
@@ -27,8 +25,6 @@ export default function KnowledgePipelinePage() {
   const [securityFilter, setSecurityFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [reindexingId, setReindexingId] = useState<string | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const { toast } = useToast();
 
   const loadStats = useCallback(async () => {
@@ -66,20 +62,6 @@ export default function KnowledgePipelinePage() {
     loadDocuments();
   }, [loadDocuments]);
 
-  const handleReindexConfirm = async () => {
-    if (!confirmTarget) return;
-    setConfirmTarget(null);
-    setReindexingId(confirmTarget);
-    try {
-      await reindexDocument(confirmTarget);
-      toast('재인덱싱이 시작되었습니다', 'success');
-      await loadDocuments();
-    } catch {
-      toast('재인덱싱 실패', 'error');
-    } finally {
-      setReindexingId(null);
-    }
-  };
 
   const domainOptions = [
     { value: '', label: '전체 도메인' },
@@ -180,11 +162,7 @@ export default function KnowledgePipelinePage() {
           </div>
         ) : (
           <>
-            <DocumentTable
-              documents={documents}
-              onReindex={(id) => setConfirmTarget(id)}
-              reindexingId={reindexingId}
-            />
+            <DocumentTable documents={documents} />
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-[var(--color-neutral-200)] px-4 py-3">
                 <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
@@ -204,16 +182,6 @@ export default function KnowledgePipelinePage() {
         )}
       </div>
 
-      <ConfirmDialog
-        isOpen={!!confirmTarget}
-        title="문서 재인덱싱"
-        message="이 문서를 재인덱싱하시겠습니까? 기존 청크가 새로 생성됩니다."
-        onConfirm={handleReindexConfirm}
-        onCancel={() => setConfirmTarget(null)}
-        variant="default"
-        confirmLabel="재인덱싱"
-        cancelLabel="취소"
-      />
     </div>
   );
 }

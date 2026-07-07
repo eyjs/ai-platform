@@ -6,10 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
-import { ConfirmDialog } from '@/components/admin/confirm-dialog';
 import {
   fetchKnowledgeDocumentDetail,
-  reindexDocument,
   type KnowledgeDocumentDetail,
 } from '@/lib/api/bff-knowledge';
 
@@ -20,8 +18,6 @@ export default function KnowledgeDocumentDetailPage() {
   const [doc, setDoc] = useState<KnowledgeDocumentDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isReindexing, setIsReindexing] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const { toast } = useToast();
 
   const loadDetail = useCallback(async () => {
@@ -40,19 +36,6 @@ export default function KnowledgeDocumentDetailPage() {
     loadDetail();
   }, [loadDetail]);
 
-  const handleReindex = async () => {
-    setShowConfirm(false);
-    setIsReindexing(true);
-    try {
-      await reindexDocument(id);
-      toast('재인덱싱이 시작되었습니다', 'success');
-      await loadDetail();
-    } catch {
-      toast('재인덱싱 실패', 'error');
-    } finally {
-      setIsReindexing(false);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -91,9 +74,6 @@ export default function KnowledgeDocumentDetailPage() {
           <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">{doc.title}</h1>
           {doc.domainCode && <Badge variant="secondary">{doc.domainCode}</Badge>}
         </div>
-        <Button variant="primary" size="sm" onClick={() => setShowConfirm(true)} loading={isReindexing} aria-label="문서 재인덱싱">
-          Reindex
-        </Button>
       </div>
 
       {/* Metadata */}
@@ -139,16 +119,6 @@ export default function KnowledgeDocumentDetailPage() {
         </div>
       </div>
 
-      <ConfirmDialog
-        isOpen={showConfirm}
-        title="문서 재인덱싱"
-        message="이 문서를 재인덱싱하시겠습니까? 기존 청크가 삭제되고 새로 생성됩니다."
-        onConfirm={handleReindex}
-        onCancel={() => setShowConfirm(false)}
-        variant="danger"
-        confirmLabel="재인덱싱"
-        cancelLabel="취소"
-      />
     </div>
   );
 }

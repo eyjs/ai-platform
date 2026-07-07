@@ -62,10 +62,3 @@ export class KnowledgeStatsDto {
   documentsByDomain: { domain: string; count: number }[];
   documentsBySecurityLevel: { level: string; count: number }[];
 }
-
-export class ReindexResponseDto {
-  jobId: string;
-  documentId: string;
-  status: string;
-  message: string;
-}

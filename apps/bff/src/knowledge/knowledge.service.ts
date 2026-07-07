@@ -3,19 +3,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Document } from '../entities/document.entity';
 import { DocumentChunk } from '../entities/document-chunk.entity';
-import { JobQueue } from '../entities/job-queue.entity';
 import {
   QueryDocumentsDto,
   DocumentsResponseDto,
   DocumentItemDto,
   DocumentDetailDto,
   KnowledgeStatsDto,
-  ReindexResponseDto,
 } from './dto/knowledge-query.dto';
 
 /**
  * Knowledge 서비스
- * documents, document_chunks, job_queue 테이블 조회
+ * documents, document_chunks 테이블 조회
  */
 @Injectable()
 export class KnowledgeService {
@@ -24,8 +22,6 @@ export class KnowledgeService {
     private readonly documentRepo: Repository<Document>,
     @InjectRepository(DocumentChunk)
     private readonly chunkRepo: Repository<DocumentChunk>,
-    @InjectRepository(JobQueue)
-    private readonly jobQueueRepo: Repository<JobQueue>,
   ) {}
 
   /**
@@ -144,39 +140,6 @@ export class KnowledgeService {
         level: String(row.level),
         count: Number(row.count),
       })),
-    };
-  }
-
-  /**
-   * 재인덱싱 요청
-   */
-  async requestReindex(documentId: string): Promise<ReindexResponseDto> {
-    // 문서 존재 확인
-    const document = await this.documentRepo.findOne({ where: { id: documentId } });
-
-    if (!document) {
-      throw new Error(`Document with id ${documentId} not found`);
-    }
-
-    // job_queue에 재인덱싱 작업 추가
-    const job = this.jobQueueRepo.create({
-      jobType: 'reindex_document',
-      payload: {
-        document_id: documentId,
-        title: document.title,
-      },
-      status: 'pending',
-      priority: 10,
-      scheduledAt: new Date(),
-    });
-
-    const savedJob = await this.jobQueueRepo.save(job);
-
-    return {
-      jobId: savedJob.id,
-      documentId,
-      status: 'queued',
-      message: `Reindexing job queued for document: ${document.title}`,
     };
   }
 }

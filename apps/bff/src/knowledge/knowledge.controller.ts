@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Param, ParseUUIDPipe, NotFoundException, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Param, ParseUUIDPipe, NotFoundException, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KnowledgeService } from './knowledge.service';
 import {
@@ -6,7 +6,6 @@ import {
   DocumentsResponseDto,
   DocumentDetailDto,
   KnowledgeStatsDto,
-  ReindexResponseDto,
 } from './dto/knowledge-query.dto';
 
 /**
@@ -50,17 +49,8 @@ export class KnowledgeController {
 
     return document;
   }
-
-  /**
-   * 재인덱싱 요청
-   * POST /bff/knowledge/reindex/:id
-   */
-  @Post('reindex/:id')
-  async requestReindex(@Param('id', ParseUUIDPipe) id: string): Promise<ReindexResponseDto> {
-    try {
-      return await this.knowledgeService.requestReindex(id);
-    } catch (error) {
-      throw new BadRequestException(error instanceof Error ? error.message : 'Reindex request failed');
-    }
-  }
 }
+// NOTE: 재인덱싱(POST /knowledge/reindex/:id)은 제거됨 — BFF 엔티티가 실제
+// job_queue 스키마(queue_name/attempts)와 달라 INSERT 가 항상 실패했고,
+// 해당 잡을 소비하는 워커도 없었다. 문서 재처리는 KMS 의 reprocess 경로
+// (outbox → document.file_uploaded)가 정도(正道)다.
