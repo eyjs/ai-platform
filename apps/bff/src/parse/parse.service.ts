@@ -57,7 +57,9 @@ export class ParseService {
   constructor() {
     this.baseUrl = (process.env.AIP_DOCFORGE_URL || '').replace(/\/+$/, '');
     this.internalKey = process.env.AIP_DOCFORGE_INTERNAL_KEY || '';
-    this.timeoutMs = 130_000; // DocForge 120s + 10s 여유
+    // DocForge sync 예산은 1740s(DOCFORGE_SYNC_TIMEOUT) — 기존 130s는 서버가
+    // 정상 처리 중인 요청을 클라이언트가 먼저 끊고 UNREACHABLE 로 오보했다.
+    this.timeoutMs = Number(process.env.AIP_DOCFORGE_TIMEOUT_MS ?? 1_750_000); // 1740s + 10s
   }
 
   /**
