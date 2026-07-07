@@ -11,6 +11,7 @@ import asyncio
 import base64
 import os
 import signal
+from pathlib import Path
 
 from src.config import settings
 from src.domain.models import UNPLACED_DOMAIN
@@ -168,6 +169,11 @@ async def run_worker() -> None:
                     logger.info("worker_stale_recovered", count=recovered)
             except Exception as e:
                 logger.warning("worker_cleanup_failed", error=str(e))
+            # 컨테이너 헬스체크용 liveness 파일 (compose: find -mmin -3)
+            try:
+                Path("/tmp/worker.alive").touch()
+            except OSError:
+                pass
             await asyncio.sleep(120)
 
     cleanup_task = asyncio.create_task(_periodic_cleanup())

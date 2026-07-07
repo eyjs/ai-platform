@@ -86,9 +86,14 @@ services:
       - ./secrets/jwt_public.pem:/run/secrets/jwt_public.pem:ro
 
   worker:
+    # ⚠️ restart 정책은 "한 번도 시작 못 한(Created)" 컨테이너를 구조하지
+    # 않는다 — 부분 up 후 worker 가 Created 로 방치된 인시던트(2026-07-07).
+    # 재기동은 반드시 `docker compose up -d --build worker` 로, 상태 확인은
+    # `docker compose ps worker` 로 할 것.
     build:
       context: ./apps/api
       dockerfile: Dockerfile
+    container_name: aip-worker
     command: ["python", "-m", "src.worker_main"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -98,6 +103,13 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      # worker 루프가 120s 주기로 /tmp/worker.alive 를 touch 한다
+      test: ["CMD-SHELL", "find /tmp/worker.alive -mmin -3 | grep -q worker.alive"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     networks:
       - default
       - kms-aip-shared
