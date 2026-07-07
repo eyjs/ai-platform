@@ -148,6 +148,21 @@ class JobQueue:
             "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
         }
 
+    async def has_active_job(self, queue_name: str, document_id: str) -> Optional[str]:
+        """해당 문서의 pending/processing 잡이 있으면 job_id 반환 (중복 큐잉 방지)."""
+        row = await self._pool.fetchrow(
+            """
+            SELECT id FROM job_queue
+            WHERE queue_name = $1
+              AND status IN ('pending', 'processing')
+              AND payload->>'document_id' = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            queue_name, document_id,
+        )
+        return str(row["id"]) if row else None
+
     async def cleanup_stale(self, stale_seconds: int = 600) -> int:
         """오래된 processing 작업을 pending으로 복구 (워커 비정상 종료 대응)."""
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
@@ -211,6 +226,10 @@ class QueueWorker:
         try:
             payload = job["payload"]
             payload["job_id"] = str(job_id)
+            # 핸들러가 "마지막 시도인지"를 판단할 수 있게 시도 정보를 주입한다
+            # (예: vlm_enhance 는 마지막 시도 실패 시에만 KMS 에 FAILED 보고).
+            payload["job_attempts"] = job.get("attempts", 0)
+            payload["job_max_attempts"] = job.get("max_attempts", 3)
             result = await self._handler(payload)
             await self._queue.complete(job_id, result=result)
         except Exception as e:

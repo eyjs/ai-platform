@@ -33,6 +33,14 @@ _FILETYPE_TO_MIME = {
 # 동일 상수로 항상 제외하여 "임베딩됨·비노출" 불변식을 보장한다. 여기선 재노출(import)만.
 
 
+class VlmTransientError(Exception):
+    """DocForge/KMS 일시 장애 — raise 하면 QueueWorker 가 backoff 재시도한다.
+
+    분류 규약: 연결 실패/타임아웃/서버 절단/HTTP 5xx = transient(이 예외),
+    HTTP 4xx·구조화된 실패 응답(success:false) = permanent(재시도 무의미).
+    """
+
+
 class KmsSyncService:
     """KMS 문서를 ai-platform 벡터 DB에 동기화한다."""
 
@@ -248,8 +256,16 @@ class KmsSyncService:
             logger.error("kms_api_error", url=url, error=str(e))
             raise
 
-    async def _download_file(self, document_id: str) -> bytes | None:
-        """KMS API에서 문서 파일을 다운로드한다."""
+    async def _download_file(
+        self, document_id: str, raise_transient: bool = False,
+    ) -> bytes | None:
+        """KMS API에서 문서 파일을 다운로드한다.
+
+        ``raise_transient=True`` (vlm_enhance 경로): 연결 오류·5xx 는
+        :class:`VlmTransientError` 로 승격해 큐 재시도를 태운다. 4xx(문서
+        삭제 등)는 permanent 로 보고 None 을 반환한다. 기본값(ingest 경로)은
+        기존과 동일하게 None 폴백.
+        """
         url = f"{self._kms_url}/documents/{document_id}/file"
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -257,10 +273,18 @@ class KmsSyncService:
                     url, headers={"X-Internal-Key": self._internal_key},
                 )
                 if resp.status_code != 200:
+                    if raise_transient and resp.status_code >= 500:
+                        raise VlmTransientError(
+                            f"kms file download 5xx: {resp.status_code}"
+                        )
                     return None
                 return resp.content
+        except VlmTransientError:
+            raise
         except httpx.HTTPError as e:
             logger.error("kms_download_error", url=url, error=str(e))
+            if raise_transient:
+                raise VlmTransientError(f"kms file download: {e}") from e
             return None
 
     async def _post_parse_result(
@@ -334,6 +358,12 @@ class KmsSyncService:
 
         fast 파싱과 분리된 백그라운드 큐('vlm_enhance')에서 실행되므로 동기 타임아웃이 없다.
         상태 전이: PENDING(적재) → PROCESSING(시작) → DONE(완료) / FAILED(실패).
+
+        재시도 시맨틱: transient 오류(:class:`VlmTransientError`)는 그대로 raise —
+        QueueWorker 가 backoff 재시도한다. 재시도 여지가 남았으면 KMS 에는
+        PROCESSING 을 유지하고, **마지막 시도 실패 시에만** FAILED 를 보고한 뒤
+        raise 해 잡 회계(terminal failed)와 KMS 상태를 일치시킨다.
+        permanent 실패(4xx·구조화 오류)는 즉시 FAILED 보고 후 정상 반환.
         """
         doc_meta = await self._fetch_document_meta(document_id)
         if not doc_meta:
@@ -344,15 +374,32 @@ class KmsSyncService:
             # PDF 만 VLM 보강 대상 (CSV/MD 는 테이블 구조 복원 불필요)
             return {"status": "skipped", "reason": f"not a pdf ({mime_type})"}
 
+        # QueueWorker 가 주입한 시도 정보 (attempts = 이전 실패 횟수, 0부터)
+        is_last_attempt = (
+            data.get("job_attempts", 0) + 1 >= data.get("job_max_attempts", 3)
+        )
+
         file_name = doc_meta.get("fileName") or f"{document_id}.pdf"
         await self._post_vlm_status(document_id, "PROCESSING")
 
-        file_bytes = await self._download_file(document_id)
-        if not file_bytes:
-            await self._post_vlm_status(document_id, "FAILED", error="file download failed")
-            return {"status": "failed", "reason": "file download failed"}
+        try:
+            file_bytes = await self._download_file(document_id, raise_transient=True)
+            if not file_bytes:
+                # 4xx (문서 삭제 등) = permanent
+                await self._post_vlm_status(
+                    document_id, "FAILED", error="file download failed (permanent)",
+                )
+                return {"status": "failed", "reason": "file download failed"}
 
-        markdown = await self._docforge_parse_vlm(file_bytes, file_name, mime_type)
+            markdown = await self._docforge_parse_vlm(file_bytes, file_name, mime_type)
+        except VlmTransientError as e:
+            if is_last_attempt:
+                await self._post_vlm_status(
+                    document_id, "FAILED",
+                    error=f"vlm transient retries exhausted: {e}",
+                )
+            raise  # → QueueWorker.fail → backoff 재시도 또는 terminal failed
+
         if not markdown:
             await self._post_vlm_status(document_id, "FAILED", error="docforge vlm parse failed")
             return {"status": "failed", "reason": "docforge vlm parse failed"}
@@ -384,15 +431,27 @@ class KmsSyncService:
                     data={"vlm_mode": "full"},
                     headers=headers,
                 )
-                resp.raise_for_status()
-                body = resp.json()
+            if resp.status_code >= 500:
+                # DocForge 재기동/일시 장애 — 재시도 가치 있음
+                raise VlmTransientError(f"docforge 5xx: {resp.status_code}")
+            if resp.status_code >= 400:
+                # 4xx = 요청 자체가 잘못됨(파일 형식 등) — 재시도 무의미
+                logger.warning(
+                    "docforge_vlm_permanent_error", status=resp.status_code,
+                    body=resp.text[:200],
+                )
+                return None
+            body = resp.json()
             if not body.get("success"):
                 logger.warning("docforge_vlm_parse_error", body=str(body)[:200])
                 return None
             return (body.get("data") or {}).get("markdown")
+        except VlmTransientError:
+            raise
         except httpx.HTTPError as e:
-            logger.warning("docforge_vlm_http_error", error=str(e))
-            return None
+            # 연결 실패/타임아웃/서버 절단(재배포 순간 등) = transient
+            logger.warning("docforge_vlm_transient_error", error=str(e))
+            raise VlmTransientError(str(e)) from e
 
     async def _delete_by_external_id(self, external_id: str) -> int:
         """external_id로 문서와 청크를 삭제한다."""

@@ -106,8 +106,16 @@ async def run_worker() -> None:
             is_pdf = result.get("mime_type") == "application/pdf"
             placed = result.get("domain_code") not in (None, UNPLACED_DOMAIN)
             if is_pdf and placed and result.get("status") != "skipped":
-                await job_queue.enqueue("vlm_enhance", {"document_id": document_id})
-                logger.info("vlm_enhance_enqueued", document_id=document_id)
+                # 중복 큐잉 방지: 같은 문서의 vlm 잡이 pending/processing 이면 스킵
+                # (수십 분짜리 잡 — 중복 실행 시 KMS 본문 이중 교체 경합).
+                existing = await job_queue.has_active_job("vlm_enhance", document_id)
+                if existing:
+                    logger.info(
+                        "vlm_enhance_dedup", document_id=document_id, job_id=existing,
+                    )
+                else:
+                    await job_queue.enqueue("vlm_enhance", {"document_id": document_id})
+                    logger.info("vlm_enhance_enqueued", document_id=document_id)
             return result
         elif action == "delete":
             return await kms_sync.delete_document(document_id)
@@ -119,7 +127,9 @@ async def run_worker() -> None:
 
     async def vlm_enhance_handler(payload: dict) -> dict:
         # 비동기 VLM 보강: fast 결과를 기다리지 않고 백그라운드로 테이블 보정 → KMS 본문 교체.
-        return await kms_sync.enhance_document(payload.get("document_id", ""), payload.get("data", {}))
+        # payload 전체를 넘긴다 — QueueWorker 가 주입한 job_attempts/job_max_attempts 로
+        # enhance_document 가 "마지막 시도"를 판단한다(재시도 시맨틱).
+        return await kms_sync.enhance_document(payload.get("document_id", ""), payload)
 
     ingest_worker = QueueWorker(
         queue=job_queue,
