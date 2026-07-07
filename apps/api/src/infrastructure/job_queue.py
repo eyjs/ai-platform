@@ -149,6 +149,40 @@ class JobQueue:
             "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
         }
 
+    async def get_latest_job_by_document(
+        self, queue_names: list[str], document_id: str,
+    ) -> Optional[dict]:
+        """문서 ID 로 최신 잡 1건 조회 (KMS 워치독의 정합 확인용).
+
+        payload 의 document_id 또는 source_document_id 매칭. 반환 필드는
+        상태 판단에 필요한 최소만 노출한다.
+        """
+        row = await self._pool.fetchrow(
+            """
+            SELECT id, queue_name, status, attempts, max_attempts,
+                   last_error, created_at, completed_at
+            FROM job_queue
+            WHERE queue_name = ANY($1::text[])
+              AND (payload->>'document_id' = $2
+                   OR payload->>'source_document_id' = $2)
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            queue_names, document_id,
+        )
+        if not row:
+            return None
+        return {
+            "job_id": str(row["id"]),
+            "queue_name": row["queue_name"],
+            "status": row["status"],
+            "attempts": row["attempts"],
+            "max_attempts": row["max_attempts"],
+            "last_error": row["last_error"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+        }
+
     async def has_active_job(self, queue_name: str, document_id: str) -> Optional[str]:
         """해당 문서의 pending/processing 잡이 있으면 job_id 반환 (중복 큐잉 방지)."""
         row = await self._pool.fetchrow(

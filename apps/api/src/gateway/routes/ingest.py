@@ -182,6 +182,75 @@ async def upload_session_file(
     return {"job_id": job_id, "status": "queued", "external_id": external_id}
 
 
+@router.post("/documents/{document_id}/vlm-enhance", status_code=202)
+async def retrigger_vlm_enhance(document_id: str, request: Request):
+    """단일 문서의 VLM 보강을 수동 재실행한다 (I/F 결함 Fix 3).
+
+    기존에는 vlm_enhance 가 kms_sync 내부에서만 큐잉되어 FAILED 후 복구
+    수단이 없었다. 같은 문서의 활성 잡이 있으면 그 job_id 를 반환한다(멱등).
+    """
+    state = _get_app_state(request)
+    user_ctx = await _authenticate(request)
+    await _check_rate_limit(request, user_ctx)
+
+    if ROLE_LEVELS.get(user_ctx.user_role, 0) < 1:
+        raise HTTPException(
+            status_code=403, detail="VLM 재실행은 EDITOR 이상 권한이 필요합니다",
+        )
+    if not document_id.strip():
+        raise HTTPException(status_code=400, detail="document_id required")
+
+    try:
+        existing = await state.job_queue.has_active_job("vlm_enhance", document_id)
+        if existing:
+            logger.info("vlm_retrigger_dedup", document_id=document_id, job_id=existing)
+            return {"job_id": existing, "status": "already_queued"}
+        job_id = await state.job_queue.enqueue(
+            "vlm_enhance", {"document_id": document_id},
+        )
+    except Exception as e:
+        logger.error("vlm_retrigger_error", document_id=document_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    logger.info("vlm_retrigger_enqueued", document_id=document_id, job_id=job_id)
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.get("/documents/sync-status/{document_id}")
+async def get_document_sync_status(document_id: str, request: Request):
+    """문서 기준 동기화/VLM 잡 상태 조회 (KMS 워치독의 정합 확인용, Fix 5).
+
+    KMS 가 PENDING 에 고착된 문서의 실체를 파악한다: 잡이 진행 중인지,
+    완료됐는데 콜백이 유실됐는지, 실패/부재인지.
+    """
+    state = _get_app_state(request)
+    await _authenticate(request)
+
+    if not document_id.strip():
+        raise HTTPException(status_code=400, detail="document_id required")
+
+    try:
+        sync_job = await state.job_queue.get_latest_job_by_document(
+            ["kms_sync", "ingest"], document_id,
+        )
+        vlm_job = await state.job_queue.get_latest_job_by_document(
+            ["vlm_enhance"], document_id,
+        )
+        synced_row = await state.vector_store.pool.fetchrow(
+            "SELECT 1 FROM documents WHERE external_id = $1 LIMIT 1", document_id,
+        )
+    except Exception as e:
+        logger.error("sync_status_error", document_id=document_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    return {
+        "document_id": document_id,
+        "sync_job": sync_job,
+        "vlm_job": vlm_job,
+        "document_synced": synced_row is not None,
+    }
+
+
 @router.get("/documents/ingest/{job_id}", response_model=IngestJobStatus)
 async def get_ingest_status(job_id: str, request: Request):
     """문서 수집 작업 상태를 조회한다 (폴링 엔드포인트)."""
