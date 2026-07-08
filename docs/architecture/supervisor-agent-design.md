@@ -11,6 +11,9 @@
 2. **Deny-by-default 유지.** 이미 `AIP_PROFILE_AUTH_STRICT=true`로 켜져 있다. Supervisor 경로든 직접 경로든
    호출자의 `allowed_profiles`(API Key/JWT/테넌트) 밖의 프로파일은 절대 못 탄다.
 3. **컨텍스트 소유권은 진입 모드가 결정한다.** 직접 모드=해당 프로파일이 소유, Supervisor 모드=메인이 소유.
+4. **Hub-and-spoke — 프로파일 간 peer 라우팅 금지.** 라우팅·위임 결정권은 **메인 한 곳**. 서브는 메인하고만 통신
+   (안 맞으면 다른 서브로 넘기지 말고 메인에 반환), 다음 행동은 메인이 결정. mesh(A→B→A 핑퐁) 금지, 메인이 위임
+   깊이/횟수를 캡으로 통제. 의미분석은 메인이 앞단에서 1회. 위임은 사용자엔 invisible, 운영자엔 트레이스로 transparent.
 
 ## 1. 배경 / 동기
 
@@ -74,10 +77,11 @@ supervise(question, ctx):
     for step in plan.delegations:                    # 순차 or 병렬
         if step.profile not in allowed: continue     # 단일 관문에서 스코프 강제
         sub_ctx = derive_scoped_context(ctx, step)   # 서브에는 필요한 범위만 위임
-        r = run_subagent(step.profile, step.subquery, sub_ctx)  # 기존 프로파일 그래프
-        results.append(r)
-        if plan.is_adaptive: plan = main_llm.replan(question, results, allowed)  # 후속 위임 루프
-    return main_llm.synthesize(question, results)    # 메인이 종합·응답 소유
+        r = run_subagent(step.profile, step.subquery, sub_ctx)  # 기존 그래프. 서브는 메인에만 반환(§0-4)
+        v = main_llm.review(r, evidence=r.sources)   # 검토 게이트(P1): 판정(pass/fail·주석), 재생성 아님
+        results.append({"answer": r, "verdict": v})  # 근거=서브 청크(트레이스 재사용). 서브 가드레일과 중복 금지
+        if plan.is_adaptive: plan = main_llm.replan(question, results, allowed)  # 후속 위임(메인 결정)
+    return main_llm.synthesize(question, results)    # 메인이 종합·응답 소유 (검토 통과분 기준)
 ```
 
 - **위임 스코프 파생**(`derive_scoped_context`): 서브에는 필요한 도메인/문서 범위만 넘겨 최소권한 유지.
