@@ -25,6 +25,19 @@ logger = get_logger(__name__)
 CANDIDATE_POOL_SIZE = 50
 PROBE_SKIP_THRESHOLD = 0.012  # RRF 스코어 범위: ~0.007-0.016
 
+# 트레이스 상세: 청크 스니펫 길이 (메타+스니펫 저장 정책)
+TRACE_SNIPPET_CHARS = 200
+
+
+def _chunk_snippet(r: dict) -> dict:
+    """트레이스용 청크 요약 (메타 + 200자 스니펫). 전문은 chunk_id로 조회."""
+    return {
+        "chunk_id": r.get("chunk_id"),
+        "document_id": r.get("document_id"),
+        "score": round(r.get("score", 0.0), 4),
+        "snippet": (r.get("content") or "")[:TRACE_SNIPPET_CHARS],
+    }
+
 # Progressive Disclosure 상수
 DEFAULT_DISCLOSURE_LEVEL = 2
 REFERENCE_LOAD_THRESHOLD = 0.015
@@ -79,7 +92,7 @@ class RAGSearchTool:
             return await self._execute_level1(query, scope, t_start)
 
         # Level 2: 기존 5-layer 파이프라인 (기본값)
-        results, query_embedding = await self._execute_full_pipeline(
+        results, query_embedding, trace_detail = await self._execute_full_pipeline(
             query, scope, top_k,
         )
 
@@ -103,6 +116,7 @@ class RAGSearchTool:
             method="rag_search",
             chunks_found=len(results),
             disclosure_level=disclosure_level,
+            trace_detail=trace_detail,
         )
 
     async def _execute_level1(
@@ -141,14 +155,31 @@ class RAGSearchTool:
 
     async def _execute_full_pipeline(
         self, query: str, scope: SearchScope, top_k: int,
-    ) -> tuple[list[dict], list[float]]:
+    ) -> tuple[list[dict], list[float], dict]:
         """기존 5-layer RAG 파이프라인 (Level 2 기본 경로).
 
         Returns:
-            (results, query_embedding): 검색 결과와 원본 쿼리 임베딩 (Level 3 재사용용)
+            (results, query_embedding, trace_detail):
+              - results: 최종 검색 결과
+              - query_embedding: 원본 쿼리 임베딩 (Level 3 재사용용)
+              - trace_detail: 파이프라인 관측 상세(필터기준·확장쿼리·리랭킹 입출력 청크)
         """
+        # 메타데이터 필터 기준 (scope) — "어떤 기준으로 필터링했나"
+        trace_detail: dict = {
+            "filter": {
+                "domain_codes": list(scope.domain_codes) if scope.domain_codes else None,
+                "security_level_max": scope.security_level_max,
+                "allowed_doc_ids": len(scope.allowed_doc_ids) if scope.allowed_doc_ids else None,
+                "tenant_id": scope.tenant_id,
+            },
+            "expanded_queries": [query],
+            "candidates": [],  # 리랭킹 입력 후보 — "무엇을 기반으로 리랭킹했나"
+            "reranked": [],    # 리랭킹 최종 결과 — "어떤 청크를 잡았나"
+        }
+
         # L1. Adaptive 쿼리 확장: probe -> 조건부 확장
         queries, probe_candidates = await self._adaptive_expand(query, scope)
+        trace_detail["expanded_queries"] = queries
 
         # 멀티쿼리 임베딩 (배치)
         embeddings = await self._embedder.embed_batch(queries)
@@ -163,11 +194,15 @@ class RAGSearchTool:
             )
 
         if not candidates:
-            # 2-tuple 계약 유지 (빈 리스트만 반환하면 호출부 언팩이 깨진다)
-            return [], query_embedding
+            # 계약 유지 (호출부 3-tuple 언팩)
+            return [], query_embedding, trace_detail
 
         # L3. 인접 청크 확장 (cascade: 약신호 노이즈 컷을 리랭커 앞에서 하지 않는다 → 고-recall)
         candidates = await expand_neighbors(self._store, candidates)
+        # 리랭킹 입력 후보 풀 스냅샷 (상한 CANDIDATE_POOL_SIZE)
+        trace_detail["candidates"] = [
+            _chunk_snippet(c) for c in candidates[:CANDIDATE_POOL_SIZE]
+        ]
 
         # L4. 리랭킹 (전체 후보 풀을 받아 정밀 판정)
         # 리랭킹은 "정제" 단계다 — 실패해도 이미 성공한 검색(candidates)을 폐기하면 안 된다.
@@ -178,6 +213,7 @@ class RAGSearchTool:
                 results = await rerank_3tier(
                     self._reranker, query, candidates, top_k,
                 )
+                trace_detail["reranked_by"] = "reranker_3tier"
             except Exception as e:
                 logger.warning(
                     "rerank_failed_degrade_to_vector_order",
@@ -186,15 +222,19 @@ class RAGSearchTool:
                     top_k=top_k,
                 )
                 results = candidates[:top_k]
+                trace_detail["reranked_by"] = "vector_order_degraded"
         else:
             results = candidates[:top_k]
+            trace_detail["reranked_by"] = "vector_order"
 
         # L2'. 노이즈 필터 (C12): 약신호 RRF 단계가 아니라 리랭킹 후 융합 점수 기준으로 적용.
         #      리랭커가 살릴 수 있는 청크를 검색 점수만으로 미리 잘라내던 문제를 제거.
         results = filter_noise(results)
 
         # L5. 결과 가드
-        return guard_results(results), query_embedding
+        results = guard_results(results)
+        trace_detail["reranked"] = [_chunk_snippet(r) for r in results]
+        return results, query_embedding, trace_detail
 
     async def _append_references(
         self,

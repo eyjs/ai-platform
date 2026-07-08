@@ -110,11 +110,16 @@ class DeterministicExecutorMixin:
                     tools_called = state_update.get("tools_called", [])
                     search_results = state_update.get("search_results", [])
                     for tl in state_update.get("tool_latencies", []):
-                        yield {"type": "trace", "data": {
+                        tool_event: dict = {
                             "tool": tl["tool"],
                             "success": tl["success"],
                             "ms": tl["ms"],
-                        }}
+                            "chunks_found": tl.get("chunks_found", 0),
+                        }
+                        # 청크 상세(필터·후보·리랭킹) 실시간 동봉
+                        if tl.get("detail"):
+                            tool_event["detail"] = tl["detail"]
+                        yield {"type": "trace", "data": tool_event}
                 elif node_name == "graph_enrich":
                     if "search_results" in state_update:
                         search_results = state_update["search_results"]

@@ -113,9 +113,13 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
                 scope=scope,
             )
             if trace_node:
+                # 도구가 반환한 관측 상세(rag_search: 필터·후보·리랭킹 청크)를
+                # 트레이스 노드에 실어 요약(latency_breakdown)으로 영속화한다.
+                detail = result.metadata.get("trace_detail") if result.metadata else None
                 trace_node.finish(
                     success=result.success,
                     chunks=len(result.data) if result.data else 0,
+                    **({"detail": detail} if detail else {}),
                 )
             return tool_call, result, trace_node
         except Exception as e:
@@ -161,9 +165,11 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
                     search_results.extend(result.data)
 
                 node_ms = trace_node.duration_ms if trace_node else 0
+                detail = result.metadata.get("trace_detail") if result.metadata else None
                 tool_latencies.append({
                     "tool": tc.tool_name, "success": result.success,
                     "chunks_found": chunks_found, "ms": round(node_ms, 1),
+                    **({"detail": detail} if detail else {}),
                 })
                 logger.info(
                     "tool_execute", tool=tc.tool_name,
