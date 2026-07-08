@@ -55,18 +55,40 @@ def route_by_rag(state: AgentState) -> str:
     return "direct_generate"
 
 
-def route_by_evaluation(state: AgentState) -> str:
-    """검색 결과 품질에 따라 다음 노드를 결정한다.
+# 검색 결과 충분성 임계 — 리랭킹 여부에 따라 점수 스케일이 다르다.
+#   리랭킹됨: fused_score 0~1 스케일 / 리랭킹 스킵·실패: RRF ~0.01 스케일.
+# 단일 0.4 임계는 리랭킹 안 탄(후보 ≤ top_k, 리랭커 없음/degrade) 결과를 아무리
+# 관련성이 높아도 '불충분'으로 오판해 상시 재시도를 유발했다(스케일 불일치 버그).
+RERANKED_SUFFICIENT_SCORE = 0.4
+RRF_SUFFICIENT_SCORE = 0.012  # rag_search PROBE_SKIP_THRESHOLD 와 정합
 
-    - 결과 충분 (score >= 0.4): generate_with_context로 진행
-    - 결과 불충분 & retry 가능: rewrite_query로 재시도
-    - 결과 불충분 & retry 소진: generate_with_context로 진행 (best-effort)
+
+def _results_sufficient(results: list[dict]) -> bool:
+    """스케일 인지 충분성 판정. rerank_score 유무로 점수 스케일을 구분한다."""
+    if not results:
+        return False
+    top_score = max(r.get("score", 0.0) for r in results)
+    reranked = any("rerank_score" in r for r in results)
+    threshold = RERANKED_SUFFICIENT_SCORE if reranked else RRF_SUFFICIENT_SCORE
+    return top_score >= threshold
+
+
+def route_by_evaluation(state: AgentState) -> str:
+    """검색 결과 품질(스케일 인지)에 따라 다음 노드를 결정한다.
+
+    - 결과 충분: generate_with_context
+    - 빈 결과(0건): 재시도 스킵 → generate_with_context (rewrite해도 0건 반복, 실측 근거)
+    - 결과 불충분 & retry 가능: rewrite_query
+    - 결과 불충분 & retry 소진: generate_with_context (best-effort)
     """
     results = state.get("search_results", [])
     retry_count = state.get("retry_count", 0)
 
-    # 결과가 있고 최소 품질 기준 충족
-    if results and max(r.get("score", 0) for r in results) >= 0.4:
+    if _results_sufficient(results):
+        return "generate_with_context"
+
+    # 빈 결과는 재시도해도 무의미(쿼리 재작성으로 없던 문서가 생기지 않음) → best-effort 생성
+    if not results:
         return "generate_with_context"
 
     # 최대 재시도 도달
@@ -197,8 +219,12 @@ def create_evaluate_results() -> Callable:
         results = state.get("search_results", [])
         retry_count = state.get("retry_count", 0)
 
-        # 결과가 충분하면 그대로 진행
-        if results and max(r.get("score", 0) for r in results) >= 0.4:
+        # 결과가 충분하면 그대로 진행 (스케일 인지 판정)
+        if _results_sufficient(results):
+            return {"retry_count": retry_count}
+
+        # 빈 결과: 재시도해도 0건 반복 → 증가시키지 않아 route에서 best-effort 생성으로 간다
+        if not results:
             return {"retry_count": retry_count}
 
         # 최대 재시도 도달
