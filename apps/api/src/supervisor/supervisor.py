@@ -93,6 +93,15 @@ class Supervisor:
                 trace=trace,
             )
             results.append(r)  # 서브는 메인에만 반환 (§0-5, P0-8)
+            # §0-5: 위임 경로 전부 관측 — 성공/실패 위임을 운영자 트레이스로 남긴다.
+            # (계층 트레이스 노드는 P1-3 소유. P0는 구조화 로그로 최소 관측 보장.)
+            logger.info(
+                "supervisor_delegation_done",
+                profile=step.profile,
+                ok=r.ok,
+                sources=len(r.sources),
+                error=r.error,
+            )
             # P0: adaptive replan 없음(is_adaptive 항상 False). review 게이트 없음(P1).
 
         answer = await self._planner.synthesize(question, results)  # 메인이 종합·소유
