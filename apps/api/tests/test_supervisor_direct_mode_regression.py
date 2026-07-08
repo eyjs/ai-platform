@@ -374,3 +374,78 @@ class TestRoutingCallSequenceUnaffectedBySupervisor:
             == state_with_supervisor.agent.execute.await_count
             == 1
         )
+
+
+# ---------------------------------------------------------------------------
+# 7. 실제 SubAgentRunner 스파이 0회 (P0 인수 시나리오 B, requirement §7 DoD)
+# ---------------------------------------------------------------------------
+#
+# 위 1번 클래스는 state.supervisor 전체를 AsyncMock으로 감싸 "supervisor.mock_calls == []"
+# 로 무호출을 증명한다. 이 클래스는 그와 별개로, 실제 Supervisor 인스턴스 + 실제
+# SubAgentRunner 대신 주입한 spy를 사용해 "SubAgentRunner.run이 정확히 0회 호출됨"을
+# supervisor-e2e-scenarios.md §B-1의 문구("SubAgentRunner/supervisor.* 코드 경로
+# 미진입")대로 명시적으로 증명한다.
+
+
+class _SpySubAgentRunner:
+    """직접 모드에서 절대 호출되면 안 되는 서브 실행 경로의 spy."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def run(self, profile_id, query, ctx, *, user_security_level, tenant_id, trace=None):
+        self.calls.append(profile_id)
+        raise AssertionError("직접 모드에서 SubAgentRunner.run이 호출되어서는 안 된다")
+
+
+class TestDirectModeSubAgentRunnerSpyZeroCalls:
+    """직접 모드(chatbot_id="insurance-qa")에서 실제 SubAgentRunner.run이 0회 호출된다."""
+
+    @pytest.mark.asyncio
+    async def test_real_supervisor_with_spy_runner_never_invoked_in_direct_mode(self, monkeypatch):
+        from src.supervisor.authz import DelegationAuthorizer
+        from src.supervisor.models import SupervisorLimits
+        from src.supervisor.planner_llm import SupervisorPlanner
+        from src.supervisor.supervisor import Supervisor
+
+        spy_runner = _SpySubAgentRunner()
+
+        class _FakeProfileStore:
+            async def list_all(self):
+                return [_make_profile("supervisor"), _make_profile("insurance-qa")]
+
+            async def get(self, profile_id):
+                return _make_profile(profile_id)
+
+        class _FakeTenantService:
+            async def get_allowed_profiles(self, tenant_id):
+                return []
+
+        authorizer = DelegationAuthorizer(
+            profile_store=_FakeProfileStore(),
+            tenant_service=_FakeTenantService(),
+            access_policy=None,
+            settings=SimpleNamespace(profile_auth_strict=False),
+        )
+        supervisor = Supervisor(
+            planner=SupervisorPlanner(orchestration_llm=AsyncMock()),
+            runner=spy_runner,
+            authorizer=authorizer,
+            limits=SupervisorLimits(),
+            profile_store=_FakeProfileStore(),
+        )
+        state = _make_full_state(supervisor=supervisor)  # chatbot_id != supervisor_profile_id
+
+        monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+        monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=_make_user_ctx()))
+        monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+        req = ChatRequest(question="보험 상품 알려줘", chatbot_id="insurance-qa")
+        request = _make_request(state)
+
+        resp = await chat_module.chat(req, request)
+
+        # 실제 SubAgentRunner(spy)가 정확히 0회 호출됨 — supervisor 코드 경로 완전 미진입.
+        assert spy_runner.calls == []
+        assert resp.answer == "직접 모드 답변"  # 기존 직접 모드 경로(state.agent.execute)만 실행됨
+        state.agent.execute.assert_awaited_once()
