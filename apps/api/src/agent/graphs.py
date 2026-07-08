@@ -41,6 +41,7 @@ def build_deterministic_graph(
     guardrails: dict[str, Guardrail],
     kms_graph_client: Optional[KmsGraphClient] = None,
     vector_store: Optional[VectorStore] = None,
+    orchestration_llm: Optional[LLMProvider] = None,
 ) -> StateGraph:
     """결정론적 RAG 파이프라인 그래프 (Plan-and-Execute + Adaptive Retry + Guardrail Regen).
 
@@ -65,10 +66,14 @@ def build_deterministic_graph(
     """
     workflow = StateGraph(AgentState)
 
+    # 오케스트레이션(계획수립·쿼리재작성)은 생성과 분리 — 경량 모델로 라이트사이징.
+    # 미주입 시 llm 으로 폴백(하위호환). 생성 노드는 항상 llm(대형)을 유지한다.
+    orch_llm = orchestration_llm or llm
+
     # --- 노드 등록 ---
     workflow.add_node(
         "plan_execution",
-        create_planner(llm, registry.resolve),
+        create_planner(orch_llm, registry.resolve),
     )
     workflow.add_node("execute_tools", create_execute_tools(registry))
 
@@ -80,7 +85,7 @@ def build_deterministic_graph(
         )
 
     workflow.add_node("evaluate_results", create_evaluate_results())
-    workflow.add_node("rewrite_query", create_rewrite_query(llm))
+    workflow.add_node("rewrite_query", create_rewrite_query(orch_llm))
     workflow.add_node("generate_with_context", create_generate_with_context(llm))
     workflow.add_node("direct_generate", create_direct_generate(llm))
     workflow.add_node("run_guardrails", create_run_guardrails(guardrails))

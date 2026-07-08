@@ -52,8 +52,12 @@ class GraphExecutor(WorkflowExecutorMixin, DeterministicExecutorMixin, AgenticEx
         graph_cache: Optional[GraphCache] = None,
         provider_factory: Optional["ProviderFactory"] = None,
         settings: Optional["Settings"] = None,
+        orchestration_llm: Optional[LLMProvider] = None,
     ):
         self._main_llm = main_llm
+        # 오케스트레이션(계획수립·쿼리재작성)용 경량 LLM. 미주입 시 main_llm 폴백.
+        # 생성은 항상 main_llm(대형)을 쓰고, 오케스트레이션만 소형으로 라이트사이징.
+        self._orchestration_llm = orchestration_llm or main_llm
         self._registry = tool_registry
         self._guardrails = guardrails or {}
         self._chat_model = chat_model
@@ -71,6 +75,7 @@ class GraphExecutor(WorkflowExecutorMixin, DeterministicExecutorMixin, AgenticEx
             guardrails=self._guardrails,
             kms_graph_client=kms_graph_client,
             vector_store=vector_store,
+            orchestration_llm=self._orchestration_llm,
         )
         self._deterministic_app = det_graph.compile()
 

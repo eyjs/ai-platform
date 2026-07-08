@@ -379,6 +379,8 @@ async def create_app_state(settings: Settings) -> AppState:
         # chat_model(기본) 은 그대로 유지되며, resolved alias 가 있을 때만 override 빌드.
         provider_factory=provider_factory,
         settings=settings,
+        # (a) 라이트사이징: 계획수립·쿼리재작성은 경량 router_llm 으로 (생성만 main_llm)
+        orchestration_llm=router_llm,
     )
 
     # 11. Parsing Provider + Ingest Pipeline
