@@ -111,8 +111,14 @@ supervise(question, ctx):
 
 1. **Phase 0**: 서브 실행을 함수로 캡슐화(`run_subagent(profile_id, query, ctx)`) — 기존 그래프 래핑.
 2. **Phase 1**: `supervisor` 프로파일 + 최소 루프(decompose→순차위임→synthesize) 추가. 직접 모드 무변경.
-3. **Phase 2**: adaptive replan(후속 위임 루프) + 병렬 위임 + 위임 트레이스 노드.
-4. **Phase 3**: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합 — 라우팅=1개 위임의 특수케이스로 흡수.
+   → **P0 구현은 명령형 async 루프**(`supervisor.py`의 `for step in plan.delegations`)로 완성. 단순 순차엔 적합.
+3. **Phase 1.5 (★Phase 2 선행조건, P1-0)**: **Supervisor를 명령형 루프 → LangGraph StateGraph로 전환.**
+   시스템 나머지가 전부 LangGraph인데 상위만 명령형 → 비일관. Phase 2의 **병렬 위임 = `Send` API**,
+   **adaptive replan = 조건부 엣지**가 그래프 네이티브이므로, 전환 없이 얹으면 기술부채가 커진다.
+   decompose/synthesize/서브를 노드로 재구성(또는 `langgraph-supervisor`). 체크포인트·`astream_events`
+   통합 스트리밍·위임 트레이스가 공짜로 따라옴. **Phase 2 착수 전 반드시 완료.**
+4. **Phase 2**: adaptive replan(조건부 엣지) + 병렬 위임(`Send`) + 위임 트레이스 노드(astream). *(Phase 1.5 후)*
+5. **Phase 3**: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합 — 라우팅=1개 위임의 특수케이스로 흡수.
 
 각 Phase는 직접 모드 회귀 없음을 e2e로 검증(외부 서비스 단일 챗봇 시나리오 필수 통과).
 
