@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchRequestLogDetail, type RequestLogSummary } from '@/lib/api/admin';
 import { formatDuration, latencyColor } from '@/lib/format';
+import { TracePanel } from '@/components/chat/trace-panel';
 
 function statusVariantOf(code: number): 'success' | 'error' | 'warning' {
   if (code >= 500) return 'error';
@@ -156,6 +157,9 @@ export default function RequestLogDetailPage() {
                 );
               })}
             </div>
+
+            {/* RAG 파이프라인 상세 트레이스 — 채팅과 동일 패널(필터 기준·리랭킹 입력/최종 청크) */}
+            <TracePanel events={detail.latencyBreakdown.nodes} />
           </CardContent>
         </Card>
       )}
