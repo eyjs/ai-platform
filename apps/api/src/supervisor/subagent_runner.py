@@ -15,6 +15,7 @@ from typing import Optional
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
 from src.domain.agent_context import AgentContext
+from src.domain.models import AgentMode
 from src.observability.logging import get_logger
 from src.router.ai_router import AIRouter
 from src.supervisor.models import SubAgentResult
@@ -77,6 +78,24 @@ class SubAgentRunner:
                 tenant_id=tenant_id,
                 session_scope_id=None,
             )
+            # P0 제약: 인터랙티브 워크플로우는 위임 불가.
+            # 서브는 stateless 단발 호출인데 워크플로우는 멀티턴(입력 대기 pause)이라
+            # 위임하면 응답 없이 잡히거나(행) 다음 턴 연속성이 끊긴다. 메인에 명시
+            # 반환해 degrade(직접 챗봇 안내)로 처리한다. 해제는 P1 sticky delegation 소유.
+            if getattr(plan, "mode", None) == AgentMode.WORKFLOW:
+                workflow_id = getattr(plan, "workflow_id", None)
+                logger.warning(
+                    "subagent_workflow_delegation_unsupported",
+                    profile_id=profile_id,
+                    workflow_id=workflow_id,
+                )
+                return SubAgentResult(
+                    profile=profile_id,
+                    answer="",
+                    ok=False,
+                    error="workflow_delegation_unsupported",
+                )
+
             resp = await self._agent.execute(
                 question=query,
                 plan=plan,

@@ -63,3 +63,6 @@ class SupervisorLimits:
 
     max_delegations: int = 4
     max_depth: int = 1  # P0는 1-depth 고정 (서브가 또 Supervisor를 호출하지 않음)
+    # 위임 1건의 실행 상한(초). 서브가 응답 없이 잡히면(예: 외부 의존 행)
+    # supervise 전체가 무한 대기하며 SSE가 ping만 보내는 사고를 차단한다.
+    delegation_timeout_sec: float = 120.0
