@@ -46,6 +46,11 @@ from src.orchestrator.orchestrator import MasterOrchestrator
 from src.orchestrator.tenant import TenantService
 from src.services.kms_graph_client import KmsGraphClient
 from src.services.null_kms_client import NullKmsClient
+from src.supervisor.authz import DelegationAuthorizer
+from src.supervisor.models import SupervisorLimits
+from src.supervisor.planner_llm import SupervisorPlanner
+from src.supervisor.subagent_runner import SubAgentRunner
+from src.supervisor.supervisor import Supervisor
 from src.workflow.action_client import ActionClient
 from src.workflow.checkpointer import build_checkpointer
 from src.workflow.context_adapter import SajuContextAdapter
@@ -78,6 +83,8 @@ class AppState:
     rate_limiter: PGRateLimiter
     tenant_service: Optional[TenantService] = None
     orchestrator: Optional[MasterOrchestrator] = None
+    # Task 002 (P0-2): Supervisor 합성 결과. 미배선/구성요소 부재 시 None(안전 폴백 — 엔트리 분기 미진입).
+    supervisor: Optional[Supervisor] = None
     # classify-intent 라우트가 재사용하는 공유 분류기 (router_llm 기반)
     classifier: Optional[SemanticClassifier] = None
 
@@ -407,6 +414,17 @@ async def create_app_state(settings: Settings) -> AppState:
     # 14. TenantService
     tenant_service = TenantService(pool)
 
+    # 14-B. Supervisor 합성 (task-002, P0-2). agent/ai_router/profile_store/tool_registry/
+    # tenant_service/access_policy/orchestration_llm이 모두 준비된 이후에만 합성한다.
+    # orchestration_llm(경량 4B) 우선, 없으면 main_llm으로 폴백(부트스트랩 다른 곳과 동일 관례).
+    supervisor_runner = SubAgentRunner(profile_store, ai_router, agent, tool_registry)
+    supervisor_authorizer = DelegationAuthorizer(profile_store, tenant_service, access_policy, settings)
+    supervisor_planner = SupervisorPlanner(orchestration_llm or main_llm)
+    supervisor = Supervisor(
+        supervisor_planner, supervisor_runner, supervisor_authorizer, SupervisorLimits(), profile_store,
+    )
+    logger.info("supervisor_initialized", profile_id=settings.supervisor_profile_id)
+
     # 15. MasterOrchestrator. 백엔드 선택은 ProviderFactory(provider_mode 기준)가 설정으로
     # 반환하고, 어댑터 생성은 합성 루트인 여기서 한다(infra→orchestrator 역의존 회피).
     orchestrator = None
@@ -532,6 +550,7 @@ async def create_app_state(settings: Settings) -> AppState:
         rate_limiter=rate_limiter,
         tenant_service=tenant_service,
         orchestrator=orchestrator,
+        supervisor=supervisor,
         provider_registry=provider_registry,
         provider_router=provider_router,
         request_log_service=request_log_service,

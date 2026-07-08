@@ -1,0 +1,34 @@
+# Supervisor 오케스트레이터 프로필 (task-002, P0-2)
+#
+# 이 프로필은 실제 그래프 실행 경로를 타지 않는다. `chatbot_id == supervisor_profile_id`
+# 요청은 엔트리(gateway/routes/chat.py)에서 `state.supervisor.supervise()`로 즉시 분기되며,
+# 여기 정의된 mode/tools는 authz·프로필 목록 표기·decompose 후보 제외용으로만 쓰인다.
+# (신규 AgentMode enum 추가 금지 — 기존 "deterministic" 값을 형식상 사용)
+id: "supervisor"
+name: "Supervisor 오케스트레이터"
+
+domain_scopes: []  # 위임 대상 서브가 각자 도메인을 제한 — 여기선 제한 없음
+category_scopes: []
+# 상위 등급 통과만 허용. 실제 접근 제한은 위임 시 user_ctx.security_level_max로 수행된다.
+security_level_max: "SECRET"
+
+mode: "deterministic"
+workflow_id: null
+hybrid_triggers: []
+
+tools: []  # 서브가 도구를 소유(§0-5 hub 강제) — supervisor 자신은 도구를 갖지 않는다.
+
+system_prompt: |
+  당신은 여러 전문 AI 에이전트를 조율하는 메인 슈퍼바이저입니다.
+  사용자 질문을 분석해 적절한 서브 에이전트에 위임하고, 그 결과를 종합해 답변합니다.
+
+response_policy: "balanced"
+guardrails: []
+
+router_model: "haiku"
+main_model: "sonnet"
+
+memory_type: "short"
+memory_ttl_seconds: 3600
+
+intent_hints: []

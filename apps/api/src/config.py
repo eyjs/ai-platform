@@ -177,6 +177,9 @@ class Settings(BaseSettings):
     locale: str = "ko"
     llm_system_prefix: str = ""  # 빈값 = 로케일 기본값 사용
     fallback_profile_id: str = "general-chat"
+    # Supervisor 엔트리 감지 키(task-002). chatbot_id가 이 값과 일치하면
+    # gateway/routes/chat.py가 일반 그래프 실행을 건너뛰고 state.supervisor.supervise()로 분기한다.
+    supervisor_profile_id: str = "supervisor"
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 
