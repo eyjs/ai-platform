@@ -9,16 +9,18 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from src.domain.agent_context import AgentContext
 from src.domain.models import AgentResponse
 from src.gateway.gateway_hooks import (
     latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
 )
-from src.gateway.models import ChatRequest
+from src.gateway.models import ChatRequest, UserContext
 from src.gateway.routes.helpers import (
     _authenticate,
     _check_rate_limit,
     _ChatSetup,
     _get_app_state,
+    _is_supervisor_request,
     _prepare_chat,
     _prepare_chat_fast,
     _save_extracted_memories,
@@ -26,10 +28,149 @@ from src.gateway.routes.helpers import (
     increment_active,
     logger,
 )
-from src.observability.logging import request_context
+from src.observability.logging import RequestContext, request_context
 from src.observability.request_log_models import RequestLogEntry
+from src.observability.trace_logger import RequestTrace
 
 router = APIRouter()
+
+
+async def _run_supervisor_chat(
+    req: ChatRequest, state, user_ctx: UserContext,
+) -> AgentResponse:
+    """Supervisor 엔트리 분기(비스트리밍) — Task 002, P0-2.
+
+    `_prepare_chat`/`state.agent.execute`를 거치지 않고 `state.supervisor.supervise()`로
+    decompose→위임→synthesize를 수행한 뒤, 기존 `/chat` 응답 포맷(AgentResponse)으로 반환한다.
+    메인(엔트리)이 컨텍스트/세션 turn 기록을 소유한다(§6-5).
+
+    주의: `AgentResponse.trace`는 `TraceInfo`만 허용하므로(pydantic), 레이턴시 집계용
+    `RequestTrace`는 `supervise()`에 넘기지 않고 이 함수 로컬에서만 사용한다.
+    """
+    request_id = str(uuid.uuid4())
+    session_id = req.session_id or str(uuid.uuid4())
+    response_id = str(uuid.uuid4())
+    supervisor_id = state.settings.supervisor_profile_id
+    trace = RequestTrace(request_id=request_id)
+
+    ctx_token = request_context.set(RequestContext(
+        request_id=request_id,
+        session_id=session_id,
+        profile_id=supervisor_id,
+        user_id=user_ctx.user_id,
+    ))
+    try:
+        tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+        await state.session_memory.create_session(
+            session_id=session_id,
+            profile_id=supervisor_id,
+            user_id=user_ctx.user_id,
+            tenant_id=tenant_id,
+        )
+
+        # 호출자가 history를 주면 신뢰원천으로 사용(기존 _prepare_chat과 동일 관용구).
+        if req.history:
+            history = [
+                {"role": h.get("role"), "content": h.get("content")}
+                for h in req.history
+                if h.get("role") and h.get("content")
+            ]
+        else:
+            history = await state.session_memory.get_turns(session_id)
+
+        agent_ctx = AgentContext(
+            session_id=session_id,
+            user_id=user_ctx.user_id,
+            user_role=user_ctx.user_role,
+            conversation_history=history,
+            metadata=req.metadata or {},
+            tenant_id=tenant_id,
+        )
+
+        response = await state.supervisor.supervise(req.question, agent_ctx, user_ctx)
+
+        await state.session_memory.add_turn(session_id, "user", req.question)
+        await state.session_memory.add_turn(session_id, "assistant", response.answer)
+
+        trace.log_summary()
+        response.response_id = response_id
+        return response
+    finally:
+        request_context.reset(ctx_token)
+
+
+async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserContext):
+    """Supervisor 엔트리 분기(스트리밍) — Task 002, P0-2.
+
+    P0 최소 어댑트: `supervise()` 완료를 기다린 뒤 answer를 단일 token + done으로 방출한다
+    (토큰 단위 스트리밍 고도화는 P1). done 이벤트에 sources를 포함한다.
+    """
+    request_id = str(uuid.uuid4())
+    session_id = req.session_id or str(uuid.uuid4())
+    response_id = str(uuid.uuid4())
+    supervisor_id = state.settings.supervisor_profile_id
+    trace = RequestTrace(request_id=request_id)
+
+    ctx_token = request_context.set(RequestContext(
+        request_id=request_id,
+        session_id=session_id,
+        profile_id=supervisor_id,
+        user_id=user_ctx.user_id,
+    ))
+
+    async def event_generator():
+        try:
+            tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
+            await state.session_memory.create_session(
+                session_id=session_id,
+                profile_id=supervisor_id,
+                user_id=user_ctx.user_id,
+                tenant_id=tenant_id,
+            )
+
+            if req.history:
+                history = [
+                    {"role": h.get("role"), "content": h.get("content")}
+                    for h in req.history
+                    if h.get("role") and h.get("content")
+                ]
+            else:
+                history = await state.session_memory.get_turns(session_id)
+
+            agent_ctx = AgentContext(
+                session_id=session_id,
+                user_id=user_ctx.user_id,
+                user_role=user_ctx.user_role,
+                conversation_history=history,
+                metadata=req.metadata or {},
+                tenant_id=tenant_id,
+            )
+
+            response = await state.supervisor.supervise(req.question, agent_ctx, user_ctx)
+
+            await state.session_memory.add_turn(session_id, "user", req.question)
+            await state.session_memory.add_turn(session_id, "assistant", response.answer)
+
+            yield {"event": "token", "data": json.dumps({"delta": response.answer}, ensure_ascii=False)}
+            yield {"event": "done", "data": json.dumps({
+                "answer": response.answer,
+                "profile_id": supervisor_id,
+                "orchestrated": False,
+                "response_id": response_id,
+                "confidence": None,
+                "traversal_path": [],
+                "sources": [s.model_dump() if hasattr(s, "model_dump") else s for s in response.sources],
+            }, ensure_ascii=False)}
+
+            trace.log_summary()
+        finally:
+            try:
+                request_context.reset(ctx_token)
+            except ValueError:
+                pass  # 다른 Context에서 생성된 토큰(SSE 제너레이터는 별도 Task에서 실행)
+            decrement_active()
+
+    return EventSourceResponse(event_generator())
 
 
 @router.post("/chat", response_model=AgentResponse)
@@ -37,6 +178,15 @@ async def chat(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+
+    if _is_supervisor_request(req.chatbot_id, state):
+        # Supervisor 엔트리 분기(task-002, §0-2) — 이하 직접 모드/오케스트레이터 경로는 타지 않는다.
+        increment_active()
+        try:
+            return await _run_supervisor_chat(req, state, user_ctx)
+        finally:
+            decrement_active()
+
     setup: Optional[_ChatSetup] = None
 
     increment_active()
@@ -162,6 +312,13 @@ async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+
+    if _is_supervisor_request(req.chatbot_id, state):
+        # Supervisor 엔트리 분기(task-002, §0-2) — 이하 직접 모드/오케스트레이터 경로는 타지 않는다.
+        # increment는 여기서, decrement는 제너레이터 종료 시점(finally)에서 수행한다
+        # (기존 /chat/stream과 동일하게 활성 카운트가 스트림 전체 수명을 감싸도록).
+        increment_active()
+        return await _run_supervisor_chat_stream(req, state, user_ctx)
 
     increment_active()
 
