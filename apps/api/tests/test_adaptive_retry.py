@@ -40,10 +40,10 @@ def _make_state(**overrides) -> AgentState:
 
 @pytest.mark.asyncio
 async def test_evaluate_sufficient_results():
-    """score >= 0.4인 결과가 있으면 retry_count 유지."""
+    """리랭킹된 결과 score >= 0.4면 retry_count 유지."""
     evaluate = create_evaluate_results()
     state = _make_state(
-        search_results=[{"score": 0.85, "content": "good result"}],
+        search_results=[{"score": 0.85, "rerank_score": 0.85, "content": "good result"}],
         retry_count=0,
     )
     result = await evaluate(state)
@@ -52,10 +52,13 @@ async def test_evaluate_sufficient_results():
 
 @pytest.mark.asyncio
 async def test_evaluate_insufficient_results():
-    """score < 0.4이면 retry_count 증가."""
+    """리랭킹된 결과 score < 0.4이면 retry_count 증가.
+
+    스케일 인지 판정: rerank_score가 있어야 0~1(fused) 스케일로 판정된다.
+    """
     evaluate = create_evaluate_results()
     state = _make_state(
-        search_results=[{"score": 0.2, "content": "weak result"}],
+        search_results=[{"score": 0.2, "rerank_score": 0.2, "content": "weak result"}],
         retry_count=0,
     )
     result = await evaluate(state)
@@ -63,12 +66,28 @@ async def test_evaluate_insufficient_results():
 
 
 @pytest.mark.asyncio
+async def test_evaluate_rrf_scale_sufficient():
+    """리랭킹 안 탄(RRF ~0.01 스케일) 결과는 0.012 임계로 판정 — 상시 재시도 버그 회귀 방지.
+
+    rerank_score 없는 0.013은 RRF 스케일에서 '충분' — 옛 단일 0.4 임계라면
+    항상 불충분으로 오판해 재시도를 유발했다(스케일 불일치 버그).
+    """
+    evaluate = create_evaluate_results()
+    state = _make_state(
+        search_results=[{"score": 0.013, "content": "rrf hit"}],
+        retry_count=0,
+    )
+    result = await evaluate(state)
+    assert result["retry_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_evaluate_empty_results():
-    """검색 결과 없으면 retry_count 증가."""
+    """검색 결과 0건이면 재시도하지 않는다(재작성해도 0건 반복 — 낭비 제거 정책)."""
     evaluate = create_evaluate_results()
     state = _make_state(search_results=[], retry_count=0)
     result = await evaluate(state)
-    assert result["retry_count"] == 1
+    assert result["retry_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -76,7 +95,7 @@ async def test_evaluate_max_retries():
     """retry_count가 max에 도달하면 더 이상 증가하지 않음."""
     evaluate = create_evaluate_results()
     state = _make_state(
-        search_results=[{"score": 0.1}],
+        search_results=[{"score": 0.1, "rerank_score": 0.1}],
         retry_count=2,  # == planner_max_retries 기본값
     )
     result = await evaluate(state)
@@ -98,16 +117,16 @@ def test_route_evaluation_sufficient():
 def test_route_evaluation_insufficient_first_time():
     """불충분 + retry_count=0 -> generate_with_context (첫 시도는 그냥 진행)."""
     state = _make_state(
-        search_results=[{"score": 0.1}],
+        search_results=[{"score": 0.1, "rerank_score": 0.1}],
         retry_count=0,
     )
     assert route_by_evaluation(state) == "generate_with_context"
 
 
 def test_route_evaluation_insufficient_after_evaluate():
-    """불충분 + retry_count=1 (evaluate에서 증가) -> rewrite_query."""
+    """불충분(리랭킹 스케일) + retry_count=1 (evaluate에서 증가) -> rewrite_query."""
     state = _make_state(
-        search_results=[{"score": 0.1}],
+        search_results=[{"score": 0.1, "rerank_score": 0.1}],
         retry_count=1,
     )
     assert route_by_evaluation(state) == "rewrite_query"
@@ -116,9 +135,15 @@ def test_route_evaluation_insufficient_after_evaluate():
 def test_route_evaluation_max_retries():
     """max retry 도달 -> generate_with_context (best-effort)."""
     state = _make_state(
-        search_results=[{"score": 0.1}],
+        search_results=[{"score": 0.1, "rerank_score": 0.1}],
         retry_count=2,
     )
+    assert route_by_evaluation(state) == "generate_with_context"
+
+
+def test_route_evaluation_empty_results():
+    """빈 결과 -> 재시도 없이 바로 generate_with_context (재작성해도 0건 반복)."""
+    state = _make_state(search_results=[], retry_count=0)
     assert route_by_evaluation(state) == "generate_with_context"
 
 
@@ -282,10 +307,10 @@ async def test_regenerate_preserves_guardrail_info():
 async def test_full_graph_adaptive_retry():
     """전체 그래프에서 adaptive retry가 동작하는지 통합 테스트.
 
-    시나리오: 첫 검색 score=0.2 (불충분) -> evaluate에서 retry_count=1
-    -> 그러나 route_by_evaluation에서 retry_count=1이면 rewrite_query로
+    시나리오: 첫 검색 rerank_score=0.2 (리랭킹 스케일 불충분) -> evaluate에서 retry_count=1
+    -> route_by_evaluation에서 retry_count=1이면 rewrite_query로
     -> rewrite_query에서 새 steps 생성 -> execute_tools 재실행
-    -> 두 번째 검색 score=0.8 (충분) -> generate 진행
+    -> 두 번째 검색 rerank_score=0.8 (충분) -> generate 진행
     """
     from src.agent.graphs import build_deterministic_graph
     from src.tools.base import ToolResult
@@ -298,11 +323,11 @@ async def test_full_graph_adaptive_retry():
         if call_count == 1:
             return ToolResult(
                 success=True,
-                data=[{"document_id": "d1", "content": "weak", "score": 0.2}],
+                data=[{"document_id": "d1", "content": "weak", "score": 0.2, "rerank_score": 0.2}],
             )
         return ToolResult(
             success=True,
-            data=[{"document_id": "d2", "content": "strong result", "score": 0.8, "title": "Doc"}],
+            data=[{"document_id": "d2", "content": "strong result", "score": 0.8, "rerank_score": 0.8, "title": "Doc"}],
         )
 
     mock_llm = AsyncMock()
