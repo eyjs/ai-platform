@@ -119,7 +119,10 @@ def _make_supervisor(
     profile_store = AsyncMock()
     profile_store.list_all.return_value = profiles
 
-    limits = SupervisorLimits(delegation_timeout_sec=timeout_sec)
+    limits = SupervisorLimits(
+        delegation_timeout_sec=timeout_sec,
+        workflow_handoff_timeout_sec=timeout_sec,  # 테스트에선 정책 무관 동일 상한
+    )
     sup = Supervisor(
         planner, runner, authorizer, limits, profile_store,
         workflow_engine=workflow_engine,
@@ -253,4 +256,42 @@ async def test_supervisor_sticky_resumes_active_workflow():
 
     assert "태어난 시간" in resp.answer
     planner.decompose.assert_not_called()  # sticky가 decompose를 우회했어야 한다
+    planner.synthesize.assert_not_called()
+
+
+# --- 6) sticky 실패: decompose 폴백 금지 — 지연 안내 + 세션 보존 ---
+
+
+@pytest.mark.asyncio
+async def test_supervisor_sticky_failure_returns_delay_notice_not_decompose():
+    """sticky 실행이 실패(타임아웃 등)해도 decompose로 폴백하지 않는다.
+
+    실사고: 워크플로우 중간 발화("투자")가 타임아웃 후 decompose로 넘어가
+    단독 질문으로 재해석 → 무의미한 RAG 답변. 지연 안내를 반환하고
+    워크플로우 세션은 보존해 재시도 시 sticky가 이어붙게 한다.
+    """
+
+    async def failing_run(profile_id, *args, **kwargs):
+        return SubAgentResult(
+            profile=profile_id, answer="", ok=False, error="delegation_timeout",
+        )
+
+    engine = AsyncMock()
+
+    async def get_session(session_id):
+        if session_id.endswith("::sub::fortune-saju"):
+            return SimpleNamespace(completed=False)
+        return None
+
+    engine.get_session.side_effect = get_session
+
+    profiles = [_profile("fortune-saju", "사주팔자 상담사")]
+    sup, planner = _make_supervisor(
+        failing_run, profiles, delegations=[], workflow_engine=engine,
+    )
+
+    resp = await sup.supervise("투자", AgentContext(session_id="s1"), _user_ctx())
+
+    assert "지연" in resp.answer and "이어서" in resp.answer
+    planner.decompose.assert_not_called()  # 중간 발화의 decompose 재해석 금지
     planner.synthesize.assert_not_called()

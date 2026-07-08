@@ -59,10 +59,16 @@ class Supervisor:
         """위임 1건 실행 — 타임아웃 상한 공용 적용(P0-6 확장).
 
         서브가 응답 없이 잡히면(외부 의존 행 등) supervise 전체가 무한 대기하며
-        SSE가 ping만 보내는 사고를 차단한다.
+        SSE가 ping만 보내는 사고를 차단한다. 워크플로우 핸드오프는 dynamic 스텝의
+        로컬 LLM 생성이 오래 걸려(실측 50~120s+) 별도의 넉넉한 상한을 쓴다.
         """
+        timeout_sec = (
+            self._limits.workflow_handoff_timeout_sec
+            if workflow_policy == "handoff"
+            else self._limits.delegation_timeout_sec
+        )
         try:
-            async with asyncio.timeout(self._limits.delegation_timeout_sec):
+            async with asyncio.timeout(timeout_sec):
                 return await self._runner.run(
                     step.profile,
                     step.subquery,
@@ -76,7 +82,7 @@ class Supervisor:
             logger.warning(
                 "supervisor_delegation_timeout",
                 profile=step.profile,
-                timeout_sec=self._limits.delegation_timeout_sec,
+                timeout_sec=timeout_sec,
             )
             return SubAgentResult(
                 profile=step.profile, answer="", ok=False, error="delegation_timeout",
@@ -145,7 +151,17 @@ class Supervisor:
                 # 워크플로우 단계 응답은 그대로 전달(passthrough) — synthesize가
                 # 단계 질문("생년월일을 알려주세요")을 훼손하면 안 된다.
                 return AgentResponse(answer=r.answer, sources=r.sources, trace=trace)
-            # sticky 실행 실패 시 일반 경로로 degrade (decompose 진행)
+            # sticky 실패 시 decompose로 폴백하지 않는다 — 워크플로우 중간 발화
+            # ("투자" 등)를 단독 질문으로 재해석하면 무의미한 답이 나온다(실사고).
+            # 워크플로우 세션은 보존되므로 재시도하면 sticky가 이어붙는다.
+            return AgentResponse(
+                answer=(
+                    "진행 중인 상담 응답이 지연되고 있어요. 잠시 후 같은 대화에서 "
+                    "이어서 말씀해 주시면 계속 진행할게요."
+                ),
+                sources=[],
+                trace=trace,
+            )
 
         plan = await self._planner.decompose(question, allowed, candidates)  # (P0-3)
 

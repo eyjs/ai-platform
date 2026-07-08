@@ -70,3 +70,6 @@ class SupervisorLimits:
     # 위임 1건의 실행 상한(초). 서브가 응답 없이 잡히면(예: 외부 의존 행)
     # supervise 전체가 무한 대기하며 SSE가 ping만 보내는 사고를 차단한다.
     delegation_timeout_sec: float = 120.0
+    # 워크플로우 핸드오프 전용 상한. 로컬 LLM에서 dynamic 스텝(페르소나+맥락 생성)이
+    # 스텝당 50~120s+ 걸리는 실측 — 직접 모드와 동일한 인내심을 준다.
+    workflow_handoff_timeout_sec: float = 300.0
