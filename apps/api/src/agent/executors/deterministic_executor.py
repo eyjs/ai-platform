@@ -4,6 +4,7 @@ graph_executor.py 분할 산출물. GraphExecutor MRO 상속 경로:
   GraphExecutor(WorkflowExecutorMixin, DeterministicExecutorMixin, AgenticExecutorMixin)
 """
 
+import time
 from typing import AsyncIterator, Optional
 
 from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
@@ -80,6 +81,7 @@ class DeterministicExecutorMixin:
             return
 
         # Tool 실행만 수행 (is_streaming=True → LLM/Guardrail 노드 바이패스)
+        t_tools = time.time()
         yield {"type": "trace", "data": {"step": "tool_execution", "status": "start"}}
 
         initial_state = create_initial_state(
@@ -87,6 +89,7 @@ class DeterministicExecutorMixin:
         )
         tools_called = []
         search_results = []
+        retry_count = 0
 
         async for chunk in self._deterministic_app.astream(
             initial_state, stream_mode="updates",
@@ -122,6 +125,33 @@ class DeterministicExecutorMixin:
                             "enriched": enrichment.get("enriched", 0),
                             "discovered": enrichment.get("discovered", 0),
                         }}
+                elif node_name == "evaluate_results":
+                    # 검색 결과 충분성 판정 (Adaptive Retry 분기점) 실시간 노출.
+                    # 충분하면 retry_count 유지, 불충분하면 +1 후 rewrite_query 로 분기.
+                    yield {"type": "trace", "data": {
+                        "step": "evaluate_results",
+                        "retry_count": state_update.get("retry_count"),
+                    }}
+                elif node_name == "rewrite_query":
+                    # 재시도 루프 발화 — 재검색 왕복이 여기서 배증한다
+                    retry_count += 1
+                    logger.info("adaptive_retry", attempt=retry_count)
+                    yield {"type": "trace", "data": {
+                        "step": "rewrite_query", "status": "retry", "attempt": retry_count,
+                    }}
+
+        tools_ms = (time.time() - t_tools) * 1000
+        logger.info(
+            "retrieval_complete",
+            ms=round(tools_ms, 1), tools=tools_called,
+            results=len(search_results), retries=retry_count,
+        )
+        yield {"type": "trace", "data": {
+            "step": "tool_execution", "status": "end",
+            "ms": round(tools_ms, 1),
+            "results": len(search_results),
+            "retries": retry_count,
+        }}
 
         # LLM 토큰 스트리밍 (래퍼에서 직접 처리)
         # graph_enrich 결과가 뒤에 추가되므로 score 기준 정렬 후 슬라이스
@@ -135,20 +165,58 @@ class DeterministicExecutorMixin:
         }}
 
         answer_tokens = []
+        # 생성 계측: ttft(prefill 체감) + tok/s(decode) — 지금까지 graph_stream 총합에
+        # 흡수돼 안 보이던 지배적 지연을 실시간 노출한다.
+        gen_start = time.time()
+        ttft_ms: Optional[float] = None
+        thinking_chunks = 0
+        answer_chunk_count = 0
         # thinking/answer 분리 스트리밍 (base 기본 구현은 전부 answer)
         async for chunk in self._main_llm.generate_stream_typed(
             prompt, system=plan.system_prompt,
         ):
+            if ttft_ms is None:
+                ttft_ms = (time.time() - gen_start) * 1000
             if chunk.kind == "thinking":
+                thinking_chunks += 1
                 yield {"type": "thinking", "data": chunk.content}
             else:
+                answer_chunk_count += 1
                 answer_tokens.append(chunk.content)
                 yield {"type": "token", "data": chunk.content}
+
+        gen_ms = (time.time() - gen_start) * 1000
+        total_chunks = thinking_chunks + answer_chunk_count
+        ttft = round(ttft_ms or 0.0, 1)
+        decode_ms = max(gen_ms - ttft, 1e-6)
+        chunks_per_s = round(total_chunks / (decode_ms / 1000), 1) if total_chunks else 0.0
+        logger.info(
+            "generation_complete",
+            ms=round(gen_ms, 1), ttft_ms=ttft, chunks=total_chunks,
+            thinking_chunks=thinking_chunks, chunks_per_s=chunks_per_s,
+            context_chunks=len(prompt_results),
+        )
+        if trace:
+            # 스트리밍에서 바이패스되는 generate 노드를 수동으로 최종 트레이스에 기록
+            trace.add_node(
+                "generate_with_context", duration_ms=gen_ms,
+                ttft_ms=ttft, chunks_per_s=chunks_per_s, chunks=total_chunks,
+            )
+        yield {"type": "trace", "data": {
+            "step": "generation", "status": "end",
+            "ms": round(gen_ms, 1),
+            "ttft_ms": ttft,
+            "chunks_per_s": chunks_per_s,
+            "chunks": total_chunks,
+            "thinking_chunks": thinking_chunks,
+        }}
 
         # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)
         faithfulness_score: Optional[float] = None
         if plan.guardrail_chain:
+            gr_start = time.time()
+            yield {"type": "trace", "data": {"step": "guardrail", "status": "start"}}
             guardrail_ctx = GuardrailContext(
                 question=question,
                 source_documents=search_results,
@@ -163,6 +231,15 @@ class DeterministicExecutorMixin:
                 yield {"type": "replace", "data": modified}
             # Task 014: faithfulness 스코어 포집 → done 이벤트 동봉
             faithfulness_score = _extract_faithfulness_score(results)
+            gr_ms = (time.time() - gr_start) * 1000
+            logger.info("guardrail_complete", ms=round(gr_ms, 1), modified=(modified != full_answer))
+            if trace:
+                trace.add_node("run_guardrails", duration_ms=gr_ms)
+            yield {"type": "trace", "data": {
+                "step": "guardrail", "status": "end",
+                "ms": round(gr_ms, 1),
+                "modified": modified != full_answer,
+            }}
 
         sources = build_source_dicts(search_results)
         done_data: dict = {
