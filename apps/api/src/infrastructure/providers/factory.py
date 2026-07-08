@@ -99,6 +99,23 @@ class ProviderFactory:
             label="router",
         )
 
+    def get_orchestration_llm(self) -> LLMProvider:
+        """오케스트레이션(계획수립·쿼리재작성·확장)용 LLM.
+
+        투트랙 라이트사이징:
+          - 순수 분류(의도/모드)는 router_llm(1.7B 등 초경량),
+          - 생성적 오케스트레이션(계획·재작성·확장)은 이 provider(4B 등 중경량),
+          - 생성은 main_llm(9B+).
+        orchestrator_server_url 미설정 시 router_llm_server_url 로 폴백(하위호환).
+        """
+        s = self._settings
+        return self._create_llm(
+            server_url=s.orchestrator_server_url or s.router_llm_server_url,
+            local_model=s.orchestrator_model,
+            anthropic_model=s.anthropic_router_model,
+            label="orchestration",
+        )
+
     def get_main_llm(self) -> LLMProvider:
         return self._create_llm(
             server_url=self._settings.main_llm_server_url,

@@ -183,14 +183,16 @@ async def create_app_state(settings: Settings) -> AppState:
     # 4. Provider Factory
     provider_factory = ProviderFactory(settings)
     embedding_provider = provider_factory.get_embedding_provider()
-    router_llm = provider_factory.get_router_llm()
-    main_llm = provider_factory.get_main_llm()
+    router_llm = provider_factory.get_router_llm()               # 분류/라우팅(1.7B 등)
+    orchestration_llm = provider_factory.get_orchestration_llm()  # 계획·재작성·확장(4B 등)
+    main_llm = provider_factory.get_main_llm()                    # 생성(9B+)
     # 리포트 전용 LLM(report_llm_server_url 미설정 시 main_llm). 채팅=9B / 리포트=14B 분리.
     report_llm = provider_factory.get_report_llm()
     logger.info(
         "providers_initialized",
         embedding=type(embedding_provider).__name__,
         router_llm=type(router_llm).__name__,
+        orchestration_llm=type(orchestration_llm).__name__,
         main_llm=type(main_llm).__name__,
         report_llm=type(report_llm).__name__,
     )
@@ -229,7 +231,8 @@ async def create_app_state(settings: Settings) -> AppState:
         embedding_provider=embedding_provider,
         vector_store=vector_store,
         reranker=reranker,
-        router_llm=router_llm,
+        # 쿼리 확장은 생성적 오케스트레이션 → 4B orchestration_llm (분류용 router_llm 아님)
+        router_llm=orchestration_llm,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
     from src.tools.internal import SajuLookupTool, SajuReportPaperTool, SajuReportCompatibilityTool
@@ -379,8 +382,8 @@ async def create_app_state(settings: Settings) -> AppState:
         # chat_model(기본) 은 그대로 유지되며, resolved alias 가 있을 때만 override 빌드.
         provider_factory=provider_factory,
         settings=settings,
-        # (a) 라이트사이징: 계획수립·쿼리재작성은 경량 router_llm 으로 (생성만 main_llm)
-        orchestration_llm=router_llm,
+        # 라이트사이징: 계획수립·쿼리재작성은 orchestration_llm(4B 등)으로 (생성만 main_llm)
+        orchestration_llm=orchestration_llm,
     )
 
     # 11. Parsing Provider + Ingest Pipeline
