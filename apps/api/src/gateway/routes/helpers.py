@@ -175,6 +175,16 @@ async def _check_rate_limit(
     )
 
 
+def _is_supervisor_request(chatbot_id: str | None, state) -> bool:
+    """chat/chat_stream 엔트리 supervisor 분기 판별 (task-002, §0-2).
+
+    순수 판별 함수 — 부작용 없음. `state.supervisor`가 배선되지 않은(None) 워크트리/환경에서는
+    항상 False를 반환해 기존 경로(직접 모드/오케스트레이터)로 안전 폴백한다.
+    """
+    sid = getattr(getattr(state, "settings", None), "supervisor_profile_id", "supervisor")
+    return chatbot_id == sid and getattr(state, "supervisor", None) is not None
+
+
 @dataclass
 class _ChatSetup:
     """chat/chat_stream 공통 세팅 결과."""
