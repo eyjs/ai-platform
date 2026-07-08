@@ -52,6 +52,10 @@ class SubAgentResult:
     trace: object | None = None
     ok: bool = True
     error: str | None = None
+    # 워크플로우 핸드오프 표식: 서브가 인터랙티브 워크플로우로 실행되어
+    # 답변(다음 단계 질문)을 그대로 사용자에게 전달해야 함(synthesize 금지).
+    # hub 유지 — "다음 턴을 누가 받나"는 여전히 메인이 sticky 감지로 결정한다.
+    workflow_handoff: bool = False
 
 
 @dataclass(frozen=True)

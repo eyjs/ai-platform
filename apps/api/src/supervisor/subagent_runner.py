@@ -51,6 +51,7 @@ class SubAgentRunner:
         user_security_level: str,
         tenant_id: str,
         trace: Optional[object] = None,
+        workflow_policy: str = "block",
     ) -> SubAgentResult:
         """단일 서브 프로파일을 실행하고 결과/실패를 메인에 반환한다.
 
@@ -78,11 +79,13 @@ class SubAgentRunner:
                 tenant_id=tenant_id,
                 session_scope_id=None,
             )
-            # P0 제약: 인터랙티브 워크플로우는 위임 불가.
-            # 서브는 stateless 단발 호출인데 워크플로우는 멀티턴(입력 대기 pause)이라
-            # 위임하면 응답 없이 잡히거나(행) 다음 턴 연속성이 끊긴다. 메인에 명시
-            # 반환해 degrade(직접 챗봇 안내)로 처리한다. 해제는 P1 sticky delegation 소유.
-            if getattr(plan, "mode", None) == AgentMode.WORKFLOW:
+            # 인터랙티브 워크플로우 위임 정책:
+            # - "block"(기본, 다중 위임): stateless 단발 위임과 멀티턴 워크플로우는
+            #   불일치 → 실행 없이 실패 반환(오라우팅된 워크플로우가 다른 위임을 오염 방지).
+            # - "handoff"(단일 위임/sticky): 워크플로우를 스코프 세션에서 시작/진행하고
+            #   그 단계 질문을 그대로 반환 — 메인이 passthrough + 다음 턴 sticky 감지.
+            is_workflow = getattr(plan, "mode", None) == AgentMode.WORKFLOW
+            if is_workflow and workflow_policy != "handoff":
                 workflow_id = getattr(plan, "workflow_id", None)
                 logger.warning(
                     "subagent_workflow_delegation_unsupported",
@@ -94,6 +97,13 @@ class SubAgentRunner:
                     answer="",
                     ok=False,
                     error="workflow_delegation_unsupported",
+                )
+            if is_workflow:
+                logger.info(
+                    "subagent_workflow_handoff",
+                    profile_id=profile_id,
+                    workflow_id=getattr(plan, "workflow_id", None),
+                    session_id=ctx.session_id,
                 )
 
             resp = await self._agent.execute(
@@ -109,6 +119,7 @@ class SubAgentRunner:
                 sources=resp.sources,
                 trace=resp.trace,
                 ok=True,
+                workflow_handoff=is_workflow,
             )
         except Exception as e:  # noqa: BLE001 - 서브 실패는 삼키되 메인에 명시 반환(부분실패 degrade 입력)
             logger.error(

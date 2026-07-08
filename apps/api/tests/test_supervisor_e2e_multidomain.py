@@ -107,6 +107,7 @@ class FakeSubAgentRunner:
         user_security_level: str,
         tenant_id: str,
         trace=None,
+        workflow_policy: str = "block",
     ) -> SubAgentResult:
         self.calls.append({"profile_id": profile_id, "query": query, "tenant_id": tenant_id})
         result = self._answers.get(profile_id)

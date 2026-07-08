@@ -61,10 +61,50 @@ async def test_runner_blocks_workflow_mode_delegation():
     agent.execute.assert_not_called()  # 워크플로우 서브는 실행 자체가 없어야 한다
 
 
+@pytest.mark.asyncio
+async def test_runner_handoff_policy_executes_workflow():
+    """workflow_policy='handoff'면 워크플로우를 실행하고 handoff 표식으로 반환."""
+    from src.domain.models import AgentResponse, TraceInfo
+
+    profile_store = AsyncMock()
+    profile_store.get.return_value = _profile("fortune-saju", "사주팔자 상담사")
+
+    ai_router = AsyncMock()
+    ai_router.route.return_value = SimpleNamespace(
+        mode=AgentMode.WORKFLOW, workflow_id="saju_discovery",
+    )
+
+    agent = AsyncMock()
+    agent.execute.return_value = AgentResponse(
+        answer="생년월일시를 알려주세요", sources=[], trace=TraceInfo(mode="workflow"),
+    )
+    tool_registry = AsyncMock()
+    tool_registry.resolve = lambda tool_names: []
+
+    runner = SubAgentRunner(
+        profile_store=profile_store, ai_router=ai_router,
+        agent=agent, tool_registry=tool_registry,
+    )
+    result = await runner.run(
+        "fortune-saju", "내 사주좀 봐줘",
+        AgentContext(session_id="s1"),
+        user_security_level="PUBLIC", tenant_id="default",
+        workflow_policy="handoff",
+    )
+
+    assert result.ok is True
+    assert result.workflow_handoff is True
+    assert "생년월일시" in result.answer
+    agent.execute.assert_called_once()
+
+
 # --- supervisor 조립 헬퍼 ---
 
 
-def _make_supervisor(runner_run, profiles, delegations, timeout_sec: float = 120.0):
+def _make_supervisor(
+    runner_run, profiles, delegations,
+    timeout_sec: float = 120.0, workflow_engine=None,
+):
     planner = AsyncMock()
     planner.decompose.return_value = DelegationPlan(delegations=delegations)
     planner.synthesize.return_value = "종합 답변"
@@ -80,7 +120,11 @@ def _make_supervisor(runner_run, profiles, delegations, timeout_sec: float = 120
     profile_store.list_all.return_value = profiles
 
     limits = SupervisorLimits(delegation_timeout_sec=timeout_sec)
-    return Supervisor(planner, runner, authorizer, limits, profile_store), planner
+    sup = Supervisor(
+        planner, runner, authorizer, limits, profile_store,
+        workflow_engine=workflow_engine,
+    )
+    return sup, planner
 
 
 def _user_ctx():
@@ -142,3 +186,71 @@ async def test_supervisor_workflow_blocked_returns_guidance():
     assert "사주팔자 상담사" in resp.answer  # 어느 챗봇으로 가야 하는지 명시
     assert "직접" in resp.answer
     planner.synthesize.assert_not_called()  # 일반 폴백이 아니라 안내 경로
+
+
+# --- 4) 단일 위임 워크플로우 핸드오프: passthrough (synthesize 금지) ---
+
+
+@pytest.mark.asyncio
+async def test_supervisor_single_workflow_delegation_passthrough():
+    """단일 위임이 워크플로우 핸드오프면 단계 질문을 그대로 전달한다."""
+
+    async def handoff_run(profile_id, *args, **kwargs):
+        assert kwargs.get("workflow_policy") == "handoff"  # 단일 위임 → 핸드오프 정책
+        return SubAgentResult(
+            profile=profile_id, answer="생년월일시를 알려주세요",
+            ok=True, workflow_handoff=True,
+        )
+
+    profiles = [_profile("fortune-saju", "사주팔자 상담사")]
+    sup, planner = _make_supervisor(
+        handoff_run, profiles,
+        [DelegationStep(profile="fortune-saju", subquery="내 사주좀 봐줘")],
+    )
+
+    resp = await sup.supervise("내 사주좀 봐줘", AgentContext(session_id="s1"), _user_ctx())
+
+    assert resp.answer == "생년월일시를 알려주세요"  # passthrough — 훼손 금지
+    planner.synthesize.assert_not_called()
+
+
+# --- 5) sticky: 진행 중 워크플로우 감지 → decompose 없이 그 서브로 직행 ---
+
+
+@pytest.mark.asyncio
+async def test_supervisor_sticky_resumes_active_workflow():
+    """활성 서브 워크플로우가 있으면 decompose를 건너뛰고 재위임한다(멀티턴 연속성)."""
+
+    async def resume_run(profile_id, subquery, *args, **kwargs):
+        assert profile_id == "fortune-saju"
+        assert kwargs.get("workflow_policy") == "handoff"
+        return SubAgentResult(
+            profile=profile_id, answer="1990년 5월 5일생이시군요. 태어난 시간은요?",
+            ok=True, workflow_handoff=True,
+        )
+
+    engine = AsyncMock()
+
+    async def get_session(session_id):
+        # 스코프 세션(parent::sub::fortune-saju)에만 활성 워크플로우 존재
+        if session_id.endswith("::sub::fortune-saju"):
+            return SimpleNamespace(completed=False)
+        return None
+
+    engine.get_session.side_effect = get_session
+
+    profiles = [
+        _profile("insurance-qa", "보험 상담 챗봇"),
+        _profile("fortune-saju", "사주팔자 상담사"),
+    ]
+    sup, planner = _make_supervisor(
+        resume_run, profiles,
+        delegations=[],  # decompose가 호출되면 안 되므로 비워둔다
+        workflow_engine=engine,
+    )
+
+    resp = await sup.supervise("1990년 5월 5일", AgentContext(session_id="s1"), _user_ctx())
+
+    assert "태어난 시간" in resp.answer
+    planner.decompose.assert_not_called()  # sticky가 decompose를 우회했어야 한다
+    planner.synthesize.assert_not_called()

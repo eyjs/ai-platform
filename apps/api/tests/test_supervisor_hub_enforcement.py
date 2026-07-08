@@ -93,9 +93,15 @@ def test_subagent_result_has_no_rerouting_fields():
 
 
 def test_subagent_result_fields_are_exactly_declared_contract():
-    """SubAgentResult의 필드 집합이 계약(profile/answer/sources/trace/ok/error)에서 벗어나지 않는다."""
+    """SubAgentResult의 필드 집합이 계약에서 벗어나지 않는다.
+
+    workflow_handoff는 재라우팅 필드가 아니다 — "이 답변을 synthesize 없이 그대로
+    전달하라"는 표식일 뿐, 다음 턴 수신자는 여전히 메인이 sticky 감지로 결정한다(§0-5).
+    """
     field_names = {f.name for f in SubAgentResult.__dataclass_fields__.values()}
-    assert field_names == {"profile", "answer", "sources", "trace", "ok", "error"}
+    assert field_names == {
+        "profile", "answer", "sources", "trace", "ok", "error", "workflow_handoff",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +177,7 @@ async def test_supervise_loop_never_derives_new_delegation_from_subagent_result(
 
     call_log: list[str] = []
 
-    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None):
+    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None, workflow_policy="block"):
         call_log.append(profile_id)
         # 서브가 마치 다른 프로파일로 재라우팅을 유도하려는 듯한 "이상 결과"를 반환해도
         # SubAgentResult 계약에는 이를 담을 필드가 없다(테스트1과 상호검증) — 여기서는
@@ -366,7 +372,7 @@ async def test_every_executed_delegation_passed_through_allow_gate():
     runner = AsyncMock()
     executed_profiles: list[str] = []
 
-    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None):
+    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None, workflow_policy="block"):
         executed_profiles.append(profile_id)
         return SubAgentResult(profile=profile_id, answer="ok", ok=True)
 

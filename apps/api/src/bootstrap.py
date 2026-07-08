@@ -419,9 +419,12 @@ async def create_app_state(settings: Settings) -> AppState:
     # orchestration_llm(경량 4B) 우선, 없으면 main_llm으로 폴백(부트스트랩 다른 곳과 동일 관례).
     supervisor_runner = SubAgentRunner(profile_store, ai_router, agent, tool_registry)
     supervisor_authorizer = DelegationAuthorizer(profile_store, tenant_service, access_policy, settings)
-    supervisor_planner = SupervisorPlanner(orchestration_llm or main_llm)
+    # decompose=경량(4B), synthesize=대형(main 9B) — "생성은 큰 LLM" (실사고: 4B 종합이
+    # 중국어 혼입·부정문 뒤집힘 유발). workflow_engine은 sticky 감지용(멀티턴 위임 연속성).
+    supervisor_planner = SupervisorPlanner(orchestration_llm or main_llm, synthesize_llm=main_llm)
     supervisor = Supervisor(
         supervisor_planner, supervisor_runner, supervisor_authorizer, SupervisorLimits(), profile_store,
+        workflow_engine=workflow_engine,
     )
     logger.info("supervisor_initialized", profile_id=settings.supervisor_profile_id)
 

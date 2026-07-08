@@ -44,7 +44,7 @@ def _make_authorizer(allowed):
 def _make_runner(result_map: dict[str, SubAgentResult] | None = None):
     runner = AsyncMock()
 
-    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None):
+    async def _run(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None, workflow_policy="block"):
         if result_map and profile_id in result_map:
             return result_map[profile_id]
         return SubAgentResult(profile=profile_id, answer=f"{profile_id} 답변", ok=True)
