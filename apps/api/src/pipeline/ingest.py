@@ -92,7 +92,10 @@ class IngestPipeline:
                 "tokenCount": len(encoding.encode(content)),
             }]
         else:
-            has_heading = bool(re.match(r'^#{1,6}\s+\S', content.lstrip()))
+            # 문서 어디든 헤딩이 있으면 마크다운 청커 사용 — 첫머리만 검사하면
+            # 표지/머리말로 시작하는 파싱본(PDF→md)이 flat 청커로 빠져
+            # 섹션 계층(AST-lite) 메타를 통째로 잃는다(실측: 보험약관 223청크 분량 헤딩 유실).
+            has_heading = bool(re.search(r'^#{1,6}\s+\S', content, re.MULTILINE))
             if has_heading or (file_name and file_name.endswith(".md")):
                 chunks = self._md_chunker.split(content)
             else:
