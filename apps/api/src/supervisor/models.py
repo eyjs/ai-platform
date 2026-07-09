@@ -56,6 +56,10 @@ class SubAgentResult:
     # 답변(다음 단계 질문)을 그대로 사용자에게 전달해야 함(synthesize 금지).
     # hub 유지 — "다음 턴을 누가 받나"는 여전히 메인이 sticky 감지로 결정한다.
     workflow_handoff: bool = False
+    # P1-4 메인 검토 게이트 판정. None=미검토(게이트 off), True/False=판정 결과.
+    # 판정은 메인이 하며 서브 재생성은 없다. 재라우팅 필드가 아니다(hub 계약 유지).
+    review_passed: bool | None = None
+    review_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,12 @@ class SupervisorLimits:
 
     max_delegations: int = 4
     max_depth: int = 1  # P0는 1-depth 고정 (서브가 또 Supervisor를 호출하지 않음)
+    # P1-1 adaptive replan: 라운드 완료 후 메인이 추가 위임을 판단(조건부 엣지).
+    # 총 위임 수는 여전히 max_delegations가 상한 — replan은 라운드 수만 추가한다.
+    adaptive_replan: bool = False
+    max_replan_rounds: int = 1
+    # P1-4 메인 검토 게이트: 서브 답변 판정(pass/fail) 후 통과분만 종합.
+    review_gate: bool = False
     # 위임 1건의 실행 상한(초). 서브가 응답 없이 잡히면(예: 외부 의존 행)
     # supervise 전체가 무한 대기하며 SSE가 ping만 보내는 사고를 차단한다.
     delegation_timeout_sec: float = 120.0

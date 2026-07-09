@@ -99,8 +99,11 @@ def test_subagent_result_fields_are_exactly_declared_contract():
     전달하라"는 표식일 뿐, 다음 턴 수신자는 여전히 메인이 sticky 감지로 결정한다(§0-5).
     """
     field_names = {f.name for f in SubAgentResult.__dataclass_fields__.values()}
+    # review_passed/review_note(P1-4)는 메인의 판정 기록이지 재라우팅 필드가 아니다 —
+    # 값을 쓰는 주체도 메인(finalize 검토 게이트)이고, 다음 위임 대상을 정하지 않는다.
     assert field_names == {
         "profile", "answer", "sources", "trace", "ok", "error", "workflow_handoff",
+        "review_passed", "review_note",
     }
 
 
@@ -284,18 +287,22 @@ def test_static_scan_models_subagent_result_has_no_reroute_field_names():
 
 
 def test_static_scan_delegate_node_only_reads_plan_delegations():
-    """graph.py의 위임 노드가 소비하는 대상이 'plan.delegations' 하나뿐임을 소스에서 확인한다.
+    """graph.py의 위임 fan-out이 소비하는 대상이 'plan.delegations' 하나뿐임을 소스에서 확인한다.
 
-    P1-0 StateGraph 전환으로 순차 루프는 delegate 노드의 조건부 self-edge가 되었다.
-    delegate 노드는 `plan.delegations[step_index]`만 읽어야 하며(hub 강제),
-    서브 결과 리스트(results)에서 step/profile을 뽑아 재위임하는 패턴이 없는지도 함께 본다.
+    P1-2 병렬 전환으로 위임 Send는 dispatch 라우터가 메인의 계획을 순회하며 생성한다.
+    서브 결과 리스트(results)에서 step/profile을 뽑아 재위임(Send)하는 패턴이
+    없는지도 함께 본다.
     """
     graph_path = _SUPERVISOR_SRC_DIR / "graph.py"
     assert graph_path.is_file(), f"경로 계산 실패 — 파일 없음: {graph_path}"
     source = graph_path.read_text(encoding="utf-8")
 
-    assert 'state["plan"].delegations[state["step_index"]]' in source, (
-        "graph.py delegate 노드가 plan.delegations를 인덱스 소비하는 코드를 찾지 못함 — 구조 변경 시 이 테스트를 갱신할 것"
+    assert 'for step in state["plan"].delegations' in source, (
+        "graph.py dispatch가 plan.delegations를 순회하는 코드를 찾지 못함 — 구조 변경 시 이 테스트를 갱신할 것"
+    )
+    # Send 생성 지점은 dispatch 라우터 하나여야 한다(위임 fan-out 단일 지점 = 단일 관문).
+    assert source.count("Send(") == 1, (
+        "delegate Send 생성 지점이 dispatch 라우터 밖에도 존재 — 관문 우회 위임 경로 의심"
     )
 
     # 서브 결과 리스트(results)를 순회하는 코드가 있다면(현재는 sources 수집용),

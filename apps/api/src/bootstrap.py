@@ -422,11 +422,22 @@ async def create_app_state(settings: Settings) -> AppState:
     # decompose=경량(4B), synthesize=대형(main 9B) — "생성은 큰 LLM" (실사고: 4B 종합이
     # 중국어 혼입·부정문 뒤집힘 유발). workflow_engine은 sticky 감지용(멀티턴 위임 연속성).
     supervisor_planner = SupervisorPlanner(orchestration_llm or main_llm, synthesize_llm=main_llm)
+    supervisor_limits = SupervisorLimits(
+        # P1-1/P1-4는 opt-in — 켜면 턴당 LLM 호출이 추가된다(라이트사이징 원칙과 트레이드오프).
+        adaptive_replan=settings.supervisor_adaptive_replan,
+        max_replan_rounds=settings.supervisor_max_replan_rounds,
+        review_gate=settings.supervisor_review_gate,
+    )
     supervisor = Supervisor(
-        supervisor_planner, supervisor_runner, supervisor_authorizer, SupervisorLimits(), profile_store,
+        supervisor_planner, supervisor_runner, supervisor_authorizer, supervisor_limits, profile_store,
         workflow_engine=workflow_engine,
     )
-    logger.info("supervisor_initialized", profile_id=settings.supervisor_profile_id)
+    logger.info(
+        "supervisor_initialized",
+        profile_id=settings.supervisor_profile_id,
+        adaptive_replan=settings.supervisor_adaptive_replan,
+        review_gate=settings.supervisor_review_gate,
+    )
 
     # 15. MasterOrchestrator. 백엔드 선택은 ProviderFactory(provider_mode 기준)가 설정으로
     # 반환하고, 어댑터 생성은 합성 루트인 여기서 한다(infra→orchestrator 역의존 회피).

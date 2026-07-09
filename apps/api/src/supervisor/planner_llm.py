@@ -54,6 +54,47 @@ SYNTHESIZE_USER_TEMPLATE = """질문: {question}
 
 FALLBACK_NO_RESULT = "죄송합니다. 요청을 처리할 수 있는 하위 에이전트로부터 유효한 답변을 받지 못했습니다."
 
+REPLAN_SYSTEM_PROMPT = """당신은 여러 전문 AI 에이전트를 조율하는 메인 슈퍼바이저입니다.
+1차 위임 결과를 검토해, 사용자 질문에 답하기 위해 **추가 위임이 반드시 필요한지** 판단하세요.
+
+규칙:
+- **대부분의 경우 추가 위임은 불필요합니다. 확신이 없으면 빈 배열을 반환하세요.**
+- 이미 받은 답변으로 질문에 답할 수 있으면 빈 배열을 반환하세요.
+- 추가 위임은 "질문이 명시적으로 요구했는데 아직 어떤 답변도 다루지 않은 도메인"이 있을 때만 만드세요.
+- 이미 위임했던 에이전트에 같은 질의를 반복하지 마세요.
+- 후보 에이전트 목록에 있는 id만 담당자로 지정할 수 있습니다."""
+
+REPLAN_USER_TEMPLATE = """후보 에이전트:
+{candidates_desc}
+
+질문: {question}
+
+1차 위임 결과:
+{sub_answers}
+
+추가 위임이 필요하면 JSON으로, 불필요하면 빈 배열로 응답하세요:
+{{
+  "delegations": [
+    {{"profile": "candidate_id", "subquery": "서브에게 전달할 구체적 질의", "reason": "추가 위임 근거"}}
+  ]
+}}"""
+
+REVIEW_SYSTEM_PROMPT = """당신은 하위 에이전트의 답변을 검토하는 메인 슈퍼바이저입니다.
+답변이 위임한 서브 질의에 실제로 응답했는지만 판정하세요(재작성 금지).
+
+판정 기준(이것만 본다 — 안전성/문체는 서브 가드레일 소관이므로 중복 검사 금지):
+- 답변이 서브 질의와 관련이 있는가?
+- 답변이 근거 없이 질의를 회피하거나 완전히 다른 주제를 다루지 않는가?
+확신이 없으면 passed=true로 판정하세요(과차단 금지)."""
+
+REVIEW_USER_TEMPLATE = """서브 질의: {subquery}
+
+서브 답변:
+{answer}
+
+JSON 형식으로 판정하세요:
+{{"passed": true/false, "note": "판정 근거 한 줄"}}"""
+
 
 class SupervisorPlanner:
     """decompose(질의 분해)=경량 LLM / synthesize(사용자 대면 종합)=대형 LLM."""
@@ -128,6 +169,69 @@ class SupervisorPlanner:
                 )
             )
         return steps
+
+    async def replan(
+        self,
+        question: str,
+        results: list[SubAgentResult],
+        candidate_profiles: list[dict],
+    ) -> DelegationPlan:
+        """1차 위임 결과를 검토해 추가 위임 계획을 만든다 (P1-1 adaptive replan).
+
+        decompose와 달리 **빈 계획이 정상 종료**다(추가 위임 불필요) — 폴백 위임을
+        만들지 않는다. LLM 실패 시에도 빈 계획으로 degrade한다(전파 금지).
+        """
+        if not candidate_profiles:
+            return DelegationPlan(delegations=[], is_adaptive=False)
+
+        ok_results = [r for r in results if r.ok]
+        if not ok_results:
+            # 전부 실패한 라운드에서 재위임하면 같은 실패를 반복할 뿐이다 — 종합으로 넘긴다.
+            return DelegationPlan(delegations=[], is_adaptive=False)
+
+        candidates_desc = "\n".join(
+            f"- {c.get('id', '')}: {c.get('name', '')} — {c.get('description', '')}"
+            for c in candidate_profiles
+        )
+        sub_answers = "\n\n".join(f"[{r.profile}]\n{r.answer}" for r in ok_results)
+        prompt = REPLAN_USER_TEMPLATE.format(
+            candidates_desc=candidates_desc, question=question, sub_answers=sub_answers
+        )
+
+        try:
+            result = await self._llm.generate_json(prompt, system=REPLAN_SYSTEM_PROMPT)
+            delegations = self._parse_delegations(result, candidate_profiles)
+        except Exception as e:  # noqa: BLE001 - replan 실패는 빈 계획으로 degrade, 전파 금지
+            logger.warning("supervisor_replan_llm_error", error=str(e))
+            delegations = []
+
+        # 이미 위임한 프로파일 재위임 금지(같은 질의 반복 방지 — 프롬프트 규칙의 코드 강제).
+        delegated = {r.profile for r in results}
+        delegations = [d for d in delegations if d.profile not in delegated]
+
+        if delegations:
+            logger.info(
+                "supervisor_replan_delegations",
+                profiles=[d.profile for d in delegations],
+            )
+        return DelegationPlan(delegations=delegations, is_adaptive=False)
+
+    async def review(self, subquery: str, result: SubAgentResult) -> dict:
+        """서브 답변 1건을 판정한다 (P1-4 메인 검토 게이트).
+
+        재생성이 아니라 판정(pass/fail + 근거 한 줄)만 한다. 판정 불능(LLM 실패,
+        파싱 실패)은 fail-open(passed=True) — 게이트 장애가 답변 유실로 번지면 안 된다.
+        """
+        prompt = REVIEW_USER_TEMPLATE.format(subquery=subquery, answer=result.answer)
+        try:
+            verdict = await self._llm.generate_json(prompt, system=REVIEW_SYSTEM_PROMPT)
+        except Exception as e:  # noqa: BLE001 - 판정 실패는 fail-open, 전파 금지
+            logger.warning("supervisor_review_llm_error", profile=result.profile, error=str(e))
+            return {"passed": True, "note": "판정 실패(fail-open)"}
+
+        if not isinstance(verdict, dict) or "passed" not in verdict:
+            return {"passed": True, "note": "판정 파싱 실패(fail-open)"}
+        return {"passed": bool(verdict["passed"]), "note": str(verdict.get("note", ""))}
 
     async def synthesize(self, question: str, results: list[SubAgentResult]) -> str:
         """서브 실행 결과를 종합해 메인의 최종 답변을 생성한다.

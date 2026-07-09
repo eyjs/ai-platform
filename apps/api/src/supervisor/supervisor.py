@@ -67,9 +67,11 @@ class Supervisor:
             "sticky_profile": None,
             "plan": None,
             "workflow_policy": "block",
-            "step_index": 0,
+            "round": 0,
             "budget": None,
+            "current_step": None,
             "results": [],
+            "delegation_log": [],
             "response": None,
         }
         final_state = await self._graph.ainvoke(

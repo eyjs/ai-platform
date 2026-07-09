@@ -180,6 +180,13 @@ class Settings(BaseSettings):
     # Supervisor 엔트리 감지 키(task-002). chatbot_id가 이 값과 일치하면
     # gateway/routes/chat.py가 일반 그래프 실행을 건너뛰고 state.supervisor.supervise()로 분기한다.
     supervisor_profile_id: str = "supervisor"
+    # P1-1 adaptive replan: 위임 라운드 완료 후 메인이 부족한 도메인을 재위임할지 판단.
+    # 턴당 orchestration LLM 호출 1회가 추가되고 과위임(오라우팅) 위험이 있어 opt-in.
+    supervisor_adaptive_replan: bool = False
+    supervisor_max_replan_rounds: int = 1
+    # P1-4 메인 검토 게이트: 서브 답변을 메인이 판정(pass/fail) 후 통과분만 종합.
+    # 서브 결과당 LLM 호출 1회가 추가되어 opt-in. 재생성 아님 — 판정만 한다.
+    supervisor_review_gate: bool = False
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 

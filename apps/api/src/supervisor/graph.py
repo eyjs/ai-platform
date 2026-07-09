@@ -1,34 +1,41 @@
-"""Supervisor StateGraph 빌더 (P1-0).
+"""Supervisor StateGraph 빌더 (P1-0 전환 + P1-1~P1-4 확장).
 
-P0의 명령형 async 루프(`supervisor.py`)를 LangGraph StateGraph로 재구성한다.
-시스템 나머지(agent/workflow)가 전부 LangGraph인데 상위 Supervisor만 명령형이던
-비일관을 해소하고, P1의 병렬 위임(`Send`)·adaptive replan(조건부 엣지)을 그래프
-네이티브로 얹을 수 있는 토대를 만든다(설계문서 §7 Phase 1.5).
+P0의 명령형 async 루프를 LangGraph StateGraph로 재구성하고(P1-0), 그 위에
+그래프 네이티브 기능을 얹는다:
+- P1-1 adaptive replan: 라운드 완료 후 메인이 추가 위임을 판단(조건부 엣지). opt-in.
+- P1-2 병렬 위임: 한 라운드의 위임들을 `Send` fan-out으로 동시 실행.
+- P1-3 위임 트레이스: 위임 경로 전부를 `delegation_log`로 수집해 `TraceInfo`로 노출.
+- P1-4 메인 검토 게이트: 서브 답변 판정(pass/fail) 후 통과분만 종합. opt-in.
 
 토폴로지:
 
     START → resolve_scope → detect_sticky
-      --(route_by_sticky)--> sticky_delegate → END        (진행 중 워크플로우 연속)
+      --(route_by_sticky)--> sticky_delegate → END           (진행 중 워크플로우 연속)
                          └─> decompose
-    decompose --(route_delegation)--> delegate | finalize
-    delegate  --(route_delegation)--> delegate | finalize (순차 루프 = 조건부 self-edge)
-    finalize → END
+    decompose --(route_dispatch)--> [Send delegate ×N] | finalize
+    delegate  → collect                                       (fan-in: 라운드 배리어)
+    collect   --(route_after_round)--> replan | finalize      (P1-1, opt-in)
+    replan    --(route_dispatch)--> [Send delegate ×N] | finalize
+    finalize  → END
 
 불변 계약(P0에서 그대로 승계):
-- hub 강제(§0-5): delegate 노드는 오직 `plan.delegations`(메인의 계획)만 소비한다.
-  서브 결과가 다음 위임 대상을 정하는 경로는 없다.
-- 단일 관문(§0-3): `runner.run` 호출은 `is_delegation_allowed` 통과 블록 안에만 존재.
-- 캡(P0-6): 위임 예산은 메인만 소유·소비하며 서브에 전달하지 않는다.
+- hub 강제(§0-5): 위임 대상은 오직 메인의 계획(`plan.delegations`)에서만 나온다.
+  서브 결과가 다음 위임 대상을 정하는 경로는 없다(replan도 메인 LLM의 결정).
+- 단일 관문(§0-3): 모든 Send는 `is_delegation_allowed` 통과 후에만 생성된다.
+- 캡(P0-6): 위임 예산은 메인만 소유·소비한다. replan 라운드에도 총 위임 수 상한 공유.
 """
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import time
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 from src.config import settings
-from src.domain.models import AgentResponse
+from src.domain.models import AgentResponse, TraceInfo
 from src.observability.logging import get_logger
 from src.supervisor.authz import DelegationAuthorizer
 from src.supervisor.limits import DelegationBudget
@@ -41,14 +48,42 @@ from src.supervisor.subagent_runner import SubAgentRunner
 logger = get_logger(__name__)
 
 # 그래프 슈퍼스텝 상한. 위임 캡(P0-6)과 별개인 최후 방어선 — decompose가 비정상적으로
-# 긴 계획을 반환해도(denied 스텝은 예산을 소비하지 않아 캡만으로는 못 끊는다)
-# 그래프가 무한히 돌지 않게 한다.
+# 긴 계획을 반환해도 그래프가 무한히 돌지 않게 한다.
 RECURSION_LIMIT = 50
 
 STICKY_DELAY_NOTICE = (
     "진행 중인 상담 응답이 지연되고 있어요. 잠시 후 같은 대화에서 "
     "이어서 말씀해 주시면 계속 진행할게요."
 )
+
+
+def _delegation_trace_entry(
+    step: DelegationStep, result: SubAgentResult, latency_ms: float, round_no: int
+) -> dict:
+    """위임 1건의 관측 레코드 (P1-3). 운영자 트레이스 패널이 그대로 표시한다."""
+    return {
+        "profile": step.profile,
+        "subquery": step.subquery,
+        "reason": step.reason,
+        "ok": result.ok,
+        "error": result.error,
+        "workflow_handoff": result.workflow_handoff,
+        "latency_ms": round(latency_ms, 1),
+        "round": round_no,
+    }
+
+
+def _build_trace_info(state: SupervisorState, sticky: str | None = None) -> TraceInfo:
+    """위임 경로 전체를 담은 TraceInfo (P1-3) — 위임은 사용자에겐 invisible,
+    운영자에겐 transparent(§0-5)."""
+    return TraceInfo(
+        mode="supervisor",
+        router_decision={
+            "delegations": state["delegation_log"],
+            "rounds": state["round"],
+            "sticky": sticky,
+        },
+    )
 
 
 def _create_run_delegation(runner: SubAgentRunner, limits: SupervisorLimits):
@@ -160,31 +195,42 @@ def _create_sticky_delegate(runner: SubAgentRunner, limits: SupervisorLimits):
             reason="진행 중 워크플로우 연속(sticky)",
         )
         sub_ctx = derive_scoped_context(state["ctx"], step)
+        started = time.monotonic()
         r = await run_delegation(
             step, sub_ctx, state["user_ctx"], state["ctx"], state["trace"], "handoff"
         )
+        latency_ms = (time.monotonic() - started) * 1000
         logger.info(
             "supervisor_workflow_sticky",
             profile=state["sticky_profile"],
             ok=r.ok,
             error=r.error,
         )
+        log_entry = _delegation_trace_entry(step, r, latency_ms, state["round"])
+        trace_info = TraceInfo(
+            mode="supervisor",
+            router_decision={
+                "delegations": [log_entry],
+                "rounds": state["round"],
+                "sticky": state["sticky_profile"],
+            },
+        )
         if r.ok:
             # 워크플로우 단계 응답은 그대로 전달(passthrough) — synthesize가
             # 단계 질문("생년월일을 알려주세요")을 훼손하면 안 된다.
-            response = AgentResponse(answer=r.answer, sources=r.sources, trace=state["trace"])
+            response = AgentResponse(answer=r.answer, sources=r.sources, trace=trace_info)
         else:
             # sticky 실패 시 decompose로 폴백하지 않는다 — 워크플로우 중간 발화
             # ("투자" 등)를 단독 질문으로 재해석하면 무의미한 답이 나온다(실사고).
             # 워크플로우 세션은 보존되므로 재시도하면 sticky가 이어붙는다.
-            response = AgentResponse(answer=STICKY_DELAY_NOTICE, sources=[], trace=state["trace"])
-        return {"response": response}
+            response = AgentResponse(answer=STICKY_DELAY_NOTICE, sources=[], trace=trace_info)
+        return {"response": response, "delegation_log": [log_entry]}
 
     return sticky_delegate
 
 
 def _create_decompose(planner: SupervisorPlanner, limits: SupervisorLimits):
-    """질의 분해(P0-3) + 위임 루프 초기화(정책·예산·인덱스)."""
+    """질의 분해(P0-3) + 위임 루프 초기화(정책·예산)."""
 
     async def decompose(state: SupervisorState) -> dict:
         plan = await planner.decompose(state["question"], state["allowed"], state["candidates"])
@@ -195,76 +241,173 @@ def _create_decompose(planner: SupervisorPlanner, limits: SupervisorLimits):
             "plan": plan,
             "workflow_policy": workflow_policy,
             "budget": DelegationBudget(limits),  # (P0-6)
-            "step_index": 0,
-            "results": [],
+            "round": 0,
         }
 
     return decompose
 
 
-def route_delegation(state: SupervisorState) -> str:
-    """순차 위임 루프의 조건부 엣지 — 남은 스텝과 예산을 모두 만족해야 계속."""
-    plan = state["plan"]
-    if state["step_index"] >= len(plan.delegations):
-        return "finalize"
-    if not state["budget"].can_delegate():
-        # 캡 초과 → 안전 종료(부분 결과로 종합) (P0-6)
-        logger.info("supervisor_delegation_cap_reached", remaining=state["budget"].remaining())
-        return "finalize"
-    return "delegate"
+def _create_route_dispatch(authorizer: DelegationAuthorizer):
+    """위임 fan-out 라우터 (P1-2) — 이번 라운드 계획을 병렬 Send 태스크로 변환한다.
+
+    단일 관문(§0-3): Send는 `is_delegation_allowed` 통과 후에만 생성되므로,
+    delegate 노드에 도달하는 모든 위임은 이미 인가된 것이다. 예산 소비(P0-6)도
+    여기서 일어난다 — 병렬 실행 중의 동시 소비 경합을 원천 제거(dispatch는 단일 지점).
+    """
+
+    def route_dispatch(state: SupervisorState):
+        sends: list[Send] = []
+        budget = state["budget"]
+        for step in state["plan"].delegations:
+            if not budget.can_delegate():
+                # 캡 초과 → 남은 위임은 버리고 안전 종료(부분 결과로 종합) (P0-6)
+                logger.info("supervisor_delegation_cap_reached", remaining=budget.remaining())
+                break
+            if not authorizer.is_delegation_allowed(state["allowed"], step.profile):
+                # 스코프 밖 위임 즉시 스킵 (§0-3, P0-4) — 예산은 소비하지 않는다.
+                logger.warning("supervisor_delegation_denied", profile=step.profile)
+                continue
+            budget.consume()
+            sends.append(
+                Send(
+                    "delegate",
+                    {
+                        "current_step": step,
+                        "ctx": state["ctx"],
+                        "user_ctx": state["user_ctx"],
+                        "trace": state["trace"],
+                        "workflow_policy": state["workflow_policy"],
+                        "round": state["round"],
+                    },
+                )
+            )
+        return sends if sends else "finalize"
+
+    return route_dispatch
 
 
-def _create_delegate(
-    runner: SubAgentRunner, authorizer: DelegationAuthorizer, limits: SupervisorLimits
-):
-    """위임 1건 처리 — 관문 재검사 → scoped context 파생 → 실행 → 결과 수집.
+def _create_delegate(runner: SubAgentRunner, limits: SupervisorLimits):
+    """위임 1건 실행 태스크 — scoped context 파생 → 실행 → 결과/트레이스 수집.
 
-    hub 강제(§0-5): 이 노드는 `plan.delegations[step_index]`만 소비한다.
-    서브 결과(SubAgentResult)에는 재라우팅 필드가 계약상 없어, 서브가 다음
-    위임 대상을 정할 방법이 없다. P0: adaptive replan 없음(P1-1 소유).
+    hub 강제(§0-5): 이 노드의 입력(`current_step`)은 dispatch 라우터가 메인의
+    계획에서 만든 Send payload뿐이다. 서브 결과(SubAgentResult)에는 재라우팅
+    필드가 계약상 없어, 서브가 다음 위임 대상을 정할 방법이 없다.
+    인가/예산은 dispatch에서 이미 처리됐다(관문 통과분만 도달).
     """
 
     run_delegation = _create_run_delegation(runner, limits)
 
     async def delegate(state: SupervisorState) -> dict:
-        step = state["plan"].delegations[state["step_index"]]
-        next_index = state["step_index"] + 1
-
-        if not authorizer.is_delegation_allowed(state["allowed"], step.profile):
-            # 스코프 밖 위임 즉시 스킵 (§0-3, P0-4) — 예산은 소비하지 않는다.
-            logger.warning("supervisor_delegation_denied", profile=step.profile)
-            return {"step_index": next_index}
-
+        step = state["current_step"]
         sub_ctx = derive_scoped_context(state["ctx"], step)  # 최소권한 (P0-5)
-        state["budget"].consume()
 
-        # 단일 관문: runner.run 호출은 반드시 is_delegation_allowed 통과 블록 안에만
-        # 존재한다(run_delegation이 타임아웃 상한과 함께 감싼다).
+        started = time.monotonic()
         r = await run_delegation(
             step, sub_ctx, state["user_ctx"], state["ctx"], state["trace"],
             state["workflow_policy"],
         )
-        # §0-5: 위임 경로 전부 관측 — 성공/실패 위임을 운영자 트레이스로 남긴다.
-        # (계층 트레이스 노드는 P1-3 소유. 지금은 구조화 로그로 최소 관측 보장.)
+        latency_ms = (time.monotonic() - started) * 1000
+        # §0-5: 위임 경로 전부 관측 — 구조화 로그 + 트레이스 레코드(P1-3).
         logger.info(
             "supervisor_delegation_done",
             profile=step.profile,
             ok=r.ok,
             sources=len(r.sources),
             error=r.error,
+            latency_ms=round(latency_ms, 1),
         )
-        # 서브는 메인에만 반환 (§0-5, P0-8). results는 새 리스트로 교체(불변성).
-        return {"step_index": next_index, "results": [*state["results"], r]}
+        # 서브는 메인에만 반환 (§0-5, P0-8). reducer 채널이 병렬 태스크의 결과를
+        # Send 생성 순서(=계획 순서)로 결정적으로 누적한다.
+        return {
+            "results": [r],
+            "delegation_log": [_delegation_trace_entry(step, r, latency_ms, state["round"])],
+        }
 
     return delegate
 
 
-def _create_finalize(planner: SupervisorPlanner):
-    """종료 판정 — 핸드오프 passthrough / 워크플로우 차단 안내 / synthesize 종합."""
+async def collect(state: SupervisorState) -> dict:
+    """라운드 배리어(fan-in) — 이번 라운드의 병렬 위임이 전부 끝난 뒤 1회 실행."""
+    return {"round": state["round"] + 1}
+
+
+def _create_route_after_round(limits: SupervisorLimits):
+    """라운드 종료 라우터 (P1-1) — 추가 위임 판단(replan)으로 갈지 종합으로 갈지."""
+
+    def route_after_round(state: SupervisorState) -> str:
+        if not limits.adaptive_replan:
+            return "finalize"
+        if state["round"] > limits.max_replan_rounds:
+            return "finalize"
+        if not state["budget"].can_delegate():
+            return "finalize"
+        results = state["results"]
+        if not any(r.ok for r in results):
+            # 전부 실패한 라운드는 재위임해도 같은 실패를 반복한다 — degrade 종합으로.
+            return "finalize"
+        if any(r.ok and r.workflow_handoff for r in results):
+            # 인터랙티브 핸드오프는 즉시 passthrough — replan 대상이 아니다.
+            return "finalize"
+        return "replan"
+
+    return route_after_round
+
+
+def _create_replan(planner: SupervisorPlanner):
+    """adaptive replan 노드 (P1-1) — 메인 LLM이 부족한 도메인의 추가 위임을 결정.
+
+    hub 유지: 추가 위임도 메인의 결정이다(서브 요청이 아니라 결과를 본 메인의 판단).
+    빈 계획이면 dispatch 라우터가 finalize로 보낸다. replan 라운드는 항상
+    workflow_policy="block" — 인터랙티브 진입은 1라운드 단일 위임에서만 허용.
+    """
+
+    async def replan(state: SupervisorState) -> dict:
+        new_plan = await planner.replan(state["question"], state["results"], state["candidates"])
+        return {"plan": new_plan, "workflow_policy": "block"}
+
+    return replan
+
+
+def _create_finalize(planner: SupervisorPlanner, limits: SupervisorLimits):
+    """종료 판정 — 핸드오프 passthrough / 워크플로우 차단 안내 / 검토 게이트 / synthesize."""
+
+    async def _apply_review_gate(question: str, results: list[SubAgentResult]) -> list[SubAgentResult]:
+        """P1-4 메인 검토 게이트 — 판정(pass/fail)만 하고 재생성하지 않는다.
+
+        reject된 결과는 ok=False로 강등해 synthesize의 기존 degrade 경로
+        (통과분만 종합 + 불완전 표시)를 그대로 태운다. 판정 실패는 fail-open.
+        """
+        ok_indices = [i for i, r in enumerate(results) if r.ok]
+        if not ok_indices:
+            return results
+        verdicts = await asyncio.gather(
+            *(planner.review(question, results[i]) for i in ok_indices),
+            return_exceptions=True,
+        )
+        reviewed = list(results)
+        for i, verdict in zip(ok_indices, verdicts):
+            if isinstance(verdict, Exception):
+                logger.warning(
+                    "supervisor_review_gate_error", profile=results[i].profile, error=str(verdict)
+                )
+                continue  # fail-open — 게이트 장애가 답변 유실로 번지면 안 된다
+            passed = bool(verdict.get("passed", True))
+            note = str(verdict.get("note", ""))
+            if passed:
+                reviewed[i] = dataclasses.replace(results[i], review_passed=True, review_note=note)
+            else:
+                logger.info(
+                    "supervisor_review_rejected", profile=results[i].profile, note=note
+                )
+                reviewed[i] = dataclasses.replace(
+                    results[i], ok=False, error="review_rejected",
+                    review_passed=False, review_note=note,
+                )
+        return reviewed
 
     async def finalize(state: SupervisorState) -> dict:
         results = state["results"]
-        trace = state["trace"]
+        trace_info = _build_trace_info(state)
 
         # 워크플로우 핸드오프(단일 위임): 단계 응답을 그대로 전달 — synthesize 금지.
         # 다음 턴은 detect_sticky가 이 워크플로우로 이어붙인다.
@@ -272,7 +415,7 @@ def _create_finalize(planner: SupervisorPlanner):
             r0 = results[0]
             logger.info("supervisor_workflow_handoff_started", profile=r0.profile)
             return {
-                "response": AgentResponse(answer=r0.answer, sources=r0.sources, trace=trace)
+                "response": AgentResponse(answer=r0.answer, sources=r0.sources, trace=trace_info)
             }
 
         # 워크플로우 위임 차단으로 전부 실패한 경우: 일반 폴백 대신
@@ -290,9 +433,23 @@ def _create_finalize(planner: SupervisorPlanner):
                             f"이용해 주세요."
                         ),
                         sources=[],
-                        trace=trace,
+                        trace=trace_info,
                     )
                 }
+
+        if limits.review_gate:
+            results = await _apply_review_gate(state["question"], results)
+            trace_info = TraceInfo(
+                mode="supervisor",
+                router_decision={
+                    **trace_info.router_decision,
+                    "review": [
+                        {"profile": r.profile, "passed": r.review_passed, "note": r.review_note}
+                        for r in results
+                        if r.review_passed is not None
+                    ],
+                },
+            )
 
         answer = await planner.synthesize(state["question"], results)  # 메인이 종합·소유
 
@@ -301,7 +458,7 @@ def _create_finalize(planner: SupervisorPlanner):
             if r.ok:
                 sources.extend(r.sources)
 
-        return {"response": AgentResponse(answer=answer, sources=sources, trace=trace)}
+        return {"response": AgentResponse(answer=answer, sources=sources, trace=trace_info)}
 
     return finalize
 
@@ -316,8 +473,8 @@ def build_supervisor_graph(
 ):
     """Supervisor 위임 그래프를 빌드·컴파일한다.
 
-    체크포인터는 아직 붙이지 않는다(단일 요청 in-memory). P1에서
-    `AsyncPostgresSaver`를 연결할 때 상태 직렬화 경계를 함께 재설계한다.
+    체크포인터는 아직 붙이지 않는다(단일 요청 in-memory). 붙일 때
+    상태 직렬화 경계를 함께 재설계한다.
     """
     workflow = StateGraph(SupervisorState)
 
@@ -325,8 +482,13 @@ def build_supervisor_graph(
     workflow.add_node("detect_sticky", _create_detect_sticky(authorizer, workflow_engine))
     workflow.add_node("sticky_delegate", _create_sticky_delegate(runner, limits))
     workflow.add_node("decompose", _create_decompose(planner, limits))
-    workflow.add_node("delegate", _create_delegate(runner, authorizer, limits))
-    workflow.add_node("finalize", _create_finalize(planner))
+    workflow.add_node("delegate", _create_delegate(runner, limits))
+    workflow.add_node("collect", collect)
+    workflow.add_node("replan", _create_replan(planner))
+    workflow.add_node("finalize", _create_finalize(planner, limits))
+
+    route_dispatch = _create_route_dispatch(authorizer)
+    route_after_round = _create_route_after_round(limits)
 
     workflow.add_edge(START, "resolve_scope")
     workflow.add_edge("resolve_scope", "detect_sticky")
@@ -336,13 +498,13 @@ def build_supervisor_graph(
         {"sticky_delegate": "sticky_delegate", "decompose": "decompose"},
     )
     workflow.add_edge("sticky_delegate", END)
+    # P1-2: dispatch가 Send 리스트를 반환하면 delegate 태스크들이 병렬 실행된다.
+    workflow.add_conditional_edges("decompose", route_dispatch, ["delegate", "finalize"])
+    workflow.add_edge("delegate", "collect")
     workflow.add_conditional_edges(
-        "decompose", route_delegation, {"delegate": "delegate", "finalize": "finalize"}
+        "collect", route_after_round, {"replan": "replan", "finalize": "finalize"}
     )
-    # 순차 위임 루프: 조건부 self-edge. P1-2 병렬 위임은 이 자리를 Send fan-out으로 교체.
-    workflow.add_conditional_edges(
-        "delegate", route_delegation, {"delegate": "delegate", "finalize": "finalize"}
-    )
+    workflow.add_conditional_edges("replan", route_dispatch, ["delegate", "finalize"])
     workflow.add_edge("finalize", END)
 
     return workflow.compile()
