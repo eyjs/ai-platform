@@ -1,9 +1,17 @@
 # SESSION HANDOFF — 2026-07-09
 
-> 범위: Supervisor Agent P1 트랙 완결 — P1-0 StateGraph 전환 → P1-1~P1-4 구현 → 라이브 실측.
-> 브랜치: 전부 `main` 로컬 커밋(`2a3c830` → `c89cd03` → `51d903b`). **푸시 안 함.**
-> api 컨테이너는 새 코드로 리빌드 완료·기본 플래그로 가동 중(P1 opt-in 플래그 off).
-> **Phase 3(오케스트레이터 → Supervisor 통합)은 사용자 결정으로 대기(보류).**
+> 범위: Supervisor Agent 트랙 완결 — P1-0 StateGraph 전환 → P1-1~P1-4 구현 → 라이브 실측 → **Phase 3(오케스트레이터 흡수)까지 완료**.
+> 브랜치: 전부 `main` 로컬 커밋(`2a3c830` → `c89cd03` → `51d903b` → `08604c7` → `d5a1dc4`). **푸시 안 함.**
+> api 컨테이너는 Phase 3 플래그 **on** 상태로 가동 중(아래 §1-D) — 자동 라우팅이 supervisor 경유.
+
+## 0. Phase 3 추가 (같은 날 후속 세션)
+
+- `AIP_ORCHESTRATOR_BACKEND=supervisor`(기본 legacy): chatbot_id 미지정(자동 라우팅)을 supervisor로 흡수 — 라우팅=1위임 특수케이스. 레거시 MasterOrchestrator는 롤백용 보존(flag→검증→컷오버, AD-1 패턴)
+- `AIP_SUPERVISOR_SINGLE_PASSTHROUGH`(기본 off): 단일 위임 성공 시 synthesize 생략·서브 원문 전달(라우팅 파리티, 검토 게이트 뒤)
+- 직접 모드 불가침(§0-1) 테스트 강제. 스트리밍 done `orchestrated=true` 표기
+- **로컬 override에 두 플래그 켜둠**(`docker-compose.override.yml`) — 되돌리기 = 해당 두 줄 삭제 후 `docker compose up -d api`
+- 라이브 실측: 자동 라우팅 15.6s(decompose 2s+위임 13.4s, passthrough) / 직접 모드 supervisor 로그 0건 / SSE `orchestrated=true`
+- **컷오버 전 잔여 갭**: supervisor 경로 토큰 스트리밍 없음(완료 후 단일 방출 — 자동선택 UX 차이). 인사/잡담 직접응답·백그라운드 재라우팅 최적화 미이식. 전체 테스트 1527 passed
 
 ---
 
@@ -39,12 +47,13 @@
 3. **4B 리뷰어 note 모순** — passed=true인데 note는 부정 서술. 판정은 bool만 신뢰. 게이트 실전 투입 시 리뷰어 모델 상향 검토
 4. **`orchestrator_profile_auth_no_tenant` 경고** — 테넌트 미매핑 우회 정책 미결(설계문서 §5)
 
-## 3. 다음 후보 (Phase 3은 대기)
+## 3. 다음 후보
 
-1. 잔여 이슈 1·2 (MLX 반복 루프 / RAG 데이터 감사 — 기존 남은 과제 1번과 동일)
-2. P2 관찰 6건 (`.pipeline/REPORT.md`)
-3. Supervisor 체크포인터 연결(AsyncPostgresSaver — 상태 직렬화 경계 재설계 필요)
-4. (대기) Phase 3: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합
+1. **Supervisor 토큰 스트리밍(astream_events)** — Phase 3 컷오버(레거시 오케스트레이터 제거)의 선행조건
+2. 잔여 이슈 1·2 (MLX 반복 루프 / RAG 데이터 감사 — 기존 남은 과제 1번과 동일)
+3. P2 관찰 6건 (`.pipeline/REPORT.md`)
+4. Supervisor 체크포인터 연결(AsyncPostgresSaver — 상태 직렬화 경계 재설계 필요)
+5. Phase 3 컷오버 결정(운영 검증 후): 레거시 MasterOrchestrator·`_prepare_chat_fast` 재라우팅 경로 제거
 
 ## 4. 운영 노트 (이번 세션 추가분)
 

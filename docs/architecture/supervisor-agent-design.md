@@ -130,6 +130,13 @@ supervise(question, ctx):
    순차였으면 15.5s), 핸드오프 passthrough 54.7s, sticky 연속 2.0s, deny 10ms, review 판정 트레이스 노출.
    관측: 4B 리뷰어의 note 텍스트가 판정 bool과 모순되는 사례 있음(판정은 bool만 사용— note는 참고용).
 5. **Phase 3**: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합 — 라우팅=1개 위임의 특수케이스로 흡수.
+   → **✅ 구현 완료(2026-07-09, `d5a1dc4`) — 피처 플래그 단계**: `AIP_ORCHESTRATOR_BACKEND=supervisor`(기본
+   `legacy`)로 미지정 요청을 supervisor 엔트리에 흡수. `AIP_SUPERVISOR_SINGLE_PASSTHROUGH`로 단일 위임 시
+   synthesize 생략(라우팅 파리티). 직접 모드 불가침 테스트 강제. 레거시 MasterOrchestrator는 롤백용 보존 —
+   **컷오버(레거시 제거)는 운영 검증 후 별도 결정**(ADR-013 AD-1 패턴). 라이브 실측: 자동 라우팅 15.6s
+   (passthrough), 직접 모드 supervisor 로그 0건, SSE done `orchestrated=true`.
+   잔여 파리티 갭: ① supervisor 경로 토큰 스트리밍 없음(완료 후 단일 방출 — 레거시는 토큰 스트림)
+   ② 레거시의 인사/잡담 직접응답·백그라운드 재라우팅 최적화 미이식. 컷오버 전 astream_events 스트리밍 필요.
 
 각 Phase는 직접 모드 회귀 없음을 e2e로 검증(외부 서비스 단일 챗봇 시나리오 필수 통과).
 
