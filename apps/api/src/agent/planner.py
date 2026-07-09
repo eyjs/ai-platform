@@ -163,7 +163,8 @@ def create_planner(
             valid_steps.append({
                 "step_id": f"step_{len(valid_steps) + 1}",
                 "tool": "rag_search",
-                "params": {},
+                # rag_search 는 query 필수 — 원 질문으로 검색(플래너 재작성 없이 안전 기본값).
+                "params": {"query": state["question"]},
                 "group": last_group + 1,
             })
             logger.info("planner_rag_guard_appended", steps_count=len(valid_steps))

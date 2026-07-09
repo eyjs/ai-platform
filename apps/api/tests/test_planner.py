@@ -414,6 +414,7 @@ async def test_planner_appends_rag_search_when_needs_rag_but_omitted():
     steps = result["planned_steps"]
     assert [s["tool"] for s in steps] == ["fact_lookup", "rag_search"]
     assert steps[-1]["group"] == 2  # 플래너 계획(그룹1) 뒤에 이어 실행
+    assert steps[-1]["params"]["query"] == "보험약관에서 자기부담금 규정 찾아줘"  # query 필수
 
 
 @pytest.mark.asyncio
