@@ -15,6 +15,27 @@
 
 ---
 
+
+## 0-C. RAG 5-Layer 체인 완성 (같은 날 3차 후속 — `6838480`~`964325a`)
+
+**근본 수정 2건**: ① RAG 전멸 = KMS 재편(D01/D02) 태깅↔스코프 불일치 → 매핑 재작성(D01→_common,
+D02→보험)·insurance-qa 스코프 "보험"(내부명, KMS 코드 하드코딩 금지)·`_default` 폴백·부팅 정합성 WARN.
+② 오라우팅 = 전 프로필 description 부재 + MLX temperature 미제어 → description 추가·decompose 후보에
+domains/intents 노출·generate_json temperature=0.
+
+**체인 완성 3건**: ③ AST-lite — MarkdownChunker 헤딩 트리 추적 → chunk.metadata.section_path,
+청크 헤더에 섹션 경로 노출, 검색 결과에 metadata 흐름. 청커 선택은 문서 전체 헤딩 검사(첫머리만 보던 버그
+수정). 재적재 후 약관 1,422청크/요약서 57청크 99% 섹션 메타. ④ KMS 지식그래프 — relations 0건이 근본
+원인이라 사실 기반 REFERENCE 관계(요약서→약관, reason+strength 5) 시드, graph_enrich_empty 관측성 추가.
+⑤ planner needs_rag 보장 가드 — 8B 플래너가 fact_lookup만 계획하면 rag_search(query=원질문) 자동 추가.
+
+**e2e 라이브 실증(E2E-6)**: "간편암건강보험 가입 자격" → 가드 보장 검색(final 5) →
+graph_enrich_complete(discovered 1, edges 1 — REFERENCE 관계로 보험약관 청크 합류) →
+답변 출처 2문서 + 섹션 경로 인용("[문서: 요약서 | 섹션: (1) 보험 기간...]"). 33.5s. 전체 1456 passed.
+
+**남은 갭**: 질문 기반 메타필터(P2, 깔때기 3단계) / KMS 그래프 실데이터 확충(관계 1건은 검증용 시드) /
+docforge 네이티브 AST(현재는 markdown 헤딩 기반 AST-lite) / fortune-saju "사주명리" 스코프 청크 0.
+
 ## 1. 완료된 작업 (커밋)
 
 ### A. P1-0 — 명령형 위임 루프 → LangGraph StateGraph (`2a3c830`)
