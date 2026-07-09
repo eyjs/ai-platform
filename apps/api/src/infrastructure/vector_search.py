@@ -416,6 +416,20 @@ class VectorSearchMixin:
         return results
 
     @staticmethod
+    def _parse_chunk_metadata(row) -> dict:
+        """chunk.metadata(JSONB) 안전 파싱 — 섹션 계층(AST-lite) 등."""
+        raw = row.get("metadata")
+        if not raw:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        try:
+            import json as _json
+            return _json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+
+    @staticmethod
     def _row_to_dict(row) -> dict:
         return {
             "chunk_id": str(row["id"]),
@@ -425,6 +439,7 @@ class VectorSearchMixin:
             "score": float(row["score"]),
             "file_name": row.get("file_name", ""),
             "title": row.get("title", ""),
+            "metadata": VectorSearchMixin._parse_chunk_metadata(row),
         }
 
     @staticmethod
@@ -438,6 +453,7 @@ class VectorSearchMixin:
                 "score": float(row["score"]),
                 "file_name": row.get("file_name", ""),
                 "title": row.get("title", ""),
+                "metadata": VectorSearchMixin._parse_chunk_metadata(row),
             }
             for row in rows
         ]
@@ -452,6 +468,7 @@ class VectorSearchMixin:
                    {score_expr} AS score,
                    d.file_name, d.title"""
         return f"""c.id, c.document_id, c.content, c.chunk_index,
+                   c.metadata,
                    {score_expr} AS score,
                    d.file_name, d.title"""
 

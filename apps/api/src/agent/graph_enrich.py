@@ -294,6 +294,14 @@ def create_graph_enrich(kms_client, vector_store):
                         discovered_count += 1
 
         if not graph_results:
+            # 관측성: "그래프가 비어서 빈손"인지 "노드가 안 돈 것"인지 구분 가능해야 한다.
+            # (실사고: KMS 그래프에 엣지 0 → 매 요청 조용히 통과 → 그래프축이 죽은 줄 앎)
+            logger.info(
+                "graph_enrich_empty",
+                seeds=len(kms_ids_to_fetch),
+                related_total=len(all_related_kms_ids),
+                hint="KMS 지식그래프에 관계(엣지)가 없거나 관련 문서가 전부 필터링됨",
+            )
             return {}
 
         logger.info(

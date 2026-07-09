@@ -98,9 +98,13 @@ class IngestPipeline:
             else:
                 chunks = self._chunker.split(content)
 
-        # 2.5 문서명 헤더
+        # 2.5 문서명 헤더 (+ 섹션 경로 — AST-lite 메타가 있으면 임베딩/FTS/LLM 컨텍스트에 노출)
         for chunk in chunks:
-            header = f"[문서: {title}]\n"
+            section_path = (chunk.get("metadata") or {}).get("section_path")
+            if section_path:
+                header = f"[문서: {title} | 섹션: {' > '.join(section_path)}]\n"
+            else:
+                header = f"[문서: {title}]\n"
             chunk["content"] = header + chunk["content"]
 
         logger.info("chunked", title=title, chunks=len(chunks))
