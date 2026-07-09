@@ -233,6 +233,23 @@ class SupervisorPlanner:
             return {"passed": True, "note": "판정 파싱 실패(fail-open)"}
         return {"passed": bool(verdict["passed"]), "note": str(verdict.get("note", ""))}
 
+    @staticmethod
+    def _split_ok(results: list[SubAgentResult]) -> tuple[list[SubAgentResult], int]:
+        ok_results = [r for r in results if r.ok]
+        return ok_results, len(results) - len(ok_results)
+
+    @staticmethod
+    def _build_synthesize_prompt(question: str, ok_results: list[SubAgentResult]) -> str:
+        sub_answers = "\n\n".join(f"[{r.profile}]\n{r.answer}" for r in ok_results)
+        return SYNTHESIZE_USER_TEMPLATE.format(question=question, sub_answers=sub_answers)
+
+    @staticmethod
+    def _partial_note(failed_count: int) -> str:
+        return (
+            f"\n\n(참고: 일부 하위 에이전트({failed_count}건)의 응답을 받지 못해 "
+            f"일부 정보가 누락되었을 수 있습니다.)"
+        )
+
     async def synthesize(self, question: str, results: list[SubAgentResult]) -> str:
         """서브 실행 결과를 종합해 메인의 최종 답변을 생성한다.
 
@@ -240,16 +257,14 @@ class SupervisorPlanner:
         종합하되 불완전함을 문장으로 표시한다(§8 degrade P0 정책). 결과가 0건이면
         안전한 폴백 문구를 반환한다(빈 응답 금지).
         """
-        ok_results = [r for r in results if r.ok]
-        failed_count = len(results) - len(ok_results)
+        ok_results, failed_count = self._split_ok(results)
 
         if not ok_results:
             if results:
                 logger.warning("supervisor_synthesize_all_failed", count=len(results))
             return FALLBACK_NO_RESULT
 
-        sub_answers = "\n\n".join(f"[{r.profile}]\n{r.answer}" for r in ok_results)
-        prompt = SYNTHESIZE_USER_TEMPLATE.format(question=question, sub_answers=sub_answers)
+        prompt = self._build_synthesize_prompt(question, ok_results)
 
         try:
             answer = await self._synth_llm.generate(prompt, system=SYNTHESIZE_SYSTEM_PROMPT)
@@ -258,6 +273,32 @@ class SupervisorPlanner:
             answer = "\n\n".join(r.answer for r in ok_results)
 
         if failed_count > 0:
-            answer += f"\n\n(참고: 일부 하위 에이전트({failed_count}건)의 응답을 받지 못해 일부 정보가 누락되었을 수 있습니다.)"
+            answer += self._partial_note(failed_count)
 
         return answer
+
+    async def synthesize_stream(self, question: str, results: list[SubAgentResult]):
+        """synthesize의 토큰 스트리밍 판 — 같은 프롬프트·같은 degrade 의미론.
+
+        LLM 스트림이 도중에 실패하면 이미 나간 토큰은 되돌릴 수 없으므로,
+        ok 답변 원문 이어붙임으로 degrade하고 로그를 남긴다(빈 응답 금지 우선).
+        """
+        ok_results, failed_count = self._split_ok(results)
+
+        if not ok_results:
+            if results:
+                logger.warning("supervisor_synthesize_all_failed", count=len(results))
+            yield FALLBACK_NO_RESULT
+            return
+
+        prompt = self._build_synthesize_prompt(question, ok_results)
+
+        try:
+            async for token in self._synth_llm.generate_stream(prompt, system=SYNTHESIZE_SYSTEM_PROMPT):
+                yield token
+        except Exception as e:  # noqa: BLE001 - 스트림 실패 시에도 결과를 안전하게 반환
+            logger.warning("supervisor_synthesize_stream_error", error=str(e))
+            yield "\n\n".join(r.answer for r in ok_results)
+
+        if failed_count > 0:
+            yield self._partial_note(failed_count)

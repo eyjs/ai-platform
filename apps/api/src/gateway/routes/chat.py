@@ -100,10 +100,12 @@ async def _run_supervisor_chat(
 
 
 async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserContext):
-    """Supervisor 엔트리 분기(스트리밍) — Task 002, P0-2.
+    """Supervisor 엔트리 분기(스트리밍) — Task 002, P0-2 / 토큰 스트리밍.
 
-    P0 최소 어댑트: `supervise()` 완료를 기다린 뒤 answer를 단일 token + done으로 방출한다
-    (토큰 단위 스트리밍 고도화는 P1). done 이벤트에 sources를 포함한다.
+    `supervise_stream()`이 최종 답변 생성 토큰(단일 위임 passthrough=서브 토큰,
+    다중 위임=synthesize 토큰)을 실시간으로 흘린다. 토큰이 하나도 안 나간 경로
+    (워크플로우 핸드오프/폴백 등, done.streamed=False)는 기존처럼 answer를
+    단일 token으로 방출해 화면 공백을 막는다.
     """
     request_id = str(uuid.uuid4())
     session_id = req.session_id or str(uuid.uuid4())
@@ -146,12 +148,28 @@ async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserCon
                 tenant_id=tenant_id,
             )
 
-            response = await state.supervisor.supervise(req.question, agent_ctx, user_ctx)
+            response = None
+            streamed = False
+            async for event in state.supervisor.supervise_stream(req.question, agent_ctx, user_ctx):
+                event_type = event["type"]
+                if event_type == "token":
+                    yield {"event": "token", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
+                elif event_type == "replace":
+                    yield {"event": "replace", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
+                elif event_type == "done":
+                    response = event["data"]["response"]
+                    streamed = event["data"]["streamed"]
+
+            if response is None:
+                # supervise_stream은 항상 done을 내지만, 방어적으로 빈 응답을 막는다.
+                raise RuntimeError("supervisor stream ended without done event")
 
             await state.session_memory.add_turn(session_id, "user", req.question)
             await state.session_memory.add_turn(session_id, "assistant", response.answer)
 
-            yield {"event": "token", "data": json.dumps({"delta": response.answer}, ensure_ascii=False)}
+            if not streamed:
+                # 버퍼드 경로(핸드오프/폴백/안내) — 화면 공백 방지 단일 방출.
+                yield {"event": "token", "data": json.dumps({"delta": response.answer}, ensure_ascii=False)}
             yield {"event": "done", "data": json.dumps({
                 "answer": response.answer,
                 "profile_id": supervisor_id,

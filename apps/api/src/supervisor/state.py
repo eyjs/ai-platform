@@ -56,5 +56,13 @@ class SupervisorState(TypedDict):
     # P1-3 위임 트레이스: 위임 1건당 관측 레코드 {profile, reason, ok, error, latency_ms, round}
     delegation_log: Annotated[list[dict], operator.add]
 
+    # 토큰 스트리밍 브리지 (supervise_stream 전용). asyncio.Queue —
+    # 최종 답변을 생성하는 노드(단일 위임 passthrough delegate / finalize synthesize)가
+    # ("token"|"replace", str)를 put한다. None이면 비스트리밍(supervise) — 어떤 노드도
+    # 토큰을 방출하지 않아 기존 동작과 동일하다.
+    emitter: Optional[object]
+    # 최종 답변 토큰이 emitter로 이미 나갔는지 — SSE 레이어가 중복 방출을 피하는 근거.
+    streamed_answer: bool
+
     # 출력 (sticky_delegate 또는 finalize 노드가 채움)
     response: Optional[AgentResponse]

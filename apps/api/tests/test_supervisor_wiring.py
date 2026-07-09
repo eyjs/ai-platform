@@ -146,10 +146,25 @@ async def test_chat_non_supervisor_request_does_not_call_supervise(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_chat_stream_supervisor_request_calls_supervise_not_prepare_chat_fast(monkeypatch):
-    """supervisor 스트리밍 요청 시 supervise가 호출되고 _prepare_chat_fast는 호출되지 않는다."""
+    """supervisor 스트리밍 요청 시 supervise_stream이 소비되고 _prepare_chat_fast는 호출되지 않는다.
+
+    토큰 스트리밍 계약: supervise_stream의 token 이벤트가 SSE token으로 중계되고,
+    done.streamed=True면 answer 단일 재방출이 없어야 한다(이중 방출 금지).
+    """
     user_ctx = _make_user_ctx()
     supervisor = AsyncMock()
-    supervisor.supervise.return_value = AgentResponse(answer="스트리밍 종합 답변", sources=[])
+    stream_called = {"count": 0}
+
+    async def fake_stream(question, ctx, user_ctx_arg, trace=None):
+        stream_called["count"] += 1
+        yield {"type": "token", "data": "스트리밍 "}
+        yield {"type": "token", "data": "종합 답변"}
+        yield {"type": "done", "data": {
+            "response": AgentResponse(answer="스트리밍 종합 답변", sources=[]),
+            "streamed": True,
+        }}
+
+    supervisor.supervise_stream = fake_stream
     state = _make_state(supervisor=supervisor)
 
     monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
@@ -164,10 +179,12 @@ async def test_chat_stream_supervisor_request_calls_supervise_not_prepare_chat_f
 
     sse_response = await chat_module.chat_stream(req, request)
 
-    # EventSourceResponse의 제너레이터를 소진해 실제로 supervise가 호출되는지 확인.
+    # EventSourceResponse의 제너레이터를 소진해 실제로 supervise_stream이 소비되는지 확인.
     body_iterator = sse_response.body_iterator
     events = [event async for event in body_iterator]
 
-    supervisor.supervise.assert_awaited_once()
+    assert stream_called["count"] == 1
     prepare_chat_fast_mock.assert_not_awaited()
+    token_events = [e for e in events if e.get("event") == "token"]
+    assert len(token_events) == 2  # streamed=True → answer 단일 재방출 없음
     assert any(e.get("event") == "done" for e in events)
