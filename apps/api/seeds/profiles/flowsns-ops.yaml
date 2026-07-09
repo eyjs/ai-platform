@@ -2,6 +2,8 @@
 # 소규모 마케팅 대행사 대표가 자연어로 모든 업무를 처리하는 챗봇
 id: "flowsns-ops"
 name: "FlowBot"
+# decompose(위임 라우팅)의 후보 판단 신호 — 담당/비담당을 구별력 있게 서술할 것
+description: "FlowSNS 서비스 운영 봇. SNS 게시물 발행·생성·등록, 계정·콘텐츠 운영 작업 담당. 정보 질문이 아닌 SNS 운영 '작업' 요청 전담."
 
 domain_scopes: []
 category_scopes: []

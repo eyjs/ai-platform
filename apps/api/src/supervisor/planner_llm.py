@@ -124,10 +124,7 @@ class SupervisorPlanner:
             logger.warning("supervisor_decompose_no_candidates")
             return DelegationPlan(delegations=[], is_adaptive=False)
 
-        candidates_desc = "\n".join(
-            f"- {c.get('id', '')}: {c.get('name', '')} — {c.get('description', '')}"
-            for c in candidate_profiles
-        )
+        candidates_desc = self._format_candidates(candidate_profiles)
         prompt = DECOMPOSE_USER_TEMPLATE.format(candidates_desc=candidates_desc, question=question)
 
         try:
@@ -145,6 +142,26 @@ class SupervisorPlanner:
             ]
 
         return DelegationPlan(delegations=delegations, is_adaptive=False)
+
+    @staticmethod
+    def _format_candidates(candidate_profiles: list[dict]) -> str:
+        """후보 프로파일을 decompose 프롬프트용으로 렌더한다.
+
+        description 외에 담당 도메인·인텐트를 함께 노출한다 — 경량 로컬 LLM 이
+        id/name 만으로 추측하지 않도록 구별 신호를 최대한 준다(오라우팅 실사고 대응).
+        """
+        lines = []
+        for c in candidate_profiles:
+            line = f"- {c.get('id', '')}: {c.get('name', '')} — {c.get('description', '')}"
+            extras = []
+            if c.get("domains"):
+                extras.append(f"담당 도메인: {', '.join(c['domains'])}")
+            if c.get("intents"):
+                extras.append(f"담당 작업: {', '.join(c['intents'])}")
+            if extras:
+                line += f" ({'; '.join(extras)})"
+            lines.append(line)
+        return "\n".join(lines)
 
     def _parse_delegations(
         self, result: dict, candidate_profiles: list[dict]
@@ -189,10 +206,7 @@ class SupervisorPlanner:
             # 전부 실패한 라운드에서 재위임하면 같은 실패를 반복할 뿐이다 — 종합으로 넘긴다.
             return DelegationPlan(delegations=[], is_adaptive=False)
 
-        candidates_desc = "\n".join(
-            f"- {c.get('id', '')}: {c.get('name', '')} — {c.get('description', '')}"
-            for c in candidate_profiles
-        )
+        candidates_desc = self._format_candidates(candidate_profiles)
         sub_answers = "\n\n".join(f"[{r.profile}]\n{r.answer}" for r in ok_results)
         prompt = REPLAN_USER_TEMPLATE.format(
             candidates_desc=candidates_desc, question=question, sub_answers=sub_answers

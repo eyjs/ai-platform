@@ -25,6 +25,10 @@ from src.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
+# 도메인 단위 기본 매핑 키. categoryPath 에 카테고리가 없거나(코드만 옴) 매핑
+# 미정의일 때 이 규칙으로 폴백한다 — "검색 불가능한 회사코드 태깅"보다 낫다.
+DEFAULT_RULE_KEY = "_default"
+
 # 기본 매핑 파일 위치: 패키지 루트(apps/api)의 seeds/domain_mapping.yaml.
 # CWD 와 무관하게 해석하되, 환경변수(AIP_DOMAIN_MAPPING_PATH)로 오버라이드 가능.
 # domain_mapping.py: apps/api/src/services/domain_mapping.py → parents[2] = apps/api.
@@ -123,7 +127,11 @@ def resolve_product_domain(domain: str, category_path: list[str]) -> str | None:
     # 빈 값/공백 정리(불신 입력 방어).
     categories = [c for c in categories if isinstance(c, str) and c.strip()]
     if not categories:
-        return None
+        # 실사고(2026-07-08): KMS 가 categoryPath=["D02"](코드만)를 보내는 회귀 발생 —
+        # 카테고리 부재 시 무조건 None 이면 해당 도메인 문서가 영영 회사코드로 태깅되어
+        # 상품도메인 스코프 프로필의 검색에서 전부 빠진다. 도메인 단위 기본 매핑
+        # `_default` 를 허용해 최소한 검색 가능한 도메인으로 착지시킨다(없으면 기존과 동일 None).
+        return rules.get(DEFAULT_RULE_KEY)
 
     # 가장 구체적(긴 경로)부터 매칭: 전체 → 한 단계씩 상위로 축소.
     for depth in range(len(categories), 0, -1):
@@ -131,4 +139,5 @@ def resolve_product_domain(domain: str, category_path: list[str]) -> str | None:
         product = rules.get(key)
         if product:
             return product
-    return None
+    # 카테고리는 왔지만 매핑 미정의 → 도메인 기본 매핑으로 폴백(없으면 None).
+    return rules.get(DEFAULT_RULE_KEY)

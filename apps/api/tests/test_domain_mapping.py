@@ -97,6 +97,47 @@ class TestResolveProductDomain:
         assert dm.resolve_product_domain("", ["", "자동차보험"]) is None
 
 
+_MAPPING_YAML_WITH_DEFAULT = textwrap.dedent(
+    """
+    D02:
+      "자동차보험": 자동차보험
+      "_default": _common
+    """
+).strip()
+
+
+@pytest.fixture
+def mapping_env_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "domain_mapping.yaml"
+    path.write_text(_MAPPING_YAML_WITH_DEFAULT, encoding="utf-8")
+    monkeypatch.setenv("AIP_DOMAIN_MAPPING_PATH", str(path))
+    dm.reload_mapping()
+    yield
+    monkeypatch.delenv("AIP_DOMAIN_MAPPING_PATH", raising=False)
+    dm.reload_mapping()
+
+
+class TestDefaultRule:
+    """도메인 단위 `_default` 폴백 (실사고: KMS 가 categoryPath=[코드]만 보내는 회귀 대응)."""
+
+    def test_코드만_와도_default_착지(self, mapping_env_default):
+        # 실사고 재현: categoryPath=["D02"] (카테고리 없음) → _common 착지(회사코드 태깅 방지).
+        assert dm.resolve_product_domain("D02", ["D02"]) == "_common"
+
+    def test_빈_categoryPath_default_착지(self, mapping_env_default):
+        assert dm.resolve_product_domain("D02", []) == "_common"
+
+    def test_미매핑_카테고리도_default_착지(self, mapping_env_default):
+        assert dm.resolve_product_domain("D02", ["D02", "장기보험", "종합"]) == "_common"
+
+    def test_명시_매핑이_default_보다_우선(self, mapping_env_default):
+        assert dm.resolve_product_domain("D02", ["D02", "자동차보험", "개인용"]) == "자동차보험"
+
+    def test_default_없는_도메인은_기존과_동일_None(self, mapping_env):
+        # 기존 픽스처(_default 미정의) — 하위호환: None(회사도메인 fallback + WARN).
+        assert dm.resolve_product_domain("DB-DAMAGE", ["DB-DAMAGE"]) is None
+
+
 # ---- kms_sync.sync_document 적용 테스트 ----
 
 def _make_service() -> KmsSyncService:

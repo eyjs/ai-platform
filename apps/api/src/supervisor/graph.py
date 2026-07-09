@@ -133,8 +133,17 @@ def _create_resolve_scope(authorizer: DelegationAuthorizer, profile_store):
         supervisor_id = getattr(settings, "supervisor_profile_id", "supervisor")
         allowed = await authorizer.resolve_allowed(state["user_ctx"])
         all_profiles = await profile_store.list_all()
+        # decompose 판단 신호: description 에 더해 domain_scopes·intent_hints 를 노출한다.
+        # (실사고: description 부재 + 신호 미노출로 8B decompose 가 id/name 만 보고
+        # 오라우팅. 프로필의 강한 신호를 라우팅 판단에 재사용 — 레거시 라우터가 쓰던 신호.)
         candidates = [
-            {"id": p.id, "name": p.name, "description": p.description}
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "domains": list(p.domain_scopes),
+                "intents": [h.name for h in p.intent_hints],
+            }
             for p in all_profiles
             if p.id != supervisor_id and authorizer.is_delegation_allowed(allowed, p.id)
         ]

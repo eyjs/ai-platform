@@ -6,6 +6,8 @@
 # (신규 AgentMode enum 추가 금지 — 기존 "deterministic" 값을 형식상 사용)
 id: "supervisor"
 name: "Supervisor 오케스트레이터"
+# decompose(위임 라우팅)의 후보 판단 신호 — 담당/비담당을 구별력 있게 서술할 것
+description: "여러 전문 챗봇을 조율하는 통합 창구(메인 오케스트레이터). 질의를 분해해 전문 챗봇에 위임하고 결과를 종합한다."
 
 domain_scopes: []  # 위임 대상 서브가 각자 도메인을 제한 — 여기선 제한 없음
 category_scopes: []

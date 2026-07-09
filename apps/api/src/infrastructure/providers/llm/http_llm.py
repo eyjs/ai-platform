@@ -42,18 +42,27 @@ class HttpLLMProvider(LLMProvider):
             name=f"llm:{self._base_url}",
         )
 
-    async def _post_completion(self, system_msg: str, prompt: str) -> str:
-        """비스트리밍 chat completion 1회 호출 — 재시도/서킷은 호출부가 감싼다."""
+    async def _post_completion(
+        self, system_msg: str, prompt: str, temperature: float | None = None,
+    ) -> str:
+        """비스트리밍 chat completion 1회 호출 — 재시도/서킷은 호출부가 감싼다.
+
+        temperature=None 이면 서버 기본값(샘플링). 구조적 판단(JSON)은 0.0(그리디)을
+        명시해 비결정성을 제거한다 — decompose 오라우팅이 호출마다 튀던 실사고 대응.
+        """
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "max_tokens": self._max_tokens,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
         response = await self._client.post(
             f"{self._base_url}/v1/chat/completions",
-            json={
-                "messages": [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-                "max_tokens": self._max_tokens,
-            },
+            json=payload,
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
@@ -129,9 +138,17 @@ class HttpLLMProvider(LLMProvider):
         self, prompt: str, system: str = "",
         cacheable_system: str = "", volatile_system: str = "",
     ) -> dict:
-        text = await self.generate(
-            prompt, self._combine_system(system, cacheable_system, volatile_system)
+        # 구조적 판단(라우팅/계획/판정)은 그리디(temperature=0) — 같은 입력 = 같은 결정.
+        system_msg = self._build_system(
+            self._combine_system(system, cacheable_system, volatile_system)
         )
+        text = await retry_async(
+            lambda: self._post_completion(system_msg, prompt, temperature=0.0),
+            attempts=self._retry_attempts,
+            breaker=self._breaker,
+            name="llm",
+        )
+        _, text = self.split_thinking(text)
         # LLM이 ```json ... ``` 으로 감싸는 경우 fence 제거
         stripped = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
         stripped = re.sub(r"\n?```\s*$", "", stripped)

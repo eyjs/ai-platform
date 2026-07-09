@@ -110,6 +110,46 @@ class AppState:
     providers: list = field(default_factory=list)
 
 
+async def _check_scope_tagging_alignment(pool, profiles) -> None:
+    """프로필 domain_scopes 와 document_chunks 실태깅의 정합성을 검사한다 (WARN 전용).
+
+    두 방향 모두 본다:
+    - 스코프가 가리키는 도메인에 청크 0 → 그 프로필의 RAG 는 조용히 빈손이 된다.
+    - 어떤 프로필도 스코프하지 않는 청크 도메인 → 스코프 프로필에선 검색 불가 데이터.
+      (_common 은 전 프로필 자동 포함, __unplaced__ 는 의도된 미배치라 제외)
+    """
+    try:
+        rows = await pool.fetch(
+            "SELECT domain_code, count(*) AS cnt FROM document_chunks GROUP BY domain_code"
+        )
+    except Exception as e:  # noqa: BLE001 - 검사 실패가 부팅을 막으면 안 된다
+        logger.warning("scope_tagging_check_failed", error=str(e))
+        return
+
+    tagged = {r["domain_code"]: r["cnt"] for r in rows}
+    scoped_domains: set[str] = set()
+    for p in profiles:
+        for scope in p.domain_scopes:
+            scoped_domains.add(scope)
+            if scope not in tagged:
+                logger.warning(
+                    "profile_scope_has_no_chunks",
+                    profile_id=p.id,
+                    scope=scope,
+                    hint="KMS 재편/매핑(seeds/domain_mapping.yaml) 확인 — 이 프로필 RAG 가 빈손이 된다",
+                )
+
+    for domain, cnt in tagged.items():
+        if domain in ("_common", "__unplaced__") or domain in scoped_domains:
+            continue
+        logger.warning(
+            "chunks_not_scoped_by_any_profile",
+            domain_code=domain,
+            chunks=cnt,
+            hint="스코프 프로필에서 검색 불가 — 매핑 미정의(회사코드 fallback) 여부 확인",
+        )
+
+
 def _check_profile_pattern_overlap(profiles):
     """프로필 간 intent_hints 패턴 중복을 검사하고 경고한다."""
     pattern_to_profiles: dict[str, list[str]] = {}
@@ -227,6 +267,11 @@ async def create_app_state(settings: Settings) -> AppState:
 
     # 프로필 간 intent_hints 패턴 중복 검사
     _check_profile_pattern_overlap(profiles)
+
+    # 프로필 스코프 ↔ 실제 청크 태깅 정합성 검사 (fail-loud, 2026-07 실사고 재발 방지):
+    # KMS 재편·매핑 누락으로 스코프가 가리키는 도메인에 청크가 0이면 해당 프로필의
+    # RAG 가 조용히 전멸한다(final 0). 부팅 시점에 시끄럽게 드러낸다(치명 아님 — WARN).
+    await _check_scope_tagging_alignment(pool, profiles)
 
     # 6. Tool Registry
     tool_registry = ToolRegistry()

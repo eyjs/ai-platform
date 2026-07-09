@@ -1,6 +1,8 @@
 # 범용 AI 어시스턴트 프로필
 id: "general-chat"
 name: "통합 AI 어시스턴트"
+# decompose(위임 라우팅)의 후보 판단 신호 — 담당/비담당을 구별력 있게 서술할 것
+description: "어느 전문 챗봇에도 속하지 않는 일반 대화·잡담·상식 질문 담당. 보험(insurance-qa)·사내문서(kms-assistant)·사주(fortune-saju)·SNS운영(flowsns-ops) 질문은 각 전문 챗봇 담당이므로 이 챗봇에 위임하지 말 것."
 
 domain_scopes: []  # 전체 도메인
 category_scopes: []

@@ -1,6 +1,8 @@
 # KMS 문서 관리 시스템 전용 어시스턴트
 id: "kms-assistant"
 name: "KMS 문서 어시스턴트"
+# decompose(위임 라우팅)의 후보 판단 신호 — 담당/비담당을 구별력 있게 서술할 것
+description: "사내 문서관리시스템(KMS) 검색 어시스턴트. 회사 내부 문서·규정·지침·자료를 찾아 출처와 함께 답변한다. '문서 찾아줘', 사내 규정·절차 질문 담당."
 
 domain_scopes: []
 category_scopes: []
