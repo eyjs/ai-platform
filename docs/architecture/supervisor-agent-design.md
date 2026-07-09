@@ -135,8 +135,11 @@ supervise(question, ctx):
    synthesize 생략(라우팅 파리티). 직접 모드 불가침 테스트 강제. 레거시 MasterOrchestrator는 롤백용 보존 —
    **컷오버(레거시 제거)는 운영 검증 후 별도 결정**(ADR-013 AD-1 패턴). 라이브 실측: 자동 라우팅 15.6s
    (passthrough), 직접 모드 supervisor 로그 0건, SSE done `orchestrated=true`.
-   잔여 파리티 갭: ① supervisor 경로 토큰 스트리밍 없음(완료 후 단일 방출 — 레거시는 토큰 스트림)
-   ② 레거시의 인사/잡담 직접응답·백그라운드 재라우팅 최적화 미이식. 컷오버 전 astream_events 스트리밍 필요.
+   잔여 파리티 갭: ① ~~supervisor 경로 토큰 스트리밍 없음~~ → **✅ 해소(2026-07-09, `d2888c6`)**:
+   `supervise_stream()` + emitter 브리지. 단일 위임 passthrough 확정이면 서브 토큰(실측 107 토큰 이벤트/10.3s),
+   다중 위임이면 synthesize 토큰(실측 274 이벤트) 스트리밍. 버퍼드 경로(핸드오프/passthrough 미확정)는
+   done.streamed=False로 호출자가 단일 방출. ② 레거시의 인사/잡담 직접응답·백그라운드 재라우팅 최적화
+   미이식 — 컷오버 판단 시 필요성 재평가(supervisor 스트리밍으로 체감 지연이 이미 해소됨).
 
 각 Phase는 직접 모드 회귀 없음을 e2e로 검증(외부 서비스 단일 챗봇 시나리오 필수 통과).
 

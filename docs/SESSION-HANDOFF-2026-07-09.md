@@ -47,13 +47,23 @@
 3. **4B 리뷰어 note 모순** — passed=true인데 note는 부정 서술. 판정은 bool만 신뢰. 게이트 실전 투입 시 리뷰어 모델 상향 검토
 4. **`orchestrator_profile_auth_no_tenant` 경고** — 테넌트 미매핑 우회 정책 미결(설계문서 §5)
 
+## 0-B. 토큰 스트리밍 추가 (`d2888c6`) — 컷오버 선행조건 충족
+
+- `Supervisor.supervise_stream()` + emitter(asyncio.Queue) 브리지: 단일 위임 passthrough 확정
+  (single_passthrough on, replan/review off)이면 **서브 토큰**(runner.run_stream→execute_stream),
+  다중 위임이면 **synthesize_stream 토큰**을 실시간 중계. 결과가 뒤집힐 수 있는 경로(replan/review on)는
+  서브 토큰을 흘리지 않는다. 버퍼드 경로(워크플로우 핸드오프 등)는 done.streamed=False → 단일 방출
+- 비스트리밍 `supervise()`는 emitter 없이 완전 동일(테스트 강제). 전체 1535 passed
+- 라이브 실측: 단일 자동 라우팅 107 토큰 이벤트/10.3s, 멀티도메인 274 이벤트/141.5s(위임 병렬 후 종합 스트림)
+- 관측: 멀티도메인 위임 단계(~114s)엔 ping만 나감 — 위임 진행 이벤트(SSE trace)는 후속 개선 후보
+
 ## 3. 다음 후보
 
-1. **Supervisor 토큰 스트리밍(astream_events)** — Phase 3 컷오버(레거시 오케스트레이터 제거)의 선행조건
+1. Phase 3 컷오버 결정(운영 검증 후): 레거시 MasterOrchestrator·`_prepare_chat_fast` 재라우팅 경로 제거.
+   스트리밍 선행조건은 충족 — 남은 판단 재료는 인사/잡담 직접응답 필요성과 운영 안정성
 2. 잔여 이슈 1·2 (MLX 반복 루프 / RAG 데이터 감사 — 기존 남은 과제 1번과 동일)
-3. P2 관찰 6건 (`.pipeline/REPORT.md`)
+3. 위임 진행 SSE trace 이벤트(멀티도메인 위임 단계 무소식 구간 해소) / P2 관찰 6건 (`.pipeline/REPORT.md`)
 4. Supervisor 체크포인터 연결(AsyncPostgresSaver — 상태 직렬화 경계 재설계 필요)
-5. Phase 3 컷오버 결정(운영 검증 후): 레거시 MasterOrchestrator·`_prepare_chat_fast` 재라우팅 경로 제거
 
 ## 4. 운영 노트 (이번 세션 추가분)
 
