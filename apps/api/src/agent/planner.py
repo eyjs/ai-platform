@@ -149,6 +149,25 @@ def create_planner(
             logger.warning("planner_no_valid_steps")
             return {}
 
+        # needs_rag 보장 가드: 라우터가 RAG 필요로 판정한 질문인데 경량 플래너가
+        # rag_search 를 계획에서 빠뜨리면 검색이 통째로 생략돼 "문서에 없음" 오답이
+        # 된다(실사고: fact_lookup 만 계획 — facts 테이블이 비어 보장된 빈손).
+        # 플래너의 판단(도구 순서·선행 팩트조회)은 존중하되 검색은 항상 보장한다.
+        needs_rag = getattr(getattr(plan, "strategy", None), "needs_rag", False)
+        if (
+            needs_rag
+            and "rag_search" in available_tool_names
+            and not any(s["tool"] == "rag_search" for s in valid_steps)
+        ):
+            last_group = max((s.get("group", 1) for s in valid_steps), default=0)
+            valid_steps.append({
+                "step_id": f"step_{len(valid_steps) + 1}",
+                "tool": "rag_search",
+                "params": {},
+                "group": last_group + 1,
+            })
+            logger.info("planner_rag_guard_appended", steps_count=len(valid_steps))
+
         logger.info(
             "planner_success",
             steps_count=len(valid_steps),

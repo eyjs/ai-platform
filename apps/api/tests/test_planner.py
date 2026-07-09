@@ -373,3 +373,105 @@ def test_needs_planning_global_disabled():
             MagicMock(planning_disabled=False),
         )
     assert result is False
+
+
+# --- needs_rag 보장 가드 (실사고: 플래너가 fact_lookup만 계획 → 검색 통째 생략) ---
+
+
+@pytest.mark.asyncio
+async def test_planner_appends_rag_search_when_needs_rag_but_omitted():
+    """needs_rag=True인데 플래너가 rag_search를 빠뜨리면 마지막 그룹 뒤에 보장 추가한다."""
+    mock_llm = AsyncMock()
+    mock_llm.generate_json = AsyncMock(return_value={
+        "steps": [
+            {"step_id": "s1", "tool": "fact_lookup", "params": {}, "group": 1},
+        ],
+        "reasoning": "팩트 조회면 충분하다고 오판",
+    })
+
+    tools = []
+    for name in ("rag_search", "fact_lookup"):
+        t = MagicMock()
+        t.name = name
+        t.description = "d"
+        t.input_schema = {}
+        tools.append(t)
+    mock_resolver = MagicMock(return_value=tools)
+
+    planner = create_planner(mock_llm, mock_resolver)
+
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tool_groups=[[ToolCall("rag_search", {}), ToolCall("fact_lookup", {})]],
+        question_type=QuestionType.STANDALONE,
+        needs_planning=True,
+        strategy=QuestionStrategy(needs_rag=True),
+    )
+    state = create_initial_state("보험약관에서 자기부담금 규정 찾아줘", plan, "sess-1")
+
+    result = await planner(state)
+    steps = result["planned_steps"]
+    assert [s["tool"] for s in steps] == ["fact_lookup", "rag_search"]
+    assert steps[-1]["group"] == 2  # 플래너 계획(그룹1) 뒤에 이어 실행
+
+
+@pytest.mark.asyncio
+async def test_planner_no_append_when_rag_already_planned():
+    """rag_search가 이미 계획에 있으면 중복 추가하지 않는다."""
+    mock_llm = AsyncMock()
+    mock_llm.generate_json = AsyncMock(return_value={
+        "steps": [
+            {"step_id": "s1", "tool": "rag_search", "params": {"query": "q"}, "group": 1},
+        ],
+        "reasoning": "검색 계획",
+    })
+
+    t = MagicMock(); t.name = "rag_search"; t.description = "d"; t.input_schema = {}
+    mock_resolver = MagicMock(return_value=[t])
+
+    planner = create_planner(mock_llm, mock_resolver)
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tool_groups=[[ToolCall("rag_search", {})]],
+        question_type=QuestionType.STANDALONE,
+        needs_planning=True,
+        strategy=QuestionStrategy(needs_rag=True),
+    )
+    state = create_initial_state("질문", plan, "sess-1")
+
+    result = await planner(state)
+    assert [s["tool"] for s in result["planned_steps"]] == ["rag_search"]
+
+
+@pytest.mark.asyncio
+async def test_planner_no_append_when_needs_rag_false():
+    """needs_rag=False(인사 등)면 가드가 rag_search를 강제하지 않는다."""
+    mock_llm = AsyncMock()
+    mock_llm.generate_json = AsyncMock(return_value={
+        "steps": [
+            {"step_id": "s1", "tool": "fact_lookup", "params": {}, "group": 1},
+        ],
+        "reasoning": "팩트만",
+    })
+
+    tools = []
+    for name in ("rag_search", "fact_lookup"):
+        t = MagicMock(); t.name = name; t.description = "d"; t.input_schema = {}
+        tools.append(t)
+    mock_resolver = MagicMock(return_value=tools)
+
+    planner = create_planner(mock_llm, mock_resolver)
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tool_groups=[[ToolCall("rag_search", {}), ToolCall("fact_lookup", {})]],
+        question_type=QuestionType.STANDALONE,
+        needs_planning=True,
+        strategy=QuestionStrategy(needs_rag=False),
+    )
+    state = create_initial_state("질문", plan, "sess-1")
+
+    result = await planner(state)
+    assert [s["tool"] for s in result["planned_steps"]] == ["fact_lookup"]
