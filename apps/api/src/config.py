@@ -187,6 +187,15 @@ class Settings(BaseSettings):
     # P1-4 메인 검토 게이트: 서브 답변을 메인이 판정(pass/fail) 후 통과분만 종합.
     # 서브 결과당 LLM 호출 1회가 추가되어 opt-in. 재생성 아님 — 판정만 한다.
     supervisor_review_gate: bool = False
+    # Phase 3: chatbot_id 미지정(자동 라우팅) 요청의 처리 백엔드.
+    #   legacy     = MasterOrchestrator 3-Tier 라우팅 (기존)
+    #   supervisor = Supervisor 위임 그래프로 흡수 (라우팅 = 1위임의 특수케이스)
+    # 직접 모드(chatbot_id 지정)는 이 설정과 무관하게 무변경(§0-1).
+    orchestrator_backend: str = "legacy"
+    # Phase 3: 단일 위임이 성공하면 synthesize를 건너뛰고 서브 답변을 그대로 전달.
+    # 자동 라우팅 파리티(레거시는 선택된 프로파일 답변을 그대로 반환) + 지연 절감.
+    # 켜면 단일 위임 응답이 "메인 종합 문체"가 아닌 서브 원문으로 나간다.
+    supervisor_single_passthrough: bool = False
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 

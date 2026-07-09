@@ -427,6 +427,8 @@ async def create_app_state(settings: Settings) -> AppState:
         adaptive_replan=settings.supervisor_adaptive_replan,
         max_replan_rounds=settings.supervisor_max_replan_rounds,
         review_gate=settings.supervisor_review_gate,
+        # Phase 3: 단일 위임 passthrough(라우팅 파리티). orchestrator_backend=supervisor와 짝.
+        single_passthrough=settings.supervisor_single_passthrough,
     )
     supervisor = Supervisor(
         supervisor_planner, supervisor_runner, supervisor_authorizer, supervisor_limits, profile_store,

@@ -451,6 +451,16 @@ def _create_finalize(planner: SupervisorPlanner, limits: SupervisorLimits):
                 },
             )
 
+        # Phase 3: 단일 위임 성공이면 synthesize 생략 — 라우팅=1위임 특수케이스 파리티.
+        # 종합할 두 번째 근거가 없어 synthesize는 정보를 더하지 못하고 지연/변형만 남긴다.
+        # 검토 게이트 뒤에 위치 — reject(ok=False)된 단일 결과는 통과하지 못한다.
+        if limits.single_passthrough and len(results) == 1 and results[0].ok:
+            r0 = results[0]
+            logger.info("supervisor_single_passthrough", profile=r0.profile)
+            return {
+                "response": AgentResponse(answer=r0.answer, sources=r0.sources, trace=trace_info)
+            }
+
         answer = await planner.synthesize(state["question"], results)  # 메인이 종합·소유
 
         sources = []

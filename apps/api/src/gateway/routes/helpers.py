@@ -176,13 +176,23 @@ async def _check_rate_limit(
 
 
 def _is_supervisor_request(chatbot_id: str | None, state) -> bool:
-    """chat/chat_stream 엔트리 supervisor 분기 판별 (task-002, §0-2).
+    """chat/chat_stream 엔트리 supervisor 분기 판별 (task-002, §0-2 / Phase 3).
 
     순수 판별 함수 — 부작용 없음. `state.supervisor`가 배선되지 않은(None) 워크트리/환경에서는
     항상 False를 반환해 기존 경로(직접 모드/오케스트레이터)로 안전 폴백한다.
+
+    Phase 3: `orchestrator_backend=supervisor`면 chatbot_id 미지정(자동 라우팅) 요청도
+    supervisor가 흡수한다(라우팅 = 1위임의 특수케이스). 직접 모드(특정 chatbot_id)는
+    이 설정과 무관하게 절대 여기 걸리지 않는다(§0-1 무변경).
     """
-    sid = getattr(getattr(state, "settings", None), "supervisor_profile_id", "supervisor")
-    return chatbot_id == sid and getattr(state, "supervisor", None) is not None
+    if getattr(state, "supervisor", None) is None:
+        return False
+    settings_obj = getattr(state, "settings", None)
+    sid = getattr(settings_obj, "supervisor_profile_id", "supervisor")
+    if chatbot_id == sid:
+        return True
+    backend = getattr(settings_obj, "orchestrator_backend", "legacy")
+    return chatbot_id is None and backend == "supervisor"
 
 
 @dataclass

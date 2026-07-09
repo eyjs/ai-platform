@@ -77,6 +77,8 @@ class SupervisorLimits:
     max_replan_rounds: int = 1
     # P1-4 메인 검토 게이트: 서브 답변 판정(pass/fail) 후 통과분만 종합.
     review_gate: bool = False
+    # Phase 3: 단일 위임 성공 시 synthesize 생략·서브 답변 그대로 전달(라우팅 파리티).
+    single_passthrough: bool = False
     # 위임 1건의 실행 상한(초). 서브가 응답 없이 잡히면(예: 외부 의존 행)
     # supervise 전체가 무한 대기하며 SSE가 ping만 보내는 사고를 차단한다.
     delegation_timeout_sec: float = 120.0

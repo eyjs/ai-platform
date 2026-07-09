@@ -155,7 +155,9 @@ async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserCon
             yield {"event": "done", "data": json.dumps({
                 "answer": response.answer,
                 "profile_id": supervisor_id,
-                "orchestrated": False,
+                # Phase 3: chatbot_id 미지정 요청이 supervisor로 흡수된 경우
+                # 자동 라우팅으로 표기(레거시 오케스트레이터 응답과 동일 의미).
+                "orchestrated": req.chatbot_id is None,
                 "response_id": response_id,
                 "confidence": None,
                 "traversal_path": [],
