@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from src.agent.profile_store import ProfileStore
     from src.config import Settings
     from src.gateway.access_policy import AccessPolicyStore
-    from src.orchestrator.tenant import TenantService
+    from src.services.tenant_service import TenantService
 
 logger = get_logger(__name__)
 

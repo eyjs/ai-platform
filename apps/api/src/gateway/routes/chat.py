@@ -412,36 +412,6 @@ async def chat_stream(req: ChatRequest, request: Request):
             tenant_id=stream_tenant_id,
         )
 
-    # 백그라운드 오케스트레이터 라우팅 (스트리밍과 병렬)
-    routing_task: Optional[asyncio.Task] = None
-    if setup.needs_routing and cached_answer is None:
-        async def _background_route():
-            """백그라운드에서 오케스트레이터 라우팅을 실행하고 세션 메타에 결과를 기록한다."""
-            try:
-                result = await state.orchestrator.route(
-                    question=req.question,
-                    session_id=setup.session_id,
-                    user_ctx=user_ctx,
-                )
-                if result and result.selected_profile_id:
-                    await state.session_memory.update_current_profile(
-                        setup.session_id, result.selected_profile_id,
-                    )
-                logger.info(
-                    "background_routing_complete",
-                    session_id=setup.session_id,
-                    selected_profile=result.selected_profile_id if result else "none",
-                    reason=result.reason if result else "none",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "background_routing_error",
-                    session_id=setup.session_id,
-                    error=str(exc),
-                )
-
-        routing_task = asyncio.create_task(_background_route())
-
     # context reset을 generator 종료 시점으로 연기
     async def event_generator():
         gen_status_code = 200
@@ -581,13 +551,6 @@ async def chat_stream(req: ChatRequest, request: Request):
             logger.error("chat_stream_error", error=str(stream_err), exc_info=True)
             raise
         finally:
-            # 백그라운드 라우팅 태스크 정리
-            if routing_task and not routing_task.done():
-                routing_task.cancel()
-                try:
-                    await routing_task
-                except (asyncio.CancelledError, Exception):
-                    pass
             # Request log enqueue — generator 종료 후 (R1 보장)
             if request_log_svc is not None:
                 elapsed_ms = int((time.monotonic() - stream_timer_start) * 1000)

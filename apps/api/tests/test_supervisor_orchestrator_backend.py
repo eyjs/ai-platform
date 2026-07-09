@@ -1,8 +1,8 @@
-"""Phase 3: 오케스트레이터 → Supervisor 통합 테스트.
+"""Phase 3: 오케스트레이터 → Supervisor 통합(컷오버) 테스트.
 
-`orchestrator_backend=supervisor`일 때 chatbot_id 미지정(자동 라우팅) 요청이
-supervisor로 흡수되고(라우팅 = 1위임의 특수케이스), 직접 모드는 어떤 설정에서도
-불가침(§0-1)임을 검증한다. 단일 위임 passthrough(라우팅 파리티)도 여기서 본다.
+컷오버 후 chatbot_id 미지정(자동 라우팅)은 무조건 supervisor가 흡수하고
+(라우팅 = 1위임의 특수케이스), 직접 모드는 불가침(§0-1)임을 검증한다.
+단일 위임 passthrough(라우팅 파리티)도 여기서 본다.
 """
 
 from types import SimpleNamespace
@@ -17,10 +17,9 @@ from src.supervisor.models import DelegationPlan, DelegationStep, SubAgentResult
 from src.supervisor.supervisor import Supervisor
 
 
-def _make_state(supervisor=None, backend: str = "legacy", supervisor_profile_id: str = "supervisor"):
+def _make_state(supervisor=None, supervisor_profile_id: str = "supervisor"):
     settings = SimpleNamespace(
         supervisor_profile_id=supervisor_profile_id,
-        orchestrator_backend=backend,
         default_tenant_id="default",
     )
     return SimpleNamespace(settings=settings, supervisor=supervisor)
@@ -29,44 +28,29 @@ def _make_state(supervisor=None, backend: str = "legacy", supervisor_profile_id:
 # --- 엔트리 판별 (Phase 3 흡수 규칙) ---
 
 
-def test_orchestrator_absorbed_when_backend_supervisor():
-    """backend=supervisor + chatbot_id 미지정 → supervisor 분기."""
-    state = _make_state(supervisor=AsyncMock(), backend="supervisor")
+def test_auto_routing_absorbed_by_supervisor():
+    """컷오버: chatbot_id 미지정 → supervisor 분기 (무조건)."""
+    state = _make_state(supervisor=AsyncMock())
     assert _is_supervisor_request(None, state) is True
 
 
-def test_orchestrator_not_absorbed_when_backend_legacy():
-    """backend=legacy(기본) + chatbot_id 미지정 → 기존 오케스트레이터 경로."""
-    state = _make_state(supervisor=AsyncMock(), backend="legacy")
+def test_direct_mode_never_absorbed():
+    """직접 모드(특정 chatbot_id)는 절대 흡수되지 않는다(§0-1)."""
+    state = _make_state(supervisor=AsyncMock())
+    assert _is_supervisor_request("insurance-qa", state) is False
+    assert _is_supervisor_request("fortune-saju", state) is False
+
+
+def test_auto_routing_not_absorbed_when_supervisor_not_wired():
+    """supervisor 미배선이면 안전 폴백(False) — 직접 모드 헬퍼가 400으로 거절한다."""
+    state = _make_state(supervisor=None)
     assert _is_supervisor_request(None, state) is False
 
 
-def test_direct_mode_never_absorbed_regardless_of_backend():
-    """직접 모드(특정 chatbot_id)는 backend 설정과 무관하게 절대 흡수되지 않는다(§0-1)."""
-    for backend in ("legacy", "supervisor"):
-        state = _make_state(supervisor=AsyncMock(), backend=backend)
-        assert _is_supervisor_request("insurance-qa", state) is False
-        assert _is_supervisor_request("fortune-saju", state) is False
-
-
-def test_orchestrator_not_absorbed_when_supervisor_not_wired():
-    """backend=supervisor여도 supervisor 미배선이면 안전 폴백(레거시 경로)."""
-    state = _make_state(supervisor=None, backend="supervisor")
-    assert _is_supervisor_request(None, state) is False
-
-
-def test_supervisor_explicit_entry_unaffected_by_backend():
-    """chatbot_id=supervisor 명시 진입은 backend와 무관하게 동작(기존 계약 유지)."""
-    for backend in ("legacy", "supervisor"):
-        state = _make_state(supervisor=AsyncMock(), backend=backend)
-        assert _is_supervisor_request("supervisor", state) is True
-
-
-def test_backend_missing_setting_defaults_to_legacy():
-    """orchestrator_backend 설정이 없는(구버전 state stub) 환경에서도 안전 폴백."""
-    settings = SimpleNamespace(supervisor_profile_id="supervisor")
-    state = SimpleNamespace(settings=settings, supervisor=AsyncMock())
-    assert _is_supervisor_request(None, state) is False
+def test_supervisor_explicit_entry_works():
+    """chatbot_id=supervisor 명시 진입 계약 유지."""
+    state = _make_state(supervisor=AsyncMock())
+    assert _is_supervisor_request("supervisor", state) is True
 
 
 # --- 단일 위임 passthrough (라우팅 파리티) ---

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from src.orchestrator.tenant import TenantService
+from src.services.tenant_service import TenantService
 
 
 @pytest.fixture

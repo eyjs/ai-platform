@@ -40,10 +40,7 @@ from src.safety.response_policy import ResponsePolicyGuard
 from src.tools.internal.fact_lookup import FactLookupTool
 from src.tools.internal.rag_search import RAGSearchTool
 from src.tools.registry import ToolRegistry
-from src.orchestrator.embedding_router import EmbeddingRouter
-from src.orchestrator.llm_adapter import OrchestratorLLM
-from src.orchestrator.orchestrator import MasterOrchestrator
-from src.orchestrator.tenant import TenantService
+from src.services.tenant_service import TenantService
 from src.services.kms_graph_client import KmsGraphClient
 from src.services.null_kms_client import NullKmsClient
 from src.supervisor.authz import DelegationAuthorizer
@@ -82,7 +79,6 @@ class AppState:
     job_queue: JobQueue
     rate_limiter: PGRateLimiter
     tenant_service: Optional[TenantService] = None
-    orchestrator: Optional[MasterOrchestrator] = None
     # Task 002 (P0-2): Supervisor 합성 결과. 미배선/구성요소 부재 시 None(안전 폴백 — 엔트리 분기 미진입).
     supervisor: Optional[Supervisor] = None
     # classify-intent 라우트가 재사용하는 공유 분류기 (router_llm 기반)
@@ -427,7 +423,7 @@ async def create_app_state(settings: Settings) -> AppState:
         adaptive_replan=settings.supervisor_adaptive_replan,
         max_replan_rounds=settings.supervisor_max_replan_rounds,
         review_gate=settings.supervisor_review_gate,
-        # Phase 3: 단일 위임 passthrough(라우팅 파리티). orchestrator_backend=supervisor와 짝.
+        # Phase 3: 단일 위임 passthrough(라우팅 파리티 — 자동 라우팅은 supervisor 전담).
         single_passthrough=settings.supervisor_single_passthrough,
     )
     supervisor = Supervisor(
@@ -441,45 +437,11 @@ async def create_app_state(settings: Settings) -> AppState:
         review_gate=settings.supervisor_review_gate,
     )
 
-    # 15. MasterOrchestrator. 백엔드 선택은 ProviderFactory(provider_mode 기준)가 설정으로
-    # 반환하고, 어댑터 생성은 합성 루트인 여기서 한다(infra→orchestrator 역의존 회피).
-    orchestrator = None
-    orchestrator_cfg = provider_factory.get_orchestrator_llm_config()
-    orchestrator_llm = OrchestratorLLM.from_config(orchestrator_cfg) if orchestrator_cfg else None
-    if orchestrator_llm:
-        await orchestrator_llm.initialize()
-        # 임베딩 기반 프로필 라우터 초기화
-        embedding_router = EmbeddingRouter(embedding_provider)
-        profile_dicts = [
-            {
-                "id": p.id,
-                "name": p.name,
-                "description": getattr(p, "description", ""),
-                "domain_scopes": p.domain_scopes,
-                "system_prompt": p.system_prompt,
-                "intent_hints": [
-                    {"name": h.name, "patterns": h.patterns, "description": h.description}
-                    for h in p.intent_hints
-                ],
-            }
-            for p in profiles
-        ]
-        await embedding_router.initialize(profile_dicts)
+    # 15. (제거됨) 레거시 MasterOrchestrator — Phase 3 컷오버로 자동 라우팅은 supervisor가
+    # 전담한다(라우팅 = 1위임의 특수케이스). 롤백이 필요하면 git 히스토리의
+    # src/orchestrator/ + 이 섹션을 복원할 것.
 
-        orchestrator = MasterOrchestrator(
-            llm=orchestrator_llm,
-            profile_store=profile_store,
-            session_memory=session_memory,
-            workflow_engine=workflow_engine,
-            tenant_service=tenant_service,
-            embedding_router=embedding_router,
-            access_policy=access_policy,
-        )
-        logger.info("orchestrator_initialized", provider_mode=settings.provider_mode.value)
-    else:
-        logger.info("orchestrator_disabled")
-
-    providers = [embedding_provider, router_llm, main_llm, reranker, orchestrator_llm, kms_graph_client]
+    providers = [embedding_provider, router_llm, main_llm, reranker, kms_graph_client]
 
     # Task 009: Provider Registry + Router + Request Log + Response Cache
     provider_registry = provider_factory.build_registry()
@@ -565,7 +527,6 @@ async def create_app_state(settings: Settings) -> AppState:
         job_queue=job_queue,
         rate_limiter=rate_limiter,
         tenant_service=tenant_service,
-        orchestrator=orchestrator,
         supervisor=supervisor,
         provider_registry=provider_registry,
         provider_router=provider_router,

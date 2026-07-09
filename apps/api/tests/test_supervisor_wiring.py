@@ -47,9 +47,10 @@ def test_is_supervisor_request_false_for_other_chatbot_id():
     assert _is_supervisor_request("general-chat", state) is False
 
 
-def test_is_supervisor_request_false_when_chatbot_id_none():
+def test_is_supervisor_request_true_when_chatbot_id_none():
+    """Phase 3 컷오버: 자동 라우팅(None)은 supervisor가 전담한다."""
     state = _make_state(supervisor=AsyncMock())
-    assert _is_supervisor_request(None, state) is False
+    assert _is_supervisor_request(None, state) is True
 
 
 def test_is_supervisor_request_false_when_supervisor_not_wired():

@@ -1,4 +1,8 @@
-"""TenantService: 멀티테넌트 격리 + 프로필 필터링."""
+"""TenantService: 멀티테넌트 격리 + 프로필 필터링.
+
+레거시 오케스트레이터 컷오버(Phase 3)로 src/orchestrator/tenant.py에서 이전.
+테넌트 인가는 supervisor(DelegationAuthorizer)와 gateway가 공유하는 살아있는 경로다.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +10,20 @@ from typing import Optional
 
 import asyncpg
 
+from dataclasses import dataclass
+
 from src.observability.logging import get_logger
-from src.orchestrator.models import TenantConfig
+
+
+@dataclass
+class TenantConfig:
+    """테넌트 설정 (tenants 테이블 행 매핑)."""
+
+    id: str
+    name: str
+    orchestrator_enabled: bool = True  # DB 컬럼 유지 — 자동 라우팅 허용 여부(테넌트 단위)
+    default_chatbot_id: str | None = None
+    is_active: bool = True
 
 logger = get_logger(__name__)
 
