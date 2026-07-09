@@ -117,6 +117,11 @@ supervise(question, ctx):
    **adaptive replan = 조건부 엣지**가 그래프 네이티브이므로, 전환 없이 얹으면 기술부채가 커진다.
    decompose/synthesize/서브를 노드로 재구성(또는 `langgraph-supervisor`). 체크포인트·`astream_events`
    통합 스트리밍·위임 트레이스가 공짜로 따라옴. **Phase 2 착수 전 반드시 완료.**
+   → **✅ 완료(2026-07-09)**: `supervisor/graph.py`(StateGraph 빌더: resolve_scope → detect_sticky →
+   sticky_delegate | decompose → delegate 조건부 self-loop → finalize) + `supervisor/state.py`.
+   `supervisor.py`는 컴파일된 그래프의 파사드로 축소(공개 API 불변). 순차 루프=조건부 self-edge라
+   P2 병렬은 그 자리를 `Send` fan-out으로 교체하면 된다. 체크포인터는 미연결(P1에서 직렬화 경계와 함께).
+   회귀 0(supervisor 80 / 전체 1504 passed).
 4. **Phase 2**: adaptive replan(조건부 엣지) + 병렬 위임(`Send`) + 위임 트레이스 노드(astream). *(Phase 1.5 후)*
 5. **Phase 3**: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합 — 라우팅=1개 위임의 특수케이스로 흡수.
 

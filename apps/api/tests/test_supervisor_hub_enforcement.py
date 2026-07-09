@@ -283,18 +283,19 @@ def test_static_scan_models_subagent_result_has_no_reroute_field_names():
         assert not pattern.search(block), f"SubAgentResult 정의 블록에 금지된 필드 선언 발견: {forbidden}"
 
 
-def test_static_scan_supervisor_loop_only_reads_plan_delegations():
-    """supervisor.py 루프가 순회하는 대상이 'plan.delegations' 하나뿐임을 소스에서 확인한다.
+def test_static_scan_delegate_node_only_reads_plan_delegations():
+    """graph.py의 위임 노드가 소비하는 대상이 'plan.delegations' 하나뿐임을 소스에서 확인한다.
 
-    서브 결과 리스트(results)에 대한 for 순회로 새 위임을 만드는 코드가 있다면
-    hub 위반이므로, results를 순회하며 step/profile을 뽑아 재위임하는 패턴이 없는지도 함께 본다.
+    P1-0 StateGraph 전환으로 순차 루프는 delegate 노드의 조건부 self-edge가 되었다.
+    delegate 노드는 `plan.delegations[step_index]`만 읽어야 하며(hub 강제),
+    서브 결과 리스트(results)에서 step/profile을 뽑아 재위임하는 패턴이 없는지도 함께 본다.
     """
-    supervisor_path = _SUPERVISOR_SRC_DIR / "supervisor.py"
-    assert supervisor_path.is_file(), f"경로 계산 실패 — 파일 없음: {supervisor_path}"
-    source = supervisor_path.read_text(encoding="utf-8")
+    graph_path = _SUPERVISOR_SRC_DIR / "graph.py"
+    assert graph_path.is_file(), f"경로 계산 실패 — 파일 없음: {graph_path}"
+    source = graph_path.read_text(encoding="utf-8")
 
-    assert "for step in plan.delegations" in source, (
-        "supervisor.py 루프가 plan.delegations를 순회하는 코드를 찾지 못함 — 구조 변경 시 이 테스트를 갱신할 것"
+    assert 'state["plan"].delegations[state["step_index"]]' in source, (
+        "graph.py delegate 노드가 plan.delegations를 인덱스 소비하는 코드를 찾지 못함 — 구조 변경 시 이 테스트를 갱신할 것"
     )
 
     # 서브 결과 리스트(results)를 순회하는 코드가 있다면(현재는 sources 수집용),
@@ -304,10 +305,19 @@ def test_static_scan_supervisor_loop_only_reads_plan_delegations():
 
     for match in re.finditer(r"for \w+ in results:\n((?:[ \t]+.+\n)*)", source):
         loop_body = match.group(1)
-        for forbidden_call in ("runner.run(", "self._runner", "DelegationStep(", "planner.decompose"):
+        for forbidden_call in ("runner.run(", "run_delegation(", "DelegationStep(", "planner.decompose"):
             assert forbidden_call not in loop_body, (
-                f"supervisor.py의 results 순회 블록에서 재위임 의심 코드 발견: {forbidden_call}"
+                f"graph.py의 results 순회 블록에서 재위임 의심 코드 발견: {forbidden_call}"
             )
+
+    # supervisor.py는 파사드로 축소되었다 — 위임 실행 코드가 남아있지 않아야 한다
+    # (그래프 밖 우회 경로 부재).
+    supervisor_path = _SUPERVISOR_SRC_DIR / "supervisor.py"
+    facade_source = supervisor_path.read_text(encoding="utf-8")
+    for forbidden_call in ("runner.run(", "self._runner.run", "decompose(", "synthesize("):
+        assert forbidden_call not in facade_source, (
+            f"supervisor.py(파사드)에 그래프 밖 위임 실행 의심 코드 발견: {forbidden_call}"
+        )
 
 
 # ---------------------------------------------------------------------------
