@@ -123,6 +123,12 @@ supervise(question, ctx):
    P2 병렬은 그 자리를 `Send` fan-out으로 교체하면 된다. 체크포인터는 미연결(P1에서 직렬화 경계와 함께).
    회귀 0(supervisor 80 / 전체 1504 passed).
 4. **Phase 2**: adaptive replan(조건부 엣지) + 병렬 위임(`Send`) + 위임 트레이스 노드(astream). *(Phase 1.5 후)*
+   → **✅ 완료(2026-07-09)**: P1-2 병렬 위임(dispatch 라우터의 `Send` fan-out, 인가·예산은 dispatch 단일 지점),
+   P1-1 adaptive replan(collect 후 조건부 엣지, opt-in `AIP_SUPERVISOR_ADAPTIVE_REPLAN`), P1-3 위임 트레이스
+   (`delegation_log` → 응답 `TraceInfo.router_decision.delegations`), P1-4 메인 검토 게이트(판정만, opt-in
+   `AIP_SUPERVISOR_REVIEW_GATE`, fail-open). **라이브 실측(로컬 MLX)**: 멀티도메인 2위임 병렬(벽시계=max 10.8s,
+   순차였으면 15.5s), 핸드오프 passthrough 54.7s, sticky 연속 2.0s, deny 10ms, review 판정 트레이스 노출.
+   관측: 4B 리뷰어의 note 텍스트가 판정 bool과 모순되는 사례 있음(판정은 bool만 사용— note는 참고용).
 5. **Phase 3**: 오케스트레이터(chatbot_id 미지정)를 Supervisor로 통합 — 라우팅=1개 위임의 특수케이스로 흡수.
 
 각 Phase는 직접 모드 회귀 없음을 e2e로 검증(외부 서비스 단일 챗봇 시나리오 필수 통과).
