@@ -248,6 +248,9 @@ async def test_chat_stream_supervisor_emits_initial_trace_and_request_log(monkey
     assert entry.response_preview == "답변"
     assert entry.response_id
     assert entry.user_id == "u1"
+    # 레이어별 처리시간 — 레거시 경로와 동일하게 trace 요약을 영속화
+    assert entry.latency_breakdown is not None
+    assert "request_id" in entry.latency_breakdown
 
 
 @pytest.mark.asyncio
@@ -277,6 +280,9 @@ async def test_chat_supervisor_nonstream_enqueues_request_log(monkeypatch):
     assert entry.status_code == 200
     assert entry.response_preview == "종합 답변"
     assert entry.response_id == resp.response_id
+    assert entry.latency_breakdown is not None
+    # supervise에 trace가 전달돼 위임 서브 실행이 레이어 타이밍을 기록할 수 있다
+    assert supervisor.supervise.await_args.kwargs.get("trace") is not None
 
 
 @pytest.mark.asyncio
@@ -303,3 +309,62 @@ async def test_chat_supervisor_nonstream_logs_500_on_error(monkeypatch):
     assert len(captured) == 1
     assert captured[0].status_code == 500
     assert captured[0].error_code == "supervisor_error"
+
+
+@pytest.mark.asyncio
+async def test_chat_nonstream_records_nonzero_latency(monkeypatch):
+    """비스트리밍 /chat의 latency_ms가 0으로 고정되지 않는다 (latency_timer 순서 버그 회귀).
+
+    기존에는 latency_timer의 elapsed_ms가 컨텍스트 종료 시점에 계산되는데
+    로그 enqueue가 안쪽 finally라 항상 초기값 0을 읽었다.
+    """
+    user_ctx = _make_user_ctx()
+    state = _make_state(supervisor=None)  # supervisor 미배선 → 레거시 직접 경로
+    state.agent = AsyncMock()
+    state.session_memory.add_turn = AsyncMock()
+    state.profile_store = AsyncMock()
+    state.profile_store.get.return_value = None
+    state.request_log_service = MagicMock()
+    state.response_cache_service = None
+    captured = _capture_enqueue(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+    monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=user_ctx))
+    monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+    # 가짜 시계: 호출마다 0.1초 전진 → elapsed가 반드시 양수
+    fake_now = {"t": 100.0}
+
+    def fake_monotonic():
+        fake_now["t"] += 0.1
+        return fake_now["t"]
+
+    monkeypatch.setattr(chat_module.time, "monotonic", fake_monotonic)
+
+    from src.gateway.routes.helpers import _ChatSetup
+    from src.domain.agent_context import AgentContext
+    from src.observability.trace_logger import RequestTrace
+    from src.observability.logging import RequestContext, request_context
+
+    real_ctx_token = request_context.set(RequestContext(
+        request_id="r1", session_id="s1", profile_id="general-chat", user_id="u1",
+    ))
+    fake_setup = _ChatSetup(
+        session_id="s1",
+        plan=SimpleNamespace(mode=None),
+        context=AgentContext(session_id="s1"),
+        trace=RequestTrace(request_id="r1"),
+        ctx_token=real_ctx_token,
+        profile_id="general-chat",
+    )
+    monkeypatch.setattr(chat_module, "_prepare_chat", AsyncMock(return_value=fake_setup))
+    state.agent.execute.return_value = AgentResponse(answer="답", sources=[])
+
+    req = ChatRequest(question="일반 질문", chatbot_id="general-chat")
+    request = MagicMock()
+    request.client = None
+
+    await chat_module.chat(req, request)
+
+    assert len(captured) == 1
+    assert captured[0].latency_ms > 0

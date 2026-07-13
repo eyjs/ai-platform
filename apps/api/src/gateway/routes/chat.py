@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from src.domain.agent_context import AgentContext
 from src.domain.models import AgentResponse
 from src.gateway.gateway_hooks import (
-    latency_timer, safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
+    safe_enqueue, should_use_cache, try_cache_get, try_cache_put,
 )
 from src.gateway.models import ChatRequest, UserContext
 from src.gateway.routes.helpers import (
@@ -46,7 +46,9 @@ async def _run_supervisor_chat(
     메인(엔트리)이 컨텍스트/세션 turn 기록을 소유한다(§6-5).
 
     주의: `AgentResponse.trace`는 `TraceInfo`만 허용하므로(pydantic), 레이턴시 집계용
-    `RequestTrace`는 `supervise()`에 넘기지 않고 이 함수 로컬에서만 사용한다.
+    `RequestTrace`는 응답에 넣지 않는다. 다만 `supervise(trace=...)`로 전달해
+    위임 서브 실행의 레이어별 처리시간을 기록하고 request_log의
+    latency_breakdown으로만 영속화한다.
     """
     request_id = str(uuid.uuid4())
     session_id = req.session_id or str(uuid.uuid4())
@@ -94,7 +96,9 @@ async def _run_supervisor_chat(
             tenant_id=tenant_id,
         )
 
-        response = await state.supervisor.supervise(req.question, agent_ctx, user_ctx)
+        response = await state.supervisor.supervise(
+            req.question, agent_ctx, user_ctx, trace=trace,
+        )
 
         await state.session_memory.add_turn(session_id, "user", req.question)
         await state.session_memory.add_turn(session_id, "assistant", response.answer)
@@ -122,6 +126,7 @@ async def _run_supervisor_chat(
                     response_id=response_id,
                     client_ip=(request.client.host if request and request.client else None),
                     user_id=getattr(user_ctx, "user_id", None),
+                    latency_breakdown=trace.summary(),
                 ),
             )
         request_context.reset(ctx_token)
@@ -194,7 +199,9 @@ async def _run_supervisor_chat_stream(
 
             response = None
             streamed = False
-            async for event in state.supervisor.supervise_stream(req.question, agent_ctx, user_ctx):
+            async for event in state.supervisor.supervise_stream(
+                req.question, agent_ctx, user_ctx, trace=trace,
+            ):
                 event_type = event["type"]
                 if event_type == "token":
                     yield {"event": "token", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
@@ -248,6 +255,7 @@ async def _run_supervisor_chat_stream(
                         response_id=response_id,
                         client_ip=(request.client.host if request and request.client else None),
                         user_id=getattr(user_ctx, "user_id", None),
+                        latency_breakdown=trace.summary(),
                     ),
                 )
             try:
@@ -290,107 +298,107 @@ async def chat(req: ChatRequest, request: Request):
     response_preview: Optional[str] = None
     profile_for_log: str = ""
 
-    with latency_timer() as timer:
-        try:
-            setup = await _prepare_chat(req, request, user_ctx)
-            profile_for_log = setup.profile_id or ""
+    chat_timer_start = time.monotonic()
+    try:
+        setup = await _prepare_chat(req, request, user_ctx)
+        profile_for_log = setup.profile_id or ""
 
-            profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
-            plan_mode = getattr(setup.plan, "mode", None)
-            mode_str = plan_mode.value if hasattr(plan_mode, "value") else str(plan_mode or "")
-            cacheable = bool(profile) and should_use_cache(profile, mode_str, cache_svc)
+        profile = await state.profile_store.get(setup.profile_id) if setup.profile_id else None
+        plan_mode = getattr(setup.plan, "mode", None)
+        mode_str = plan_mode.value if hasattr(plan_mode, "value") else str(plan_mode or "")
+        cacheable = bool(profile) and should_use_cache(profile, mode_str, cache_svc)
 
-            if cacheable:
-                cached_text = await try_cache_get(
-                    cache_svc, setup.profile_id, mode_str, req.question,
-                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
-                )
-                if cached_text is not None:
-                    cache_hit = True
-                    response_preview = RequestLogEntry.truncate_preview(cached_text)
-                    await state.session_memory.add_turn(setup.session_id, "user", req.question)
-                    await state.session_memory.add_turn(setup.session_id, "assistant", cached_text)
-                    # Task 014: 캐시 응답도 response_id 포함
-                    return AgentResponse(answer=cached_text, response_id=response_id)
+        if cacheable:
+            cached_text = await try_cache_get(
+                cache_svc, setup.profile_id, mode_str, req.question,
+                tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
+            )
+            if cached_text is not None:
+                cache_hit = True
+                response_preview = RequestLogEntry.truncate_preview(cached_text)
+                await state.session_memory.add_turn(setup.session_id, "user", req.question)
+                await state.session_memory.add_turn(setup.session_id, "assistant", cached_text)
+                # Task 014: 캐시 응답도 response_id 포함
+                return AgentResponse(answer=cached_text, response_id=response_id)
 
-            response = await state.agent.execute(
-                question=req.question,
-                plan=setup.plan,
-                session_id=setup.session_id,
-                trace=setup.trace,
-                context=setup.context,
+        response = await state.agent.execute(
+            question=req.question,
+            plan=setup.plan,
+            session_id=setup.session_id,
+            trace=setup.trace,
+            context=setup.context,
+        )
+
+        await state.session_memory.add_turn(setup.session_id, "user", req.question)
+        await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
+
+        if profile and profile.memory_type in ("session", "long"):
+            asyncio.create_task(_save_extracted_memories(
+                state=state,
+                tenant_id=user_ctx.user_id,
+                turns=[
+                    {"role": "user", "content": req.question},
+                    {"role": "assistant", "content": response.answer},
+                ],
+                retention_days=profile.memory_retention_days,
+            ))
+
+        setup.trace.log_summary()
+
+        if response.trace:
+            response.trace.request_id = setup.trace.request_id
+            response.trace.latency_ms = setup.trace.total_ms
+
+        response_preview = RequestLogEntry.truncate_preview(response.answer)
+        # Task 014: finally 에서 request_log 에 기록할 점수 캡처
+        captured_faithfulness_score = response.guardrail_score
+
+        if cacheable and response.answer:
+            await try_cache_put(
+                cache_svc, setup.profile_id, mode_str, req.question, response.answer,
+                tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
             )
 
-            await state.session_memory.add_turn(setup.session_id, "user", req.question)
-            await state.session_memory.add_turn(setup.session_id, "assistant", response.answer)
+        # Task 014: 응답에 response_id 주입 (JSON body)
+        response.response_id = response_id
+        # guardrail_score 는 내부 전달용 — 클라이언트 응답에서 제거
+        response.guardrail_score = None
+        return response
 
-            if profile and profile.memory_type in ("session", "long"):
-                asyncio.create_task(_save_extracted_memories(
-                    state=state,
-                    tenant_id=user_ctx.user_id,
-                    turns=[
-                        {"role": "user", "content": req.question},
-                        {"role": "assistant", "content": response.answer},
-                    ],
-                    retention_days=profile.memory_retention_days,
-                ))
-
-            setup.trace.log_summary()
-
-            if response.trace:
-                response.trace.request_id = setup.trace.request_id
-                response.trace.latency_ms = setup.trace.total_ms
-
-            response_preview = RequestLogEntry.truncate_preview(response.answer)
-            # Task 014: finally 에서 request_log 에 기록할 점수 캡처
-            captured_faithfulness_score = response.guardrail_score
-
-            if cacheable and response.answer:
-                await try_cache_put(
-                    cache_svc, setup.profile_id, mode_str, req.question, response.answer,
-                    tenant_id=user_ctx.tenant_id or state.settings.default_tenant_id,
-                )
-
-            # Task 014: 응답에 response_id 주입 (JSON body)
-            response.response_id = response_id
-            # guardrail_score 는 내부 전달용 — 클라이언트 응답에서 제거
-            response.guardrail_score = None
-            return response
-
-        except HTTPException as he:
-            status_code = he.status_code
-            error_code = f"http_{he.status_code}"
-            raise
-        except Exception as e:
-            status_code = 500
-            error_code = "internal_error"
-            logger.error("chat_error", error=str(e), exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error")
-        finally:
-            if request_log_svc is not None:
-                safe_enqueue(
-                    request_log_svc,
-                    RequestLogEntry(
-                        api_key_id=getattr(user_ctx, "api_key_id", None),
-                        profile_id=profile_for_log or None,
-                        status_code=status_code,
-                        latency_ms=timer["elapsed_ms"],
-                        cache_hit=cache_hit,
-                        error_code=error_code,
-                        request_preview=RequestLogEntry.truncate_preview(req.question),
-                        response_preview=response_preview,
-                        # Task 014: 응답 식별자 + faithfulness 스코어 영속화
-                        response_id=response_id,
-                        faithfulness_score=captured_faithfulness_score,
-                        # Phase 3: 관측성 — IP·user_id·레이어별 처리시간
-                        client_ip=(request.client.host if request.client else None),
-                        user_id=getattr(user_ctx, "user_id", None),
-                        latency_breakdown=(setup.trace.summary() if setup and setup.trace else None),
-                    ),
-                )
-            if setup:
-                request_context.reset(setup.ctx_token)
-            decrement_active()
+    except HTTPException as he:
+        status_code = he.status_code
+        error_code = f"http_{he.status_code}"
+        raise
+    except Exception as e:
+        status_code = 500
+        error_code = "internal_error"
+        logger.error("chat_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if request_log_svc is not None:
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    profile_id=profile_for_log or None,
+                    status_code=status_code,
+                    latency_ms=int((time.monotonic() - chat_timer_start) * 1000),
+                    cache_hit=cache_hit,
+                    error_code=error_code,
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_preview=response_preview,
+                    # Task 014: 응답 식별자 + faithfulness 스코어 영속화
+                    response_id=response_id,
+                    faithfulness_score=captured_faithfulness_score,
+                    # Phase 3: 관측성 — IP·user_id·레이어별 처리시간
+                    client_ip=(request.client.host if request.client else None),
+                    user_id=getattr(user_ctx, "user_id", None),
+                    latency_breakdown=(setup.trace.summary() if setup and setup.trace else None),
+                ),
+            )
+        if setup:
+            request_context.reset(setup.ctx_token)
+        decrement_active()
 
 
 @router.post("/chat/stream")
