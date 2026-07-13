@@ -59,3 +59,26 @@ async def test_http_success_path_unaffected():
     assert out[0]["index"] == 2  # 최고 점수 우선
     assert len(out) == 2
     assert r._fallback_unavailable is False
+
+
+@pytest.mark.asyncio
+async def test_http_rerank_sends_top_n():
+    """[회귀] top_n 미전송 시 서버 기본값(10)이 후보 풀을 자른다 — 항상 명시."""
+    from unittest.mock import AsyncMock, MagicMock
+    from src.infrastructure.providers.reranking.http_reranker import HttpRerankerProvider
+
+    provider = HttpRerankerProvider(base_url="http://reranker.test")
+    captured = {}
+
+    async def fake_post(url, json=None, **kwargs):
+        captured.update(json or {})
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value=[{"index": 0, "score": 1.2}])
+        return resp
+
+    provider._client = MagicMock()
+    provider._client.post = AsyncMock(side_effect=fake_post)
+
+    await provider.rerank("질문", ["문서1", "문서2"], top_k=55)
+    assert captured.get("top_n") == 55

@@ -44,7 +44,13 @@ class HttpRerankerProvider(RerankerProvider):
     ) -> List[dict]:
         response = await self._client.post(
             f"{self._base_url}/rerank",
-            json={"query": query, "texts": documents, "return_text": False},
+            # top_n 미지정 시 서버 기본값(10)으로 응답이 잘려, 후보 풀(50+) 중
+            # 10개만 티어 판정에 도달하던 배선 버그 — 요청한 top_k 를 명시한다
+            # (실사고: rerank_audit 도입 직후 감사 행 10개로 발견).
+            json={
+                "query": query, "texts": documents,
+                "return_text": False, "top_n": top_k,
+            },
         )
         response.raise_for_status()
         raw = response.json()
