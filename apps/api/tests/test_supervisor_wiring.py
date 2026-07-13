@@ -189,3 +189,117 @@ async def test_chat_stream_supervisor_request_calls_supervise_not_prepare_chat_f
     token_events = [e for e in events if e.get("event") == "token"]
     assert len(token_events) == 2  # streamed=True → answer 단일 재방출 없음
     assert any(e.get("event") == "done" for e in events)
+
+
+# --- supervisor 경로 관측성: request_log 기록 + 초기 진행 이벤트 ---
+
+
+def _capture_enqueue(monkeypatch):
+    """chat 모듈의 safe_enqueue를 가로채 RequestLogEntry를 수집한다."""
+    captured: list = []
+    monkeypatch.setattr(
+        chat_module, "safe_enqueue", lambda svc, entry: captured.append(entry),
+    )
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_supervisor_emits_initial_trace_and_request_log(monkeypatch):
+    """스트리밍 supervisor 경로: 첫 이벤트는 즉시 진행 trace, 종료 시 request_log 기록."""
+    import json as json_lib
+
+    user_ctx = _make_user_ctx()
+    supervisor = AsyncMock()
+
+    async def fake_stream(question, ctx, user_ctx_arg, trace=None):
+        yield {"type": "token", "data": "답변"}
+        yield {"type": "done", "data": {
+            "response": AgentResponse(answer="답변", sources=[]),
+            "streamed": True,
+        }}
+
+    supervisor.supervise_stream = fake_stream
+    state = _make_state(supervisor=supervisor)
+    state.request_log_service = MagicMock()
+    captured = _capture_enqueue(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+    monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=user_ctx))
+    monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+    req = ChatRequest(question="가입 나이 알려줘", chatbot_id=None)
+    request = MagicMock()
+    request.client = None
+
+    sse_response = await chat_module.chat_stream(req, request)
+    events = [event async for event in sse_response.body_iterator]
+
+    # 첫 이벤트 = 연결 생존 신호 (첫 토큰까지 무신호 구간 제거)
+    assert events[0]["event"] == "trace"
+    first = json_lib.loads(events[0]["data"])
+    assert first == {"step": "supervisor", "status": "start"}
+
+    # request_log 기록 (기존 관측 공백 해소)
+    assert len(captured) == 1
+    entry = captured[0]
+    assert entry.profile_id == "supervisor"
+    assert entry.status_code == 200
+    assert entry.request_preview == "가입 나이 알려줘"
+    assert entry.response_preview == "답변"
+    assert entry.response_id
+    assert entry.user_id == "u1"
+
+
+@pytest.mark.asyncio
+async def test_chat_supervisor_nonstream_enqueues_request_log(monkeypatch):
+    """비스트리밍 supervisor 경로도 request_log에 남는다."""
+    user_ctx = _make_user_ctx()
+    supervisor = AsyncMock()
+    supervisor.supervise.return_value = AgentResponse(answer="종합 답변", sources=[])
+    state = _make_state(supervisor=supervisor)
+    state.request_log_service = MagicMock()
+    captured = _capture_enqueue(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+    monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=user_ctx))
+    monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+    req = ChatRequest(question="보험 알려줘", chatbot_id="supervisor")
+    request = MagicMock()
+    request.client = None
+
+    resp = await chat_module.chat(req, request)
+
+    assert resp.answer == "종합 답변"
+    assert len(captured) == 1
+    entry = captured[0]
+    assert entry.profile_id == "supervisor"
+    assert entry.status_code == 200
+    assert entry.response_preview == "종합 답변"
+    assert entry.response_id == resp.response_id
+
+
+@pytest.mark.asyncio
+async def test_chat_supervisor_nonstream_logs_500_on_error(monkeypatch):
+    """supervise 예외 시에도 request_log에 500으로 남는다 (무음 실패 금지)."""
+    user_ctx = _make_user_ctx()
+    supervisor = AsyncMock()
+    supervisor.supervise.side_effect = RuntimeError("boom")
+    state = _make_state(supervisor=supervisor)
+    state.request_log_service = MagicMock()
+    captured = _capture_enqueue(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+    monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=user_ctx))
+    monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+    req = ChatRequest(question="보험 알려줘", chatbot_id="supervisor")
+    request = MagicMock()
+    request.client = None
+
+    with pytest.raises(RuntimeError):
+        await chat_module.chat(req, request)
+
+    assert len(captured) == 1
+    assert captured[0].status_code == 500
+    assert captured[0].error_code == "supervisor_error"

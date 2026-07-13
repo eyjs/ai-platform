@@ -37,6 +37,7 @@ router = APIRouter()
 
 async def _run_supervisor_chat(
     req: ChatRequest, state, user_ctx: UserContext,
+    request: Optional[Request] = None,
 ) -> AgentResponse:
     """Supervisor 엔트리 분기(비스트리밍) — Task 002, P0-2.
 
@@ -59,6 +60,12 @@ async def _run_supervisor_chat(
         profile_id=supervisor_id,
         user_id=user_ctx.user_id,
     ))
+    # 관측성: supervisor 경로도 레거시 경로와 동일하게 request_log에 남긴다.
+    request_log_svc = getattr(state, "request_log_service", None)
+    timer_start = time.monotonic()
+    log_status_code = 200
+    log_error_code: Optional[str] = None
+    log_response_preview: Optional[str] = None
     try:
         tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
         await state.session_memory.create_session(
@@ -94,12 +101,36 @@ async def _run_supervisor_chat(
 
         trace.log_summary()
         response.response_id = response_id
+        log_response_preview = RequestLogEntry.truncate_preview(response.answer)
         return response
+    except Exception:
+        log_status_code = 500
+        log_error_code = "supervisor_error"
+        raise
     finally:
+        if request_log_svc is not None:
+            safe_enqueue(
+                request_log_svc,
+                RequestLogEntry(
+                    api_key_id=getattr(user_ctx, "api_key_id", None),
+                    profile_id=supervisor_id,
+                    status_code=log_status_code,
+                    latency_ms=int((time.monotonic() - timer_start) * 1000),
+                    error_code=log_error_code,
+                    request_preview=RequestLogEntry.truncate_preview(req.question),
+                    response_preview=log_response_preview,
+                    response_id=response_id,
+                    client_ip=(request.client.host if request and request.client else None),
+                    user_id=getattr(user_ctx, "user_id", None),
+                ),
+            )
         request_context.reset(ctx_token)
 
 
-async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserContext):
+async def _run_supervisor_chat_stream(
+    req: ChatRequest, state, user_ctx: UserContext,
+    request: Optional[Request] = None,
+):
     """Supervisor 엔트리 분기(스트리밍) — Task 002, P0-2 / 토큰 스트리밍.
 
     `supervise_stream()`이 최종 답변 생성 토큰(단일 위임 passthrough=서브 토큰,
@@ -120,8 +151,21 @@ async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserCon
         user_id=user_ctx.user_id,
     ))
 
+    # 관측성: supervisor 스트리밍 경로도 request_log에 남긴다 (기존 공백).
+    request_log_svc = getattr(state, "request_log_service", None)
+    timer_start = time.monotonic()
+
     async def event_generator():
+        log_status_code = 200
+        log_error_code: Optional[str] = None
+        log_response_preview: Optional[str] = None
         try:
+            # 즉시 진행 이벤트 방출 — supervisor 경로는 첫 토큰까지 수십 초간
+            # 무신호라 화면이 죽은 것처럼 보인다. 연결 생존 신호를 먼저 보낸다.
+            yield {"event": "trace", "data": json.dumps(
+                {"step": "supervisor", "status": "start"}, ensure_ascii=False,
+            )}
+
             tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
             await state.session_memory.create_session(
                 session_id=session_id,
@@ -183,7 +227,29 @@ async def _run_supervisor_chat_stream(req: ChatRequest, state, user_ctx: UserCon
             }, ensure_ascii=False)}
 
             trace.log_summary()
+            log_response_preview = RequestLogEntry.truncate_preview(response.answer)
+        except Exception as stream_err:
+            log_status_code = 500
+            log_error_code = "supervisor_stream_error"
+            logger.error("supervisor_stream_error", error=str(stream_err), exc_info=True)
+            raise
         finally:
+            if request_log_svc is not None:
+                safe_enqueue(
+                    request_log_svc,
+                    RequestLogEntry(
+                        api_key_id=getattr(user_ctx, "api_key_id", None),
+                        profile_id=supervisor_id,
+                        status_code=log_status_code,
+                        latency_ms=int((time.monotonic() - timer_start) * 1000),
+                        error_code=log_error_code,
+                        request_preview=RequestLogEntry.truncate_preview(req.question),
+                        response_preview=log_response_preview,
+                        response_id=response_id,
+                        client_ip=(request.client.host if request and request.client else None),
+                        user_id=getattr(user_ctx, "user_id", None),
+                    ),
+                )
             try:
                 request_context.reset(ctx_token)
             except ValueError:
@@ -203,7 +269,7 @@ async def chat(req: ChatRequest, request: Request):
         # Supervisor 엔트리 분기(task-002, §0-2) — 이하 직접 모드/오케스트레이터 경로는 타지 않는다.
         increment_active()
         try:
-            return await _run_supervisor_chat(req, state, user_ctx)
+            return await _run_supervisor_chat(req, state, user_ctx, request)
         finally:
             decrement_active()
 
@@ -338,7 +404,7 @@ async def chat_stream(req: ChatRequest, request: Request):
         # increment는 여기서, decrement는 제너레이터 종료 시점(finally)에서 수행한다
         # (기존 /chat/stream과 동일하게 활성 카운트가 스트림 전체 수명을 감싸도록).
         increment_active()
-        return await _run_supervisor_chat_stream(req, state, user_ctx)
+        return await _run_supervisor_chat_stream(req, state, user_ctx, request)
 
     increment_active()
 
