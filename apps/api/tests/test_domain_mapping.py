@@ -162,6 +162,7 @@ def _make_service() -> KmsSyncService:
     )
     svc._download_file = AsyncMock(return_value=b"%PDF-1.4 stub")  # type: ignore[method-assign]
     svc._delete_by_external_id = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    svc._delete_stale_by_external_id = AsyncMock(return_value=0)  # type: ignore[method-assign]
     svc._set_external_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
     # 미적재 상태(fresh ingest)로 고정 — 매핑 분기만 검증. 재태깅/스킵 분기는 별도 테스트.
     svc._get_existing = AsyncMock(return_value=None)  # type: ignore[method-assign]

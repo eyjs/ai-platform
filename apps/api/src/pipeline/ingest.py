@@ -198,14 +198,27 @@ class IngestPipeline:
 
         async def _embed_one(idx: int, batch: List[str]) -> List[List[float]]:
             async with sem:
-                try:
-                    return await self._embedder.embed_batch(batch)
-                except Exception as e:
-                    # 실패 원인을 배치 컨텍스트와 함께 표면화 (last_error 공백 방지)
-                    raise RuntimeError(
-                        f"embed_batch 실패 (배치 {idx + 1}/{len(batches)}, "
-                        f"{len(batch)}개 텍스트): {type(e).__name__}: {e}"
-                    ) from e
+                # 배치 단위 재시도: 대형 문서(수십 배치)에서 배치 하나의 일시
+                # 타임아웃이 전체 재파싱+재임베딩(잡 재시도)으로 번지는 것을 막는다
+                # (실사고: 25배치 중 10번째 ReadTimeout → 잡 3회 소진).
+                last_exc: Exception | None = None
+                for attempt in range(3):
+                    try:
+                        return await self._embedder.embed_batch(batch)
+                    except Exception as e:
+                        last_exc = e
+                        if attempt < 2:
+                            logger.warning(
+                                "embed_batch_retry",
+                                batch=idx + 1, total=len(batches),
+                                attempt=attempt + 1, error=f"{type(e).__name__}: {e}",
+                            )
+                            await asyncio.sleep(2 * (attempt + 1))
+                # 실패 원인을 배치 컨텍스트와 함께 표면화 (last_error 공백 방지)
+                raise RuntimeError(
+                    f"embed_batch 실패 (배치 {idx + 1}/{len(batches)}, "
+                    f"{len(batch)}개 텍스트): {type(last_exc).__name__}: {last_exc}"
+                ) from last_exc
 
         results = await asyncio.gather(
             *[_embed_one(i, b) for i, b in enumerate(batches)]

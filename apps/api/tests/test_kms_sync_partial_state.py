@@ -77,6 +77,7 @@ def _make_sync(chunk_count: int):
     })
     svc._download_file = AsyncMock(return_value=b"%PDF-fake")
     svc._delete_by_external_id = AsyncMock(return_value=1)
+    svc._delete_stale_by_external_id = AsyncMock(return_value=0)
     svc._set_external_id = AsyncMock()
     svc._post_parse_result = AsyncMock()
 
@@ -108,3 +109,23 @@ async def test_chunked_existing_still_skips():
     )
     pipeline.ingest_text.assert_not_awaited()
     assert result["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_reingest_does_not_delete_before_success():
+    """재적재는 성공 전에 기존 데이터를 삭제하지 않는다 (유실 방지 계약).
+
+    실사고: reprocess 재동기화가 선삭제 후 임베딩 타임아웃 → 1,591청크 유실.
+    선삭제(_delete_by_external_id) 금지, 성공 후 옛 행 정리(_delete_stale)만 허용.
+    """
+    svc, pipeline = _make_sync(chunk_count=0)
+    svc._delete_by_external_id = AsyncMock(return_value=0)
+    svc._delete_stale_by_external_id = AsyncMock(return_value=0)
+
+    await svc.sync_document(
+        "kms-1", data={"domainCodes": ["보험"]}, event="document.file_uploaded",
+    )
+
+    svc._delete_by_external_id.assert_not_awaited()   # 선삭제 금지
+    pipeline.ingest_text.assert_awaited_once()
+    svc._delete_stale_by_external_id.assert_awaited_once()  # 성공 후 정리만

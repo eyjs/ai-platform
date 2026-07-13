@@ -160,8 +160,11 @@ class KmsSyncService:
             logger.warning("kms_file_download_failed", document_id=document_id)
             return {"status": "skipped", "reason": "file download failed"}
 
-        # 기존 동기화 데이터 삭제 (external_id 기준)
-        await self._delete_by_external_id(document_id)
+        # 주의: 기존 데이터를 여기서 미리 삭제하지 않는다 — 재적재(파싱+임베딩)가
+        # 실패하면 기존 서빙 청크까지 유실된다(실사고: reprocess 이벤트 재동기화가
+        # 임베딩 ReadTimeout으로 3회 소진 → 1,591청크 문서가 빈손). ingest_text 가
+        # file_hash upsert + 임베딩 성공 후 청크 교체로 동일 콘텐츠를 원자적으로
+        # 처리하고, 콘텐츠가 바뀐 경우의 옛 문서 행은 성공 후에 정리한다(아래).
 
         # IngestPipeline으로 처리
         metadata = {
@@ -185,6 +188,16 @@ class KmsSyncService:
         # external_id 설정 (insert_document에서 이미 처리되지만 명시적 업데이트)
         if result.get("document_id"):
             await self._set_external_id(result["document_id"], document_id)
+            # 콘텐츠 변경(file_hash 상이)으로 새 문서 행이 생긴 경우에만 옛 행 정리 —
+            # 재적재 성공이 확정된 뒤에 지우므로 실패 시 기존 서빙이 유지된다.
+            stale = await self._delete_stale_by_external_id(
+                document_id, keep_doc_id=result["document_id"],
+            )
+            if stale:
+                logger.info(
+                    "kms_sync_stale_cleaned",
+                    document_id=document_id, stale_chunks=stale,
+                )
 
         # 파싱결과(조립 MD)를 KMS 로 콜백 — 원본↔MD 비교 표시용(Path B).
         # markdown 은 job 큐 로그에 싣지 않도록 pop 후 별도 전송한다.
@@ -454,6 +467,35 @@ class KmsSyncService:
             # 연결 실패/타임아웃/서버 절단(재배포 순간 등) = transient
             logger.warning("docforge_vlm_transient_error", error=str(e))
             raise VlmTransientError(str(e)) from e
+
+    async def _delete_stale_by_external_id(
+        self, external_id: str, keep_doc_id: str,
+    ) -> int:
+        """같은 external_id 의 옛 문서 행(콘텐츠 변경으로 대체됨)을 정리한다.
+
+        keep_doc_id(방금 재적재 성공한 행)는 보존 — 재적재 성공 후에만 호출된다.
+        """
+        if not self._store.pool:
+            return 0
+        import uuid as _uuid
+        async with self._store.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    "SELECT id FROM documents WHERE external_id = $1 AND id != $2",
+                    external_id, _uuid.UUID(keep_doc_id),
+                )
+                if not rows:
+                    return 0
+                stale_ids = [row["id"] for row in rows]
+                result = await conn.execute(
+                    "DELETE FROM document_chunks WHERE document_id = ANY($1::uuid[])",
+                    stale_ids,
+                )
+                chunk_count = int(result.split()[-1])
+                await conn.execute(
+                    "DELETE FROM documents WHERE id = ANY($1::uuid[])", stale_ids,
+                )
+        return chunk_count
 
     async def _delete_by_external_id(self, external_id: str) -> int:
         """external_id로 문서와 청크를 삭제한다."""
