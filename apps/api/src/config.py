@@ -100,10 +100,15 @@ class Settings(BaseSettings):
     embed_max_batch_size: int = 64            # 대형 문서도 배치당 최대 64 (서버 부하 완화)
     # 임베딩 서버로의 동시 배치 요청 상한. 대형 문서(수천 청크)에서 모든 배치를
     # 동시에 발사하면 단일 임베딩 서버가 교착(CLOSE_WAIT)되므로 제한한다.
-    embed_concurrency: int = 3
+    # 로컬 MLX 단일 서버 기준 2가 안전 상한 — 3이상이면 배치당 지연이 타임아웃을
+    # 넘겨 ReadTimeout→서킷 오픈 연쇄로 대형 문서 적재가 실패한다(실사고).
+    embed_concurrency: int = 2
 
     # 임베딩 프로바이더
-    embedding_timeout: float = 30.0           # HTTP 타임아웃 (초)
+    # 64텍스트 배치가 로컬 MLX 서버에서 부하 시 30초를 초과한다(실사고:
+    # 1,599청크 문서 25배치 중 후반 배치 ReadTimeout 연쇄) — 여유 있게 잡고
+    # 진짜 장애는 connect_timeout 과 서킷브레이커가 fast-fail 로 잡는다.
+    embedding_timeout: float = 120.0          # HTTP 읽기 타임아웃 (초)
     embedding_connect_timeout: float = 5.0    # 커넥션 타임아웃 (초)
 
     # 동시성
