@@ -112,7 +112,9 @@ class KmsSyncService:
         # ── 이미 적재됨 & 콘텐츠 불변(파일 재업로드 아님) → 재임베딩 없이 메타만 갱신 ──
         # 배치(placement)=도메인 재태깅, 보안등급 변경=청크까지 전파(다운그레이드 누출 방지).
         # domain·security 둘 다 그대로면 스킵(멱등). 파일 재업로드는 아래 (재)적재로 간다.
-        if existing and event != "document.file_uploaded":
+        # 단, 청크 0개는 "적재됨"이 아니다 — 문서 행만 남은 부분 상태(실사고: 파싱
+        # 결과의 NUL 바이트로 청크 insert 실패)는 (재)적재로 내려보내 복구한다.
+        if existing and existing.get("chunk_count", 0) > 0 and event != "document.file_uploaded":
             target_domain = resolved_domain or existing["domain_code"]
             unchanged = (
                 target_domain == existing["domain_code"]
@@ -525,7 +527,12 @@ class KmsSyncService:
             return None
         async with self._store.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, domain_code, security_level FROM documents WHERE external_id = $1",
+                """
+                SELECT id, domain_code, security_level,
+                       (SELECT count(*) FROM document_chunks c
+                        WHERE c.document_id = documents.id) AS chunk_count
+                FROM documents WHERE external_id = $1
+                """,
                 external_id,
             )
         return (
@@ -533,6 +540,7 @@ class KmsSyncService:
                 "id": row["id"],
                 "domain_code": row["domain_code"],
                 "security_level": row["security_level"],
+                "chunk_count": row["chunk_count"],
             }
             if row
             else None

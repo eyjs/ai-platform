@@ -251,7 +251,7 @@ class TestEmbedPlacementSeparation:
         # 이미 holding 으로 적재된 문서 + 배치(document.updated) → 재태깅만, ingest X
         svc = _make_service()
         svc._get_existing = AsyncMock(  # type: ignore[method-assign]
-            return_value={"id": "aip-1", "domain_code": UNPLACED_DOMAIN, "security_level": "PUBLIC"}
+            return_value={"id": "aip-1", "domain_code": UNPLACED_DOMAIN, "security_level": "PUBLIC", "chunk_count": 10}
         )
         svc._retag_and_refresh = AsyncMock(return_value=3)  # type: ignore[method-assign]
         data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
@@ -272,7 +272,7 @@ class TestEmbedPlacementSeparation:
             return_value={"fileName": "약관.pdf", "fileType": "pdf", "securityLevel": "CONFIDENTIAL"}
         )
         svc._get_existing = AsyncMock(  # type: ignore[method-assign]
-            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC", "chunk_count": 10}
         )
         svc._retag_and_refresh = AsyncMock(return_value=5)  # type: ignore[method-assign]
         data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
@@ -288,7 +288,7 @@ class TestEmbedPlacementSeparation:
         # 이미 배치된 문서 + 도메인·보안등급 모두 불변 → 스킵(재임베딩·재태깅 X, 멱등)
         svc = _make_service()
         svc._get_existing = AsyncMock(  # type: ignore[method-assign]
-            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC", "chunk_count": 10}
         )
         svc._retag_and_refresh = AsyncMock(return_value=0)  # type: ignore[method-assign]
         data = {"domainCodes": ["DB-DAMAGE"], "categoryPath": ["DB-DAMAGE", "자동차보험", "개인용"]}
@@ -304,7 +304,7 @@ class TestEmbedPlacementSeparation:
         # 이미 적재된 문서 + file_uploaded(콘텐츠 변경) → 재적재, 기존 도메인 보존
         svc = _make_service()
         svc._get_existing = AsyncMock(  # type: ignore[method-assign]
-            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC"}
+            return_value={"id": "aip-1", "domain_code": "자동차보험", "security_level": "PUBLIC", "chunk_count": 10}
         )
         data: dict = {}  # 재업로드 이벤트엔 도메인 없음 → 기존값 보존
 

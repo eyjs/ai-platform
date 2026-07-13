@@ -68,6 +68,14 @@ class IngestPipeline:
         if not content or not content.strip():
             raise ValueError("content or file_bytes is required")
 
+        # PostgreSQL TEXT 는 NUL(0x00)을 허용하지 않는다 — OCR 경유 파싱본에
+        # 섞여 들어오면 청크 insert 가 통째로 실패한다(실사고: 6.4MB 약관 PDF).
+        # 시스템 경계에서 소독한다.
+        if "\x00" in content:
+            nul_count = content.count("\x00")
+            content = content.replace("\x00", "")
+            logger.warning("content_nul_bytes_stripped", title=title, count=nul_count)
+
         file_hash = hashlib.sha256(content.encode()).hexdigest()
 
         # 1. 문서 레코드 생성
