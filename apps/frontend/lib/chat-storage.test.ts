@@ -66,6 +66,51 @@ describe('loadSessions()', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
     expect(loadSessions()).toHaveLength(2);
   });
+
+  it('잔존 isStreaming 메시지를 마감 처리한다 (빈 내용 → 에러 표시)', () => {
+    const sessions: ChatSession[] = [
+      makeSession({
+        messages: [
+          makeMessage({ id: 'u1', role: 'user', content: '질문' }),
+          makeMessage({
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            isStreaming: true,
+          }),
+        ],
+      }),
+    ];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+
+    const [loaded] = loadSessions();
+    const assistant = loaded.messages[1];
+    expect(assistant.isStreaming).toBe(false);
+    expect(assistant.isError).toBe(true);
+    expect(assistant.errorMessage).toBe('응답을 받지 못했습니다.');
+  });
+
+  it('잔존 isStreaming이라도 부분 내용이 있으면 내용을 보존한다', () => {
+    const sessions: ChatSession[] = [
+      makeSession({
+        messages: [
+          makeMessage({
+            id: 'a1',
+            role: 'assistant',
+            content: '부분 답변',
+            isStreaming: true,
+          }),
+        ],
+      }),
+    ];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+
+    const [loaded] = loadSessions();
+    const assistant = loaded.messages[0];
+    expect(assistant.isStreaming).toBe(false);
+    expect(assistant.isError).toBe(false);
+    expect(assistant.content).toBe('부분 답변');
+  });
 });
 
 describe('saveSessions()', () => {
