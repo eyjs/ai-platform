@@ -14,6 +14,7 @@ from src.gateway.routes import (
     classify,
     feedback,
     ingest,
+    inspect,
     public,
     session,
     workflow,
@@ -34,5 +35,7 @@ gateway_router.include_router(workflow.router)
 gateway_router.include_router(admin.router)
 gateway_router.include_router(feedback.router)
 gateway_router.include_router(session.router)
+# 역방향 분석 (청크/문서 역조회 — 분할 후 신설, 인벤토리 끝에 추가)
+gateway_router.include_router(inspect.router)
 
 __all__ = ["gateway_router", "APP_VERSION", "wait_for_pending_requests"]

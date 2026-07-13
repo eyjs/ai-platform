@@ -16,13 +16,18 @@ async def rerank_3tier(
     query: str,
     candidates: list[dict],
     top_k: int,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     """2-tier 리랭킹 + 스케일 정규화 융합 스코어.
 
     C8 수정: 벡터(RRF) 점수는 ~0.01 스케일, 리랭커는 0~1 스케일이라 0.7/0.3을
     그대로 가중합하면 벡터 항(0.3 × ~0.01 ≈ 0.003)이 0으로 묻혀 "30% 벡터"가
     허구가 된다. 후보 집합 내 min-max로 벡터 점수를 [0,1]로 정규화한 뒤 융합해
     벡터 신호가 실제로 ranking에 기여하게 한다.
+
+    Returns:
+        (results, audit): results 는 채택 top_k. audit 은 **전 후보**의 판정
+        기록(fused 내림차순) — "왜 이 청크가 채택/탈락했나"의 역방향 분석 근거.
+        audit fate: selected(채택) / capacity(티어 통과·정원 밖) / tier_fail(티어 미달)
     """
     # 1. 슬라이딩 윈도우
     documents = [_sliding_window(c["content"]) for c in candidates]
@@ -77,6 +82,30 @@ async def rerank_3tier(
         output=len(results),
     )
 
+    # 전 후보 판정 감사 — 채택/탈락과 그 사유를 후보 단위로 남긴다 (역방향 분석)
+    selected_ids = {id(r) for r in results}
+    audit = []
+    for r in scored:
+        fused = r["fused_score"]
+        tier = 1 if fused >= PREFERRED_MIN_SCORE else (
+            2 if fused >= FALLBACK_MIN_SCORE else 0
+        )
+        if id(r) in selected_ids:
+            fate = "selected"
+        elif tier > 0:
+            fate = "capacity"   # 티어는 통과했으나 top_k 정원 밖
+        else:
+            fate = "tier_fail"  # FALLBACK_MIN_SCORE 미달
+        audit.append({
+            "chunk_id": r["data"].get("chunk_id"),
+            "document_id": r["data"].get("document_id"),
+            "rerank_score": round(r["rerank_score"], 4),
+            "vector_score": round(r["vector_score"], 4),
+            "fused": round(fused, 4),
+            "tier": tier,
+            "fate": fate,
+        })
+
     return [
         {
             **r["data"],
@@ -85,7 +114,7 @@ async def rerank_3tier(
             "vector_score": r["vector_score"],
         }
         for r in results
-    ]
+    ], audit
 
 
 def _sliding_window(text: str) -> str:

@@ -71,6 +71,7 @@ async def expand_neighbors(
                 key = (doc_id, nb["chunk_index"])
                 parent_score = index_score.get(key, 0.0)
                 nb["score"] = parent_score * NEIGHBOR_SCORE_DECAY
+                nb["origin"] = "neighbor"  # 역방향 분석: 이웃확장으로 합류한 청크
                 expanded.append(nb)
                 seen.add(nb["chunk_id"])
 

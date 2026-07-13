@@ -23,7 +23,7 @@ async def test_tier1_high_quality():
         {"index": 2, "score": 0.3},
     ]
     candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
     # vec min-max: a=1.0, b=0.5, c=0.0
     # a: 0.7*0.9 + 0.3*1.0 = 0.93 (Tier1)
     # b: 0.7*0.7 + 0.3*0.5 = 0.64 (Tier1)
@@ -43,7 +43,7 @@ async def test_tier2_fallback():
         {"index": 2, "score": 0.05},
     ]
     candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
     # vec min-max: a=1.0, b=0.5, c=0.0
     # a: 0.7*0.28 + 0.3 = 0.496 (Tier2, <0.5)
     # b: 0.7*0.20 + 0.15 = 0.29 (Tier2)
@@ -61,7 +61,7 @@ async def test_all_irrelevant_returns_empty():
     reranker.rerank.return_value = [{"index": i, "score": 0.05} for i in range(5)]
     # 모두 동일 RRF → 벡터 변별력 없음(vspan=0) → fused = 0.7*0.05 = 0.035 < 0.25
     candidates = [_chunk(str(i), 0.01) for i in range(5)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
     assert result == []
 
 
@@ -78,7 +78,7 @@ async def test_vector_signal_breaks_ties():
         {"index": 1, "score": 0.5},  # 동점
     ]
     candidates = [_chunk("a", 0.016), _chunk("b", 0.008)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
     # a: 0.7*0.5 + 0.3*1.0 = 0.65, b: 0.7*0.5 + 0.3*0.0 = 0.35
     assert result[0]["chunk_id"] == "a"
     # 벡터 신호가 0으로 묻히지 않고 실질적 차이를 만든다 (구버그면 ~0.0024)
@@ -93,7 +93,7 @@ async def test_top_k_limits_output():
         {"index": i, "score": 0.9} for i in range(10)
     ]
     candidates = [_chunk(str(i), 0.9) for i in range(10)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=3)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=3)
     assert len(result) == 3
 
 
@@ -117,7 +117,49 @@ async def test_fused_score_single_candidate():
     reranker = AsyncMock()
     reranker.rerank.return_value = [{"index": 0, "score": 0.8}]
     candidates = [_chunk("a", 0.012)]
-    result = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
     assert result[0]["score"] == pytest.approx(0.7 * 0.8)
     assert result[0]["vector_score"] == pytest.approx(0.0)
     assert result[0]["rerank_score"] == pytest.approx(0.8)
+
+
+@pytest.mark.asyncio
+async def test_audit_records_every_candidate_fate():
+    """[역방향 분석] 전 후보의 판정(fate)이 감사에 남는다 — 탈락 사유 추적."""
+    from src.tools.internal.reranker_pipeline import rerank_3tier
+    reranker = AsyncMock()
+    reranker.rerank.return_value = [
+        {"index": 0, "score": 0.9},   # tier1, 채택
+        {"index": 1, "score": 0.7},   # tier1, 채택
+        {"index": 2, "score": 0.05},  # tier_fail
+    ]
+    candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
+    result, audit = await rerank_3tier(reranker, "질문", candidates, top_k=2)
+
+    assert len(audit) == 3  # 채택 여부와 무관하게 전 후보 기록
+    by_id = {a["chunk_id"]: a for a in audit}
+    assert by_id["a"]["fate"] == "selected"
+    assert by_id["a"]["tier"] == 1
+    assert by_id["c"]["fate"] == "tier_fail"
+    assert by_id["c"]["tier"] == 0
+    # fused 내림차순 정렬
+    fused = [a["fused"] for a in audit]
+    assert fused == sorted(fused, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_audit_capacity_fate():
+    """티어는 통과했으나 top_k 정원 밖 → capacity."""
+    from src.tools.internal.reranker_pipeline import rerank_3tier
+    reranker = AsyncMock()
+    reranker.rerank.return_value = [
+        {"index": 0, "score": 0.9},
+        {"index": 1, "score": 0.8},
+        {"index": 2, "score": 0.75},
+    ]
+    candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
+    result, audit = await rerank_3tier(reranker, "질문", candidates, top_k=2)
+
+    assert len(result) == 2
+    by_id = {a["chunk_id"]: a for a in audit}
+    assert by_id["c"]["fate"] == "capacity"

@@ -30,13 +30,22 @@ TRACE_SNIPPET_CHARS = 200
 
 
 def _chunk_snippet(r: dict) -> dict:
-    """트레이스용 청크 요약 (메타 + 200자 스니펫). 전문은 chunk_id로 조회."""
-    return {
+    """트레이스용 청크 요약 (메타 + 200자 스니펫). 전문은 chunk_id로 조회.
+
+    출신(origin)·귀속(found_by)을 함께 실어 "이 청크가 어떻게 후보에
+    들어왔나"를 역추적 가능하게 한다.
+    """
+    snippet = {
         "chunk_id": r.get("chunk_id"),
         "document_id": r.get("document_id"),
         "score": round(r.get("score", 0.0), 4),
         "snippet": (r.get("content") or "")[:TRACE_SNIPPET_CHARS],
     }
+    if r.get("found_by"):
+        snippet["found_by"] = r["found_by"]
+    if r.get("origin"):
+        snippet["origin"] = r["origin"]
+    return snippet
 
 # Progressive Disclosure 상수
 DEFAULT_DISCLOSURE_LEVEL = 2
@@ -197,6 +206,8 @@ class RAGSearchTool:
         # 멀티쿼리 하이브리드 검색 + 합산
         if probe_candidates is not None and len(queries) == 1:
             candidates = probe_candidates
+            for c in candidates:
+                c["found_by"] = ["원본"]
         else:
             candidates = await self._multi_query_search(
                 queries, embeddings, scope,
@@ -223,9 +234,10 @@ class RAGSearchTool:
         # 리랭킹은 "정제" 단계다 — 실패해도 이미 성공한 검색(candidates)을 폐기하면 안 된다.
         # 어떤 reranker 구현/융합 로직이 raise 하든 벡터 점수 순 top_k 로 degrade 하여
         # 검색 레이어의 가용성을 보장한다(provider 레벨 degrade와 별개의 심층 방어).
+        rerank_audit: list[dict] = []
         if self._reranker and len(candidates) > top_k:
             try:
-                results = await rerank_3tier(
+                results, rerank_audit = await rerank_3tier(
                     self._reranker, query, candidates, top_k,
                 )
                 trace_detail["reranked_by"] = "reranker_3tier"
@@ -251,9 +263,19 @@ class RAGSearchTool:
         #      절단 전용이다. 절대 임계 노이즈 컷은 rerank_3tier의 tier가 담당한다.
         results = filter_noise(results)
 
+        # 노이즈컷 탈락자를 감사에 반영 — "채택됐다가 마지막에 잘린" 청크 식별
+        if len(results) < n_rerank_out and rerank_audit:
+            surviving = {r.get("chunk_id") for r in results}
+            for entry in rerank_audit:
+                if entry["fate"] == "selected" and entry["chunk_id"] not in surviving:
+                    entry["fate"] = "noise_cut"
+
         # L5. 결과 가드
         results = guard_results(results)
         trace_detail["reranked"] = [_chunk_snippet(r) for r in results]
+        if rerank_audit:
+            # 전 후보 판정 기록 (fused 내림차순, 상한 CANDIDATE_POOL_SIZE)
+            trace_detail["rerank_audit"] = rerank_audit[:CANDIDATE_POOL_SIZE]
         # 파이프라인 단계별 관측 — "각 레이어에서 무엇이 얼마나 걸러졌나"
         trace_detail["stages"] = {
             "expansion": {**probe_meta, "queries": len(queries)},
@@ -414,14 +436,20 @@ class RAGSearchTool:
         # 기존 MAX는 여러 변형이 함께 찾아낸 청크(강한 관련성 신호)를 한 변형만 찾은
         # 청크와 동일 취급해 쿼리확장 효과를 알고리즘적으로 상쇄시켰다. RRF는 본래
         # 여러 랭킹의 기여를 합산하도록 설계된 기법이므로 SUM이 정합한다.
+        # found_by: 어느 쿼리(원본/변형N)가 이 청크를 찾았는지 귀속 — 역방향 분석용.
         merged: dict[str, dict] = {}
-        for results in all_results_lists:
+        for qi, results in enumerate(all_results_lists):
+            label = "원본" if qi == 0 else f"변형{qi}"
             for r in results:
                 cid = r["chunk_id"]
                 if cid in merged:
-                    merged[cid] = {**merged[cid], "score": merged[cid]["score"] + r["score"]}
+                    merged[cid] = {
+                        **merged[cid],
+                        "score": merged[cid]["score"] + r["score"],
+                        "found_by": [*merged[cid].get("found_by", []), label],
+                    }
                 else:
-                    merged[cid] = dict(r)
+                    merged[cid] = {**r, "found_by": [label]}
 
         return sorted(
             merged.values(),

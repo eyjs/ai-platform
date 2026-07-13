@@ -217,6 +217,111 @@ class VectorStore(VectorSearchMixin, AbstractVectorStore):
             )
         return row["cnt"] if row else 0
 
+    # -- 역방향 분석 (청크 → 문서/섹션/전문 역추적) --
+
+    async def get_chunk_detail(self, chunk_id: str) -> dict | None:
+        """청크 역조회 — 전문 + 섹션 메타 + 소속 문서 정보.
+
+        트레이스에 남은 chunk_id 로 "이 근거가 어디서 왔나"를 복원하는
+        역방향 분석의 진입점 (관리자 청크 뷰어).
+        """
+        if not self._pool:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT c.id, c.document_id, c.content, c.chunk_index,
+                       c.metadata, c.domain_code, c.security_level, c.token_count,
+                       d.title, d.file_name, d.external_id, d.source_url,
+                       (SELECT count(*) FROM document_chunks c2
+                        WHERE c2.document_id = c.document_id) AS total_chunks
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.id = $1
+                """,
+                uuid.UUID(chunk_id),
+            )
+        if not row:
+            return None
+        return {
+            "chunk_id": str(row["id"]),
+            "document_id": str(row["document_id"]),
+            "content": row["content"],
+            "chunk_index": row["chunk_index"],
+            "token_count": row["token_count"],
+            "metadata": self._parse_chunk_metadata(row),
+            "domain_code": row["domain_code"],
+            "security_level": row["security_level"],
+            "document": {
+                "title": row["title"],
+                "file_name": row["file_name"],
+                "external_id": row["external_id"],
+                "source_url": row["source_url"],
+                "total_chunks": row["total_chunks"],
+            },
+        }
+
+    async def get_document_meta(self, document_id: str) -> dict | None:
+        """문서 메타 + 청크 수 (원본 문서 뷰어 헤더)."""
+        if not self._pool:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT d.id, d.title, d.file_name, d.domain_code, d.security_level,
+                       d.external_id, d.source_url, d.created_at,
+                       (SELECT count(*) FROM document_chunks c
+                        WHERE c.document_id = d.id) AS total_chunks
+                FROM documents d WHERE d.id = $1
+                """,
+                uuid.UUID(document_id),
+            )
+        if not row:
+            return None
+        return {
+            "document_id": str(row["id"]),
+            "title": row["title"],
+            "file_name": row["file_name"],
+            "domain_code": row["domain_code"],
+            "security_level": row["security_level"],
+            "external_id": row["external_id"],
+            "source_url": row["source_url"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "total_chunks": row["total_chunks"],
+        }
+
+    async def get_document_chunks_page(
+        self, document_id: str, offset: int = 0, limit: int = 200,
+    ) -> list[dict]:
+        """문서의 청크를 chunk_index 순으로 페이지 조회 (원본 복원 뷰어 본문).
+
+        청크를 적재 순서대로 이어 붙이면 파싱된 원본 마크다운이 복원된다
+        (AST-lite 섹션 메타 포함).
+        """
+        if not self._pool:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.id, c.chunk_index, c.content, c.metadata, c.token_count
+                FROM document_chunks c
+                WHERE c.document_id = $1
+                ORDER BY c.chunk_index
+                OFFSET $2 LIMIT $3
+                """,
+                uuid.UUID(document_id), offset, limit,
+            )
+        return [
+            {
+                "chunk_id": str(row["id"]),
+                "chunk_index": row["chunk_index"],
+                "content": row["content"],
+                "token_count": row["token_count"],
+                "metadata": self._parse_chunk_metadata(row),
+            }
+            for row in rows
+        ]
+
     async def get_neighbor_chunks(
         self, document_id: str, chunk_indices: list[int],
     ) -> list[dict]:

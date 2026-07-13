@@ -352,3 +352,41 @@ async def test_trace_detail_includes_pipeline_stages():
     assert stages["rerank"]["input"] == 8
     assert stages["rerank"]["output"] == len(result.data)
     assert stages["noise_filter"]["after"] == len(result.data)
+
+
+@pytest.mark.asyncio
+async def test_found_by_attribution_in_trace():
+    """[역방향 분석] 후보 청크에 어떤 쿼리(원본/변형N)가 찾았는지 귀속된다."""
+    from src.tools.internal.rag_search import RAGSearchTool
+
+    embedder = AsyncMock()
+    embedder.embed_batch.side_effect = [
+        [[0.1] * 10],
+        [[0.1] * 10, [0.2] * 10, [0.3] * 10],
+    ]
+
+    store = AsyncMock()
+    store.hybrid_search.return_value = [
+        _mock_chunk(f"c{i}", 0.008 - i * 0.0003) for i in range(10)
+    ]
+    store.get_neighbor_chunks.return_value = []
+
+    reranker = AsyncMock()
+    reranker.rerank.return_value = [{"index": i, "score": 0.8 - i * 0.05} for i in range(6)]
+
+    router_llm = AsyncMock()
+    router_llm.generate_json.return_value = ["변형1", "변형2"]
+
+    tool = RAGSearchTool(
+        embedding_provider=embedder, vector_store=store,
+        reranker=reranker, router_llm=router_llm,
+    )
+    result = await tool.execute({"query": "청구"}, _make_context(), _make_scope())
+
+    detail = result.metadata["trace_detail"]
+    # 3개 쿼리가 모두 같은 청크를 찾았으므로 3중 귀속
+    cand = detail["candidates"][0]
+    assert cand["found_by"] == ["원본", "변형1", "변형2"]
+    # 리랭킹 감사도 존재
+    assert len(detail["rerank_audit"]) > 0
+    assert {a["fate"] for a in detail["rerank_audit"]} <= {"selected", "capacity", "tier_fail", "noise_cut"}
