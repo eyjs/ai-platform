@@ -4,7 +4,7 @@ import asyncio
 import time
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from src.domain.execution_plan import ToolCall, ExecutionPlan, QuestionStrategy, QuestionType
 from src.domain.models import AgentMode, SearchScope
@@ -57,6 +57,7 @@ async def test_parallel_execution_faster_than_sequential():
         return ToolResult(success=True, data=[{"chunk_id": f"{tool_name}-1", "content": "c", "score": 0.9}])
 
     registry = AsyncMock()
+    registry.get = MagicMock(return_value=None)
     registry.execute = AsyncMock(side_effect=slow_execute)
 
     execute_tools = create_execute_tools(registry)
@@ -93,6 +94,7 @@ async def test_parallel_execution_one_failure():
         raise RuntimeError("fact_lookup failed")
 
     registry = AsyncMock()
+    registry.get = MagicMock(return_value=None)
     registry.execute = AsyncMock(side_effect=mixed_execute)
 
     execute_tools = create_execute_tools(registry)
@@ -124,6 +126,7 @@ async def test_sequential_groups():
         return ToolResult(success=True, data=[])
 
     registry = AsyncMock()
+    registry.get = MagicMock(return_value=None)
     registry.execute = AsyncMock(side_effect=ordered_execute)
 
     execute_tools = create_execute_tools(registry)
@@ -148,6 +151,7 @@ async def test_trace_integration():
     from src.agent.nodes import create_execute_tools
 
     registry = AsyncMock()
+    registry.get = MagicMock(return_value=None)
     registry.execute = AsyncMock(return_value=ToolResult(
         success=True, data=[{"chunk_id": "c1", "content": "c", "score": 0.9}],
     ))
@@ -177,6 +181,7 @@ async def test_empty_tool_groups():
     from src.agent.nodes import create_execute_tools
 
     registry = AsyncMock()
+    registry.get = MagicMock(return_value=None)
     execute_tools = create_execute_tools(registry)
 
     plan = ExecutionPlan(

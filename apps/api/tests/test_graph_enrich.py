@@ -141,7 +141,7 @@ async def test_ontology_priority_reason_with_aip_mapping():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-r1": _aip_map_entry("aip-r1"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-r1",
             "document_id": "aip-r1",
@@ -180,7 +180,7 @@ async def test_ontology_priority_strength():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-r1": _aip_map_entry("aip-r1"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-r1",
             "document_id": "aip-r1",
@@ -246,7 +246,7 @@ async def test_ontology_strength_float_string():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-r1": _aip_map_entry("aip-r1"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-r1",
             "document_id": "aip-r1",
@@ -327,7 +327,7 @@ async def test_discovery_mode():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-new": _aip_map_entry("aip-new"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-new",
             "document_id": "aip-new",
@@ -423,7 +423,7 @@ async def test_security_filter_blocks_confidential_for_viewer():
         "kms-secret": _aip_map_entry("aip-secret", "CONFIDENTIAL"),
         "kms-public": _aip_map_entry("aip-public", "PUBLIC"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-pub",
             "document_id": "aip-public",
@@ -503,7 +503,7 @@ async def test_security_filter_allows_for_approver():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-conf": _aip_map_entry("aip-conf", "CONFIDENTIAL"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-conf",
             "document_id": "aip-conf",
@@ -580,7 +580,7 @@ async def test_graph_results_have_title_and_method():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-new": _aip_map_entry("aip-new"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "chunk-1",
             "document_id": "aip-new",
@@ -785,7 +785,7 @@ async def test_batch_reverse_mapping():
         "kms-r1": _aip_map_entry("aip-r1"),
         "kms-r2": _aip_map_entry("aip-r2"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "c1",
             "document_id": "aip-r1",
@@ -807,7 +807,7 @@ async def test_batch_reverse_mapping():
 
 @pytest.mark.asyncio
 async def test_security_filter_passes_to_get_top_chunks():
-    """get_top_chunks_by_doc에 max_security_level이 전달되는지 검증."""
+    """search_chunks_in_doc에 max_security_level이 전달되는지 검증."""
     client = MagicMock()
     client.is_configured = True
     client.get_rag_context = AsyncMock(return_value={
@@ -826,7 +826,7 @@ async def test_security_filter_passes_to_get_top_chunks():
     store.get_aip_ids_by_externals = AsyncMock(return_value={
         "kms-new": _aip_map_entry("aip-new", "PUBLIC"),
     })
-    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+    store.search_chunks_in_doc = AsyncMock(return_value=[
         {
             "chunk_id": "c1",
             "document_id": "aip-new",
@@ -845,8 +845,8 @@ async def test_security_filter_passes_to_get_top_chunks():
     node = create_graph_enrich(client, store)
     await node(state)
 
-    store.get_top_chunks_by_doc.assert_called_once()
-    call_kwargs = store.get_top_chunks_by_doc.call_args
+    store.search_chunks_in_doc.assert_called_once()
+    call_kwargs = store.search_chunks_in_doc.call_args
     assert call_kwargs.kwargs.get("max_security_level") == "INTERNAL" or \
         call_kwargs[1].get("max_security_level") == "INTERNAL"
 
@@ -887,3 +887,112 @@ async def test_security_filter_db_internal_blocked_for_viewer():
 
     # INTERNAL > PUBLIC 이므로 필터링
     assert result == {}
+
+
+# --- 발견 모드 관련성 검색 + 점수 상속 (회귀: 표지 청크·0.5 고정 점수) ---
+
+
+@pytest.mark.asyncio
+async def test_discovery_score_inherits_seed_decay():
+    """발견 청크 점수 = 시드 최고 점수 × GRAPH_SCORE_DECAY (고정 0.5 금지).
+
+    회귀 방지: 절대값 0.5는 결과 집합의 점수 스케일과 무관해 정렬 시
+    실제 검색 청크를 밀어내고 충분성 판정을 오염시켰다.
+    """
+    from src.agent.graph_enrich import GRAPH_SCORE_DECAY
+
+    client = MagicMock()
+    client.is_configured = True
+    client.get_rag_context = AsyncMock(return_value={
+        "relatedDocuments": [
+            _make_related_doc(doc_id="kms-new", file_name="신규.pdf", reason="관련 보장 참조"),
+        ],
+    })
+
+    store = AsyncMock()
+    store.get_external_ids = AsyncMock(return_value={"aip-1": "kms-1"})
+    store.get_aip_ids_by_externals = AsyncMock(return_value={
+        "kms-new": _aip_map_entry("aip-new"),
+    })
+    store.search_chunks_in_doc = AsyncMock(return_value=[
+        {"chunk_id": "c1", "document_id": "aip-new", "content": "관련 내용",
+         "chunk_index": 3, "score": 0.001, "file_name": "신규.pdf"},
+    ])
+
+    seed = _make_search_result(doc_id="aip-1", score=0.9)
+    state = _make_state([seed], question="보장 내용")
+    node = create_graph_enrich(client, store)
+    result = await node(state)
+
+    graph_items = [r for r in result["search_results"] if r.get("source") == "graph"]
+    assert len(graph_items) == 1
+    assert graph_items[0]["score"] == pytest.approx(0.9 * GRAPH_SCORE_DECAY)
+    # 발견 청크는 질의 관련성 검색(search_chunks_in_doc)으로 가져온다
+    store.search_chunks_in_doc.assert_called_once()
+    call = store.search_chunks_in_doc.call_args
+    assert call.kwargs.get("text_query") == "보장 내용"
+
+
+@pytest.mark.asyncio
+async def test_discovery_falls_back_to_top_chunks_when_no_text_match():
+    """텍스트 매칭 0건이면 문서 선두 청크로 degrade (빈손 방지)."""
+    client = MagicMock()
+    client.is_configured = True
+    client.get_rag_context = AsyncMock(return_value={
+        "relatedDocuments": [
+            _make_related_doc(doc_id="kms-new", file_name="신규.pdf", reason="관련 보장 참조"),
+        ],
+    })
+
+    store = AsyncMock()
+    store.get_external_ids = AsyncMock(return_value={"aip-1": "kms-1"})
+    store.get_aip_ids_by_externals = AsyncMock(return_value={
+        "kms-new": _aip_map_entry("aip-new"),
+    })
+    store.search_chunks_in_doc = AsyncMock(return_value=[])
+    store.get_top_chunks_by_doc = AsyncMock(return_value=[
+        {"chunk_id": "c-head", "document_id": "aip-new", "content": "문서 선두",
+         "chunk_index": 0, "score": 0.5, "file_name": "신규.pdf"},
+    ])
+
+    state = _make_state([_make_search_result()], question="약관")
+    node = create_graph_enrich(client, store)
+    result = await node(state)
+
+    assert result != {}
+    store.get_top_chunks_by_doc.assert_called_once()
+    graph_items = [r for r in result["search_results"] if r.get("source") == "graph"]
+    assert "문서 선두" in graph_items[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_header_only_score_below_content_chunks():
+    """본문 청크가 전혀 없으면 관계 헤더만 추가하되 점수는 콘텐츠보다 낮게."""
+    from src.agent.graph_enrich import GRAPH_SCORE_DECAY, GRAPH_HEADER_ONLY_FACTOR
+
+    client = MagicMock()
+    client.is_configured = True
+    client.get_rag_context = AsyncMock(return_value={
+        "relatedDocuments": [
+            _make_related_doc(doc_id="kms-new", file_name="신규.pdf", reason="상위 약관 참조"),
+        ],
+    })
+
+    store = AsyncMock()
+    store.get_external_ids = AsyncMock(return_value={"aip-1": "kms-1"})
+    store.get_aip_ids_by_externals = AsyncMock(return_value={
+        "kms-new": _aip_map_entry("aip-new"),
+    })
+    store.search_chunks_in_doc = AsyncMock(return_value=[])
+    store.get_top_chunks_by_doc = AsyncMock(return_value=[])
+
+    seed = _make_search_result(doc_id="aip-1", score=0.9)
+    state = _make_state([seed], question="약관")
+    node = create_graph_enrich(client, store)
+    result = await node(state)
+
+    graph_items = [r for r in result["search_results"] if r.get("source") == "graph"]
+    assert len(graph_items) == 1
+    assert graph_items[0]["chunk_id"] == ""
+    expected = 0.9 * GRAPH_SCORE_DECAY * GRAPH_HEADER_ONLY_FACTOR
+    assert graph_items[0]["score"] == pytest.approx(expected)

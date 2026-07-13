@@ -92,6 +92,18 @@ class AbstractVectorStore(ABC):
     ) -> list[dict]: ...
 
     @abstractmethod
+    async def search_chunks_in_doc(
+        self,
+        document_id: str,
+        text_query: str,
+        limit: int = 2,
+        max_security_level: str | None = None,
+        tenant_id: str | None = None,
+    ) -> list[dict]:
+        """단일 문서 내 질의 관련 청크 텍스트 검색 (graph_enrich 발견 모드)."""
+        ...
+
+    @abstractmethod
     async def get_aip_ids_by_externals(
         self, external_ids: list[str],
     ) -> dict[str, dict]: ...

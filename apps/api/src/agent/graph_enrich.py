@@ -23,6 +23,13 @@ GRAPH_CONTEXT_HEADER = (
 MAX_SEEDS = 5
 GRAPH_ENRICH_TIMEOUT_SECONDS = 15
 
+# 발견 문서 청크의 점수는 자기를 발견한 시드 문서의 최고 점수를 감쇠 상속한다.
+# 절대값(예: 0.5 고정)을 쓰면 결과 집합의 점수 스케일(리랭킹 fused 0~1 /
+# RRF ~0.01)과 무관한 값이 되어, 정렬 시 실제 검색 청크를 밀어내거나
+# evaluate_results 충분성 판정을 오염시킨다.
+GRAPH_SCORE_DECAY = 0.8
+GRAPH_HEADER_ONLY_FACTOR = 0.5  # 본문 없는 관계 헤더는 콘텐츠 청크보다 아래로
+
 
 def _is_relevant(file_name: str, keywords: list[str]) -> bool:
     """파일명이 키워드와 관련 있는지 판단한다."""
@@ -252,7 +259,7 @@ def create_graph_enrich(kms_client, vector_store):
                     })
                     enriched_count += 1
                 else:
-                    # 발견 모드: 벡터 검색으로 청크 가져오기
+                    # 발견 모드: 질의 관련 청크 텍스트 검색으로 가져오기
                     if not related_aip_id:
                         # P0: ai-platform에 없는 문서 -> 추가하지 않음 (KMS UUID 혼용 방지)
                         logger.debug(
@@ -262,10 +269,35 @@ def create_graph_enrich(kms_client, vector_store):
                         )
                         continue
 
-                    chunks = await vector_store.get_top_chunks_by_doc(
-                        related_aip_id, limit=2,
-                        max_security_level=max_security_level,
+                    # 시드 문서 최고 점수 감쇠 상속 — 결과 집합과 같은 스케일 유지
+                    seed_best = max(
+                        (r.get("score", 0.0) for r in search_results
+                         if r.get("document_id") == aip_id),
+                        default=0.0,
                     )
+                    inherited_score = seed_best * GRAPH_SCORE_DECAY
+
+                    try:
+                        chunks = await vector_store.search_chunks_in_doc(
+                            related_aip_id,
+                            text_query=question,
+                            limit=2,
+                            max_security_level=max_security_level,
+                            tenant_id=(plan.scope.tenant_id if plan else None),
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "graph_enrich_doc_search_error",
+                            document_id=related_aip_id, error=str(e),
+                        )
+                        chunks = []
+
+                    if not chunks:
+                        # 텍스트 매칭 실패 시 문서 선두 청크로 degrade (빈손 방지)
+                        chunks = await vector_store.get_top_chunks_by_doc(
+                            related_aip_id, limit=2,
+                            max_security_level=max_security_level,
+                        )
 
                     if chunks:
                         for chunk in chunks:
@@ -273,7 +305,7 @@ def create_graph_enrich(kms_client, vector_store):
                                 "chunk_id": chunk["chunk_id"],
                                 "document_id": related_aip_id,
                                 "content": f"{ontology_meta}\n{chunk['content']}",
-                                "score": chunk["score"],
+                                "score": inherited_score,
                                 "source": "graph",
                                 "file_name": related_file_name,
                                 "title": related_file_name,
@@ -285,7 +317,7 @@ def create_graph_enrich(kms_client, vector_store):
                             "chunk_id": "",
                             "document_id": related_aip_id,
                             "content": ontology_meta,
-                            "score": 0.3,
+                            "score": inherited_score * GRAPH_HEADER_ONLY_FACTOR,
                             "source": "graph",
                             "file_name": related_file_name,
                             "title": related_file_name,

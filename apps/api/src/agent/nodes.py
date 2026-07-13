@@ -10,6 +10,7 @@ from typing import Callable
 from collections import defaultdict
 
 from src.agent.state import AgentState
+from src.agent.planner import _validate_steps
 from src.config import settings
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
@@ -28,6 +29,15 @@ MIN_SOURCE_SCORE = 0.3
 
 
 # --- 헬퍼 함수 ---
+
+
+def _top_results_by_score(results: list[dict], max_chunks: int) -> list[dict]:
+    """score 상위 max_chunks개 선별.
+
+    graph_enrich가 결과를 리스트 '뒤에' append하므로 정렬 없이 앞에서 자르면
+    그래프축 청크가 항상 잘려나간다(스트리밍 경로와 동일 규칙 — 실사고 수정).
+    """
+    return sorted(results, key=lambda r: r.get("score", 0.0), reverse=True)[:max_chunks]
 
 
 def _steps_to_tool_groups(steps: list[dict]) -> list[list[ToolCall]]:
@@ -121,6 +131,31 @@ def route_by_guardrail(state: AgentState) -> str:
 # --- 노드 팩토리 함수 ---
 
 
+def _inject_strategy_params(tc: ToolCall, registry: ToolRegistry, strategy) -> ToolCall:
+    """도구 스키마가 선언했지만 계획이 누락한 전략 파라미터를 주입한다.
+
+    실사고(배선 갭): strategy.max_vector_chunks(예: CROSS_DOC=10)가 ToolCall
+    params에 실리지 않아 rag_search가 항상 기본 top_k(5)로 검색했다 — 프롬프트
+    슬롯만 10개로 늘던 반쪽 배선. 도구 이름 하드코딩 대신 input_schema 선언
+    기반으로 주입해 Tool 격리 원칙을 지킨다.
+    """
+    max_chunks = getattr(strategy, "max_vector_chunks", None)
+    if max_chunks is None or "max_vector_chunks" in tc.params:
+        return tc
+    try:
+        tool = registry.get(tc.tool_name)
+        schema = getattr(tool, "input_schema", None)
+        props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    except Exception:
+        props = {}
+    if "max_vector_chunks" not in props:
+        return tc
+    return ToolCall(
+        tool_name=tc.tool_name,
+        params={**tc.params, "max_vector_chunks": max_chunks},
+    )
+
+
 def create_execute_tools(registry: ToolRegistry) -> Callable:
     """Tool 병렬 실행 노드. tool_groups별 asyncio.gather."""
 
@@ -164,7 +199,11 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
         else:
             tool_groups = plan.tool_groups
 
+        strategy = getattr(plan, "strategy", None)
         for group in tool_groups:
+            group = [
+                _inject_strategy_params(tc, registry, strategy) for tc in group
+            ]
             tasks = [
                 _execute_single(tc, context, plan.scope, trace)
                 for tc in group
@@ -247,6 +286,14 @@ def create_rewrite_query(llm: LLMProvider) -> Callable:
     async def rewrite_query(state: AgentState) -> dict:
         question = state["question"]
         results = state.get("search_results", [])
+        plan = state["plan"]
+
+        # 인가 경계: 재작성 LLM 출력은 프로필이 이 계획에 허용한 도구 집합으로
+        # 검증한다. 무검증 실행은 (a) 누락 키로 KeyError 크래시, (b) 환각 도구명이
+        # 레지스트리의 전역 도구를 호출하는 프로필 권한 우회를 허용했다.
+        allowed_tools = {
+            tc.tool_name for group in plan.tool_groups for tc in group
+        }
 
         max_score = max((r.get("score", 0) for r in results), default=0)
         prompt = (
@@ -267,16 +314,27 @@ def create_rewrite_query(llm: LLMProvider) -> Callable:
             )
             new_steps = result.get("steps", [])
             reasoning = result.get("reasoning", "")
-            if new_steps:
+            valid_steps = _validate_steps(new_steps, allowed_tools) if new_steps else []
+            if valid_steps:
                 logger.info("rewrite_query_success", reasoning=reasoning[:100])
                 return {
-                    "planned_steps": new_steps,
+                    "planned_steps": valid_steps,
                     "planning_reasoning": f"retry: {reasoning}",
                 }
+            if new_steps:
+                logger.warning(
+                    "rewrite_query_no_valid_steps",
+                    raw_steps=len(new_steps), allowed=sorted(allowed_tools),
+                )
         except Exception as e:
             logger.warning("rewrite_query_failed", error=str(e))
 
-        # 실패 시 원래 질문으로 rag_search 재실행
+        # 실패 시 원래 질문으로 rag_search 재실행 (인가 경계 준수)
+        if "rag_search" not in allowed_tools:
+            logger.warning(
+                "rewrite_fallback_tool_not_allowed", allowed=sorted(allowed_tools),
+            )
+            return {}
         return {
             "planned_steps": [
                 {"step_id": "retry_fallback", "tool": "rag_search",
@@ -313,7 +371,7 @@ def create_regenerate(llm: LLMProvider) -> Callable:
 
         # 프롬프트에 guardrail 피드백 추가
         max_chunks = plan.strategy.max_vector_chunks
-        prompt_results = results[:max_chunks]
+        prompt_results = _top_results_by_score(results, max_chunks)
         prompt = build_prompt(question, plan, prompt_results)
 
         # guardrail 피드백은 per-turn 지시 → volatile 로 분리.
@@ -358,7 +416,7 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
         results = state["search_results"]
 
         max_chunks = plan.strategy.max_vector_chunks
-        prompt_results = results[:max_chunks]
+        prompt_results = _top_results_by_score(results, max_chunks)
 
         prompt = build_prompt(question, plan, prompt_results)
         # plan.system_prompt = cacheable(persona+grounding), plan.volatile_system_prompt = 날짜.
@@ -490,12 +548,24 @@ async def run_guardrail_chain(
 
 
 def build_source_dicts(results: list[dict]) -> list[dict]:
-    """검색 결과를 중복 제거된 출처 dict 리스트로 변환한다."""
+    """검색 결과를 중복 제거된 출처 dict 리스트로 변환한다.
+
+    스케일 인지: 절대 임계(MIN_SOURCE_SCORE=0.3)는 리랭킹된 fused(0~1)
+    스케일에서만 유효하다. 리랭킹 스킵/degrade 경로의 RRF(~0.01) 스케일에
+    같은 임계를 적용하면 출처가 전멸한다(_results_sufficient와 동일 버그 부류).
+    비리랭킹 경로는 임계 없이 dedupe+상한(MAX_SOURCES)에 맡긴다 — 어차피
+    같은 청크가 LLM 컨텍스트로 들어가므로 출처로 보이는 것이 정직하다.
+    """
+    # graph_enrich 등이 뒤에 append하므로 점수순 정렬 후 상위 출처를 뽑는다
+    ordered = sorted(results, key=lambda r: r.get("score", 0.0), reverse=True)
+    reranked = any("rerank_score" in r for r in ordered)
+    min_score = MIN_SOURCE_SCORE if reranked else 0.0
+
     sources = []
     seen: set[str] = set()
-    for r in results:
+    for r in ordered:
         score = r.get("score", 0.0)
-        if score < MIN_SOURCE_SCORE:
+        if score < min_score:
             continue
         doc_id = r.get("document_id", "")
         if doc_id in seen:

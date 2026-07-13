@@ -1,6 +1,6 @@
 """SubAgentRunner 단위 테스트 (task-001, P0-1)."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

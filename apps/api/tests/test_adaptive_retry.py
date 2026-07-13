@@ -341,6 +341,7 @@ async def test_full_graph_adaptive_retry():
     })
 
     mock_registry = AsyncMock()
+    mock_registry.get = MagicMock(return_value=None)
     mock_registry.execute = mock_execute
     mock_registry.resolve = MagicMock(return_value=[])  # Planner 스킵
 

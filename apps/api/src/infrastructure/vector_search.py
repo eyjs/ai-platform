@@ -132,6 +132,30 @@ class VectorSearchMixin:
             row_converter=self._row_to_metadata_dict,
         )
 
+    async def search_chunks_in_doc(
+        self,
+        document_id: str,
+        text_query: str,
+        limit: int = 2,
+        max_security_level: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+    ) -> List[dict]:
+        """단일 문서 안에서 질의 관련 청크를 텍스트(FTS+trigram) 검색으로 조회한다.
+
+        graph_enrich 발견 모드용 — 임베딩 없이 질문 텍스트만으로 해당 문서의
+        관련 청크를 고른다(문서 선두 청크가 아니라). 반환 score 는 FTS/trigram
+        스케일이라 결과 집합과 정합하지 않으므로 호출부가 자기 스케일로
+        재부여해야 한다 — 여기서는 순위만 의미를 가진다.
+        """
+        if not self._pool:
+            return []
+        allowed_levels = self._allowed_security_levels(max_security_level)
+        rows = await self._text_search_combined(
+            text_query, limit, None,
+            [document_id], allowed_levels, tenant_id=tenant_id,
+        )
+        return self._rows_to_results(rows[:limit])
+
     @staticmethod
     def _tokenize_for_fts(text: str) -> str:
         """간단한 한국어 토큰화 (공백 기반)."""

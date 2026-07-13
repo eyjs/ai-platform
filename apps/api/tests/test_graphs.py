@@ -85,6 +85,7 @@ async def test_deterministic_rag_path():
     # Tool 실행 mock
     from src.tools.base import ToolResult
     mock_registry = AsyncMock()
+    mock_registry.get = MagicMock(return_value=None)
     mock_registry.execute = AsyncMock(return_value=ToolResult(
         success=True,
         data=[{"document_id": "doc-1", "title": "약관", "content": "대인배상 한도 1억원", "score": 0.9}],
@@ -151,6 +152,7 @@ async def test_graph_executor_deterministic_rag():
 
     from src.tools.base import ToolResult
     mock_registry = AsyncMock()
+    mock_registry.get = MagicMock(return_value=None)
     mock_registry.execute = AsyncMock(return_value=ToolResult(
         success=True,
         data=[{"document_id": "d1", "title": "약관", "content": "1억", "score": 0.9}],
@@ -209,6 +211,7 @@ async def test_streaming_bypass_no_double_llm():
 
     from src.tools.base import ToolResult
     mock_registry = AsyncMock()
+    mock_registry.get = MagicMock(return_value=None)
     mock_registry.execute = AsyncMock(return_value=ToolResult(
         success=True,
         data=[{"document_id": "d1", "title": "약관", "content": "1억", "score": 0.9}],

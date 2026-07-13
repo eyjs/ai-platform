@@ -53,6 +53,10 @@ class RAGSearchTool:
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "검색 쿼리"},
+            "max_vector_chunks": {
+                "type": "integer",
+                "description": "반환할 최대 청크 수 (미지정 시 전략 기본값)",
+            },
         },
         "required": ["query"],
     }
@@ -81,7 +85,12 @@ class RAGSearchTool:
         if not query:
             return ToolResult.fail("query is required")
 
-        top_k = params.get("max_vector_chunks", self._default_top_k)
+        # 시스템 경계 검증: 플래너 LLM이 극단값을 넣어도 1~20으로 클램프
+        try:
+            top_k = int(params.get("max_vector_chunks", self._default_top_k))
+        except (TypeError, ValueError):
+            top_k = self._default_top_k
+        top_k = max(1, min(top_k, 20))
         disclosure_level = params.get(
             "disclosure_level", DEFAULT_DISCLOSURE_LEVEL,
         )
@@ -229,6 +238,9 @@ class RAGSearchTool:
 
         # L2'. 노이즈 필터 (C12): 약신호 RRF 단계가 아니라 리랭킹 후 융합 점수 기준으로 적용.
         #      리랭커가 살릴 수 있는 청크를 검색 점수만으로 미리 잘라내던 문제를 제거.
+        #      주의: MIN_KEEP_COUNT(5)는 최소 컨텍스트 보장이므로 top_k ≤ 5에서는
+        #      의도적으로 무동작 — 이 필터는 top_k > 5(예: CROSS_DOC=10)의 긴 꼬리
+        #      절단 전용이다. 절대 임계 노이즈 컷은 rerank_3tier의 tier가 담당한다.
         results = filter_noise(results)
 
         # L5. 결과 가드

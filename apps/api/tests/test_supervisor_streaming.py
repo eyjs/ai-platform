@@ -8,7 +8,7 @@ supervise_stream의 계약:
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
