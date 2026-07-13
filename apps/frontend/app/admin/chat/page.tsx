@@ -93,6 +93,25 @@ export default function AdminChatPage() {
           errorMessage: error.message,
         }));
       },
+      onIncomplete: (reason: 'aborted' | 'no_done') => {
+        const sid = activeSessionIdRef.current;
+        if (!sid) return;
+        updateLastMessage(sid, (msg) => {
+          if (msg.content.length > 0) {
+            // 부분 응답은 남기고 스트리밍 상태만 마감
+            return { ...msg, isStreaming: false };
+          }
+          return {
+            ...msg,
+            isStreaming: false,
+            isError: true,
+            errorMessage:
+              reason === 'aborted'
+                ? '응답이 중단되었습니다.'
+                : '연결이 끊겨 응답을 받지 못했습니다. 다시 시도해주세요.',
+          };
+        });
+      },
     }),
     [updateLastMessage],
   );

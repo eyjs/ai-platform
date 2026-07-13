@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { streamChat, parseSSEEvents } from '@/lib/api/chat';
+import { streamChat, parseSSEBuffer } from '@/lib/api/chat';
 import type { ChatRequest } from '@/types/chat';
 
 interface UseChatStreamCallbacks {
@@ -16,6 +16,11 @@ interface UseChatStreamCallbacks {
     response_id?: string;
   }) => void;
   onError: (error: Error) => void;
+  /**
+   * done 이벤트 없이 스트림이 끝났을 때 (사용자 중단 포함).
+   * 말풍선이 스트리밍 상태로 영구 고착되지 않도록 호출자가 마감 처리한다.
+   */
+  onIncomplete: (reason: 'aborted' | 'no_done') => void;
 }
 
 export function useChatStream(callbacks: UseChatStreamCallbacks) {
@@ -28,6 +33,7 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      let sawDone = false;
       try {
         const stream = streamChat(request, token, abortController.signal);
         const reader = stream.getReader();
@@ -38,13 +44,9 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
           if (done) break;
 
           buffer += value;
-          const events = parseSSEEvents(buffer);
-
-          // 마지막 불완전한 이벤트를 버퍼에 유지
-          const lastNewline = buffer.lastIndexOf('\n\n');
-          if (lastNewline >= 0) {
-            buffer = buffer.slice(lastNewline + 2);
-          }
+          // 완결된 이벤트만 소비하고 미완결 꼬리는 버퍼에 유지 (중복 방출 없음)
+          const { events, rest } = parseSSEBuffer(buffer);
+          buffer = rest;
 
           for (const event of events) {
             try {
@@ -60,6 +62,7 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
                   callbacks.onTrace(data);
                   break;
                 case 'done':
+                  sawDone = true;
                   callbacks.onDone(data);
                   break;
                 case 'error':
@@ -74,12 +77,20 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
             }
           }
         }
+
+        if (!sawDone) {
+          // done 없이 연결이 끝남(중단/유실) — 고착 방지 마감
+          callbacks.onIncomplete(
+            abortController.signal.aborted ? 'aborted' : 'no_done',
+          );
+        }
       } catch (error) {
         if (
           error instanceof DOMException &&
           error.name === 'AbortError'
         ) {
-          // 사용자가 중단함 — 정상
+          // 사용자가 중단함 — 말풍선은 마감 처리
+          callbacks.onIncomplete('aborted');
         } else {
           callbacks.onError(
             error instanceof Error ? error : new Error('스트리밍 실패'),

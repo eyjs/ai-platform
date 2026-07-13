@@ -9,7 +9,23 @@ export function loadSessions(): ChatSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as ChatSession[];
+    const sessions = JSON.parse(raw) as ChatSession[];
+    // 이전 페이지 수명에서 마감되지 못한 스트리밍 메시지 정규화
+    // (스트림은 페이지와 함께 죽으므로 로드 시점의 isStreaming:true는 전부 잔해)
+    return sessions.map((s) => ({
+      ...s,
+      messages: s.messages.map((m) =>
+        m.isStreaming
+          ? {
+              ...m,
+              isStreaming: false,
+              ...(m.content.length === 0
+                ? { isError: true, errorMessage: '응답을 받지 못했습니다.' }
+                : {}),
+            }
+          : m,
+      ),
+    }));
   } catch {
     return [];
   }
