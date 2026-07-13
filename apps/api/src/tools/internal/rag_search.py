@@ -187,7 +187,7 @@ class RAGSearchTool:
         }
 
         # L1. Adaptive 쿼리 확장: probe -> 조건부 확장
-        queries, probe_candidates = await self._adaptive_expand(query, scope)
+        queries, probe_candidates, probe_meta = await self._adaptive_expand(query, scope)
         trace_detail["expanded_queries"] = queries
 
         # 멀티쿼리 임베딩 (배치)
@@ -204,7 +204,13 @@ class RAGSearchTool:
 
         if not candidates:
             # 계약 유지 (호출부 3-tuple 언팩)
+            trace_detail["stages"] = {
+                "expansion": {**probe_meta, "queries": len(queries)},
+                "retrieval": {"candidates": 0},
+            }
             return [], query_embedding, trace_detail
+
+        n_retrieved = len(candidates)
 
         # L3. 인접 청크 확장 (cascade: 약신호 노이즈 컷을 리랭커 앞에서 하지 않는다 → 고-recall)
         candidates = await expand_neighbors(self._store, candidates)
@@ -236,6 +242,8 @@ class RAGSearchTool:
             results = candidates[:top_k]
             trace_detail["reranked_by"] = "vector_order"
 
+        n_rerank_out = len(results)
+
         # L2'. 노이즈 필터 (C12): 약신호 RRF 단계가 아니라 리랭킹 후 융합 점수 기준으로 적용.
         #      리랭커가 살릴 수 있는 청크를 검색 점수만으로 미리 잘라내던 문제를 제거.
         #      주의: MIN_KEEP_COUNT(5)는 최소 컨텍스트 보장이므로 top_k ≤ 5에서는
@@ -246,6 +254,18 @@ class RAGSearchTool:
         # L5. 결과 가드
         results = guard_results(results)
         trace_detail["reranked"] = [_chunk_snippet(r) for r in results]
+        # 파이프라인 단계별 관측 — "각 레이어에서 무엇이 얼마나 걸러졌나"
+        trace_detail["stages"] = {
+            "expansion": {**probe_meta, "queries": len(queries)},
+            "retrieval": {"candidates": n_retrieved},
+            "neighbor": {"added": len(candidates) - n_retrieved},
+            "rerank": {
+                "input": len(candidates),
+                "output": n_rerank_out,
+                "by": trace_detail.get("reranked_by", ""),
+            },
+            "noise_filter": {"before": n_rerank_out, "after": len(results)},
+        }
         return results, query_embedding, trace_detail
 
     async def _append_references(
@@ -309,17 +329,18 @@ class RAGSearchTool:
 
     async def _adaptive_expand(
         self, query: str, scope: SearchScope,
-    ) -> tuple[list[str], list[dict] | None]:
+    ) -> tuple[list[str], list[dict] | None, dict]:
         """Probe 검색 후 조건부 쿼리 확장.
 
         Returns:
-            (queries, probe_candidates):
-            - 확장 스킵: ([원본], probe 결과)
-            - 확장 실행: ([원본, 변형1, 변형2], None)
-            - LLM 없음: ([원본], None)
+            (queries, probe_candidates, probe_meta):
+            - 확장 스킵: ([원본], probe 결과, {mode: probe_skip})
+            - 확장 실행: ([원본, 변형1, 변형2], None, {mode: expanded})
+            - LLM 없음: ([원본], None, {mode: no_llm})
+            probe_meta 는 트레이스 관측용(어떤 판단으로 확장 여부가 갈렸나).
         """
         if not self._router_llm:
-            return [query], None
+            return [query], None, {"mode": "no_llm"}
 
         # Probe: 원본 쿼리 1회 검색
         probe_embedding = (await self._embedder.embed_batch([query]))[0]
@@ -338,7 +359,7 @@ class RAGSearchTool:
         if not probe_results:
             # 결과 없음 → 확장 실행
             queries = await expand_queries(self._router_llm, query)
-            return queries, None
+            return queries, None, {"mode": "expanded", "probe_top": 0.0}
 
         top_score = probe_results[0]["score"]
         if top_score >= PROBE_SKIP_THRESHOLD:
@@ -348,7 +369,9 @@ class RAGSearchTool:
                 threshold=PROBE_SKIP_THRESHOLD,
             )
             sorted_results = sorted(probe_results, key=lambda x: x["score"], reverse=True)
-            return [query], sorted_results
+            return [query], sorted_results, {
+                "mode": "probe_skip", "probe_top": round(top_score, 4),
+            }
 
         # 품질 부족 → 확장 실행
         logger.info(
@@ -357,7 +380,7 @@ class RAGSearchTool:
             threshold=PROBE_SKIP_THRESHOLD,
         )
         queries = await expand_queries(self._router_llm, query)
-        return queries, None
+        return queries, None, {"mode": "expanded", "probe_top": round(top_score, 4)}
 
     async def _multi_query_search(
         self,

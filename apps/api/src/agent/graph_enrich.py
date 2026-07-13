@@ -9,6 +9,7 @@ ai-platform 아키텍처에 맞게 포팅.
 """
 
 import asyncio
+import time
 
 from src.agent.state import AgentState
 from src.domain.models import SECURITY_HIERARCHY
@@ -76,6 +77,7 @@ def create_graph_enrich(kms_client, vector_store):
 
     async def _graph_enrich_inner(state: AgentState) -> dict:
         """타임아웃 없는 내부 구현."""
+        t_start = time.time()
         if not kms_client.is_configured:
             return {}
 
@@ -117,6 +119,12 @@ def create_graph_enrich(kms_client, vector_store):
         enriched_count = 0
         discovered_count = 0
         processed_in_graph: set[str] = set()
+
+        # 관측 상세 — "그래프가 무엇을 보고, 무엇을 살리고, 무엇을 걸렀나"
+        # (트레이스 노드 detail 로 실려 채팅 트레이스·요청로그에 그대로 노출)
+        discovered_entries: list[dict] = []
+        enriched_files: list[str] = []
+        skipped = {"unmapped": 0, "security": 0, "no_ontology": 0}
 
         # 3. KMS 그래프 탐색 — 병렬 호출
         kms_ids_to_fetch = [
@@ -184,6 +192,7 @@ def create_graph_enrich(kms_client, vector_store):
                             security_level=related_security,
                             max_level=max_security_level,
                         )
+                        skipped["security"] += 1
                         continue
 
                 # 온톨로지 메타데이터 추출
@@ -209,6 +218,7 @@ def create_graph_enrich(kms_client, vector_store):
 
                 # 온톨로지 우선 필터링
                 if not has_ontology and not _is_relevant(related_file_name, keywords):
+                    skipped["no_ontology"] += 1
                     continue
 
                 # P2 strength 표시 개선
@@ -258,6 +268,7 @@ def create_graph_enrich(kms_client, vector_store):
                         "method": "graph",
                     })
                     enriched_count += 1
+                    enriched_files.append(related_file_name)
                 else:
                     # 발견 모드: 질의 관련 청크 텍스트 검색으로 가져오기
                     if not related_aip_id:
@@ -267,6 +278,7 @@ def create_graph_enrich(kms_client, vector_store):
                             related_kms_id=related_kms_id,
                             file_name=related_file_name,
                         )
+                        skipped["unmapped"] += 1
                         continue
 
                     # 시드 문서 최고 점수 감쇠 상속 — 결과 집합과 같은 스케일 유지
@@ -312,6 +324,12 @@ def create_graph_enrich(kms_client, vector_store):
                                 "method": "graph",
                             })
                         discovered_count += 1
+                        discovered_entries.append({
+                            "file_name": related_file_name,
+                            "chunks": len(chunks),
+                            "score": round(inherited_score, 4),
+                            "via": relation_label or "관련",
+                        })
                     elif reason or strength:
                         graph_results.append({
                             "chunk_id": "",
@@ -324,6 +342,37 @@ def create_graph_enrich(kms_client, vector_store):
                             "method": "graph",
                         })
                         discovered_count += 1
+                        discovered_entries.append({
+                            "file_name": related_file_name,
+                            "chunks": 0,
+                            "score": round(inherited_score * GRAPH_HEADER_ONLY_FACTOR, 4),
+                            "via": relation_label or "관련",
+                        })
+
+        # 트레이스 detail — 채팅 트레이스 패널·요청로그(latency_breakdown)에 그대로 실린다
+        seed_names = [
+            next(
+                (r.get("file_name", "") for r in search_results
+                 if r.get("document_id") == aip_id),
+                aip_id[:8],
+            )
+            for aip_id, _ in kms_ids_to_fetch
+        ]
+        trace = state.get("trace")
+        if trace:
+            trace.add_node(
+                "graph_enrich",
+                duration_ms=round((time.time() - t_start) * 1000, 1),
+                enriched=enriched_count, discovered=discovered_count,
+                detail={
+                    "seeds": seed_names,
+                    "edges": traversal_edges,
+                    "discovered": discovered_entries,
+                    "enriched": enriched_files,
+                    "skipped": skipped,
+                    "related_total": len(all_related_kms_ids),
+                },
+            )
 
         if not graph_results:
             # 관측성: "그래프가 비어서 빈손"인지 "노드가 안 돈 것"인지 구분 가능해야 한다.
@@ -349,6 +398,11 @@ def create_graph_enrich(kms_client, vector_store):
                 "enriched": enriched_count,
                 "discovered": discovered_count,
                 "edges": traversal_edges,
+                # 관측 상세 (SSE trace 이벤트로 실시간 노출)
+                "seeds": seed_names,
+                "discovered_docs": discovered_entries,
+                "enriched_docs": enriched_files,
+                "skipped": skipped,
             },
         }
 

@@ -314,3 +314,41 @@ async def test_adaptive_no_llm_skips_probe():
     assert result.success is True
     embedder.embed_batch.assert_called_once()
     assert len(embedder.embed_batch.call_args[0][0]) == 1
+
+
+@pytest.mark.asyncio
+async def test_trace_detail_includes_pipeline_stages():
+    """trace_detail.stages 로 5-layer 각 단계의 입출력 수가 관측된다."""
+    from src.tools.internal.rag_search import RAGSearchTool
+
+    embedder = AsyncMock()
+    embedder.embed_batch.return_value = [[0.1] * 10]
+
+    store = AsyncMock()
+    # probe top 0.014 (>= 0.012) → 확장 스킵
+    store.hybrid_search.return_value = [
+        _mock_chunk(f"c{i}", 0.014 - i * 0.0005) for i in range(8)
+    ]
+    store.get_neighbor_chunks.return_value = []
+
+    reranker = AsyncMock()
+    reranker.rerank.return_value = [
+        {"index": i, "score": 0.9 - i * 0.05} for i in range(8)
+    ]
+
+    tool = RAGSearchTool(
+        embedding_provider=embedder,
+        vector_store=store,
+        reranker=reranker,
+        router_llm=AsyncMock(),
+    )
+
+    result = await tool.execute({"query": "보장"}, _make_context(), _make_scope())
+
+    stages = result.metadata["trace_detail"]["stages"]
+    assert stages["expansion"]["mode"] == "probe_skip"
+    assert stages["expansion"]["queries"] == 1
+    assert stages["retrieval"]["candidates"] == 8
+    assert stages["rerank"]["input"] == 8
+    assert stages["rerank"]["output"] == len(result.data)
+    assert stages["noise_filter"]["after"] == len(result.data)

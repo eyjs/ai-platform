@@ -16,12 +16,45 @@ type Chunk = {
   snippet?: string;
 };
 
+type Stages = {
+  expansion?: { mode?: string; queries?: number; probe_top?: number };
+  retrieval?: { candidates?: number };
+  neighbor?: { added?: number };
+  rerank?: { input?: number; output?: number; by?: string };
+  noise_filter?: { before?: number; after?: number };
+};
+
 type TraceDetail = {
   filter?: Record<string, unknown>;
   expanded_queries?: string[];
   candidates?: Chunk[];
   reranked?: Chunk[];
   reranked_by?: string;
+  stages?: Stages;
+};
+
+type GraphEdge = {
+  source_name?: string;
+  target_name?: string;
+  relation?: string;
+  reason?: string;
+  strength?: string | number;
+};
+
+type GraphDiscovered = {
+  file_name?: string;
+  chunks?: number;
+  score?: number;
+  via?: string;
+};
+
+type GraphDetail = {
+  seeds?: string[];
+  edges?: GraphEdge[];
+  discovered?: GraphDiscovered[];
+  enriched?: string[];
+  skipped?: Record<string, number>;
+  related_total?: number;
 };
 
 function shortId(id?: string): string {
@@ -63,12 +96,122 @@ function ChunkList({ title, chunks }: { title: string; chunks: Chunk[] }) {
   );
 }
 
+/** 5-Layer 파이프라인 단계 요약: 각 레이어에서 무엇이 얼마나 걸러졌나 */
+function StagesSummary({ stages }: { stages: Stages }) {
+  const parts: string[] = [];
+  const exp = stages.expansion;
+  if (exp) {
+    const mode =
+      exp.mode === 'probe_skip' ? '확장 스킵' : exp.mode === 'expanded' ? '확장' : '확장 없음';
+    const probe = typeof exp.probe_top === 'number' ? ` (probe ${exp.probe_top.toFixed(4)})` : '';
+    parts.push(`${mode} · ${exp.queries ?? 1}쿼리${probe}`);
+  }
+  if (stages.retrieval) parts.push(`후보 ${stages.retrieval.candidates ?? 0}`);
+  if (stages.neighbor && (stages.neighbor.added ?? 0) > 0) parts.push(`이웃 +${stages.neighbor.added}`);
+  const rr = stages.rerank;
+  if (rr) parts.push(`리랭킹 ${rr.input ?? '?'}→${rr.output ?? '?'}${rr.by ? ` (${rr.by})` : ''}`);
+  const nf = stages.noise_filter;
+  if (nf && nf.before !== nf.after) parts.push(`노이즈컷 ${nf.before}→${nf.after}`);
+  if (parts.length === 0) return null;
+  return (
+    <div className="text-[var(--font-size-xs)] text-[var(--color-neutral-600)]">
+      <span className="font-semibold">파이프라인:</span> {parts.join(' → ')}
+    </div>
+  );
+}
+
+/** graph_enrich 상세: 온톨로지 탐색 결과 — 시드, 관계 엣지, 발견/보강 문서, 필터 사유 */
+function GraphEnrichDetail({ detail }: { detail: GraphDetail }) {
+  const edges = detail.edges ?? [];
+  const discovered = detail.discovered ?? [];
+  const enriched = detail.enriched ?? [];
+  const skipped = Object.entries(detail.skipped ?? {}).filter(([, v]) => v > 0);
+  const skippedLabel: Record<string, string> = {
+    unmapped: '미동기화',
+    security: '보안등급',
+    no_ontology: '온톨로지 없음',
+  };
+  return (
+    <div className="mt-1 space-y-1.5 border-l-2 border-[var(--color-neutral-200)] pl-3 text-[var(--font-size-xs)]">
+      {detail.seeds && detail.seeds.length > 0 && (
+        <div className="text-[var(--color-neutral-600)]">
+          <span className="font-semibold">탐색 시드:</span> {detail.seeds.join(', ')}
+        </div>
+      )}
+      {edges.length > 0 && (
+        <div>
+          <div className="mb-1 font-semibold text-[var(--color-neutral-600)]">
+            지식그래프 관계 ({edges.length})
+          </div>
+          <ol className="space-y-1">
+            {edges.map((edge, i) => (
+              <li
+                key={i}
+                className="rounded-[var(--radius-sm)] bg-[var(--color-neutral-50)] px-2 py-1"
+              >
+                <div className="flex flex-wrap items-center gap-1 text-[var(--color-neutral-700)]">
+                  <span className="truncate">{edge.source_name || '—'}</span>
+                  <span className="shrink-0 font-mono text-[var(--color-primary)]">
+                    ─{edge.relation || '관련'}→
+                  </span>
+                  <span className="truncate">{edge.target_name || '—'}</span>
+                  {edge.strength != null && String(edge.strength).trim() !== '' && (
+                    <span className="ml-auto shrink-0 font-mono text-[var(--color-neutral-500)]">
+                      강도 {String(edge.strength)}/10
+                    </span>
+                  )}
+                </div>
+                {edge.reason && (
+                  <p className="mt-0.5 text-[var(--color-neutral-500)]">사유: {edge.reason}</p>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {discovered.length > 0 && (
+        <div className="text-[var(--color-neutral-600)]">
+          <span className="font-semibold">발견 문서 (새로 합류):</span>
+          <ul className="mt-0.5 space-y-0.5 pl-3">
+            {discovered.map((doc, i) => (
+              <li key={i} className="text-[var(--color-neutral-500)]">
+                · {doc.file_name}
+                {doc.via ? ` — ${doc.via}` : ''}
+                {typeof doc.chunks === 'number' && doc.chunks > 0 ? ` · ${doc.chunks}청크` : ' · 헤더만'}
+                {typeof doc.score === 'number' && (
+                  <span className="font-mono text-[var(--color-primary)]"> {doc.score.toFixed(4)}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {enriched.length > 0 && (
+        <div className="text-[var(--color-neutral-600)]">
+          <span className="font-semibold">보강 (관계 메타 추가):</span>{' '}
+          <span className="text-[var(--color-neutral-500)]">{enriched.join(', ')}</span>
+        </div>
+      )}
+      {skipped.length > 0 && (
+        <div className="text-[var(--color-neutral-400)]">
+          걸러짐: {skipped.map(([k, v]) => `${skippedLabel[k] ?? k} ${v}건`).join(' · ')}
+        </div>
+      )}
+      {edges.length === 0 && discovered.length === 0 && enriched.length === 0 && (
+        <div className="text-[var(--color-neutral-400)]">그래프 관계 없음 (탐색 결과 0건)</div>
+      )}
+    </div>
+  );
+}
+
 /** rag_search 상세: 필터 기준 + 확장쿼리 + 리랭킹 입력/최종 청크 */
 function RagSearchDetail({ detail }: { detail: TraceDetail }) {
   const filter = detail.filter ?? {};
   const domains = filter.domain_codes as string[] | null | undefined;
   return (
     <div className="mt-1 border-l-2 border-[var(--color-neutral-200)] pl-3">
+      {/* 5-Layer 단계 요약 */}
+      {detail.stages && <StagesSummary stages={detail.stages} />}
       {/* 메타데이터 필터 기준 */}
       <div className="text-[var(--font-size-xs)] text-[var(--color-neutral-600)]">
         <span className="font-semibold">필터 기준:</span>{' '}
@@ -212,6 +355,9 @@ export function TracePanel({ events }: { events: Array<Record<string, unknown>> 
                 {detailAvailable && expanded[i] && (
                   <div className="pl-6">
                     {isRag && <RagSearchDetail detail={(e.detail ?? {}) as TraceDetail} />}
+                    {nodeKey(e) === 'graph_enrich' && (
+                      <GraphEnrichDetail detail={(e.detail ?? {}) as GraphDetail} />
+                    )}
                     {isGen && <GenerationDetail e={e} />}
                   </div>
                 )}

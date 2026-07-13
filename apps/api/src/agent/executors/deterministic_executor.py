@@ -125,10 +125,19 @@ class DeterministicExecutorMixin:
                         search_results = state_update["search_results"]
                     enrichment = state_update.get("graph_enrichment", {})
                     if enrichment.get("enriched") or enrichment.get("discovered"):
+                        # 온톨로지 탐색 상세(엣지·발견 문서·필터 사유)를 그대로 동봉 —
+                        # 채팅 트레이스 패널이 "그래프가 무엇을 왜 살렸나"를 렌더한다
                         yield {"type": "trace", "data": {
                             "step": "graph_enrich",
                             "enriched": enrichment.get("enriched", 0),
                             "discovered": enrichment.get("discovered", 0),
+                            "detail": {
+                                "seeds": enrichment.get("seeds", []),
+                                "edges": enrichment.get("edges", []),
+                                "discovered": enrichment.get("discovered_docs", []),
+                                "enriched": enrichment.get("enriched_docs", []),
+                                "skipped": enrichment.get("skipped", {}),
+                            },
                         }}
                 elif node_name == "evaluate_results":
                     # 검색 결과 충분성 판정 (Adaptive Retry 분기점) 실시간 노출.

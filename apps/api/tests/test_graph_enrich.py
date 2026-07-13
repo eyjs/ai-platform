@@ -996,3 +996,64 @@ async def test_header_only_score_below_content_chunks():
     assert graph_items[0]["chunk_id"] == ""
     expected = 0.9 * GRAPH_SCORE_DECAY * GRAPH_HEADER_ONLY_FACTOR
     assert graph_items[0]["score"] == pytest.approx(expected)
+
+
+# --- 관측성: 트레이스 노드에 온톨로지 탐색 상세 기록 ---
+
+
+@pytest.mark.asyncio
+async def test_trace_node_records_graph_detail():
+    """graph_enrich 가 RequestTrace 에 엣지·발견 문서·필터 사유를 기록한다.
+
+    요청로그(latency_breakdown)와 채팅 트레이스 패널이 이 detail 로
+    "그래프가 무엇을 보고 무엇을 살렸나"를 렌더한다 — 관측성 계약.
+    """
+    client = MagicMock()
+    client.is_configured = True
+    client.get_rag_context = AsyncMock(return_value={
+        "relatedDocuments": [
+            _make_related_doc(
+                doc_id="kms-new", file_name="약관.pdf",
+                reason="상품요약서가 참조하는 약관 원문", strength="5",
+            ),
+        ],
+    })
+
+    store = AsyncMock()
+    store.get_external_ids = AsyncMock(return_value={"aip-1": "kms-1"})
+    store.get_aip_ids_by_externals = AsyncMock(return_value={
+        "kms-new": _aip_map_entry("aip-new"),
+    })
+    store.search_chunks_in_doc = AsyncMock(return_value=[
+        {"chunk_id": "c1", "document_id": "aip-new", "content": "본문",
+         "chunk_index": 2, "score": 0.01, "file_name": "약관.pdf"},
+    ])
+
+    recorded = {}
+
+    class FakeTrace:
+        def add_node(self, name, duration_ms, **data):
+            recorded["name"] = name
+            recorded["data"] = data
+
+    state = _make_state(
+        [_make_search_result(doc_id="aip-1", file_name="요약서.pdf", score=0.8)],
+        question="가입 자격",
+    )
+    state["trace"] = FakeTrace()
+
+    node = create_graph_enrich(client, store)
+    result = await node(state)
+
+    assert result != {}
+    assert recorded["name"] == "graph_enrich"
+    detail = recorded["data"]["detail"]
+    assert detail["seeds"] == ["요약서.pdf"]
+    assert len(detail["edges"]) == 1
+    assert detail["edges"][0]["reason"] == "상품요약서가 참조하는 약관 원문"
+    assert detail["discovered"][0]["file_name"] == "약관.pdf"
+    assert detail["discovered"][0]["chunks"] == 1
+    # SSE 이벤트용 상세도 state 반환에 동봉
+    ge = result["graph_enrichment"]
+    assert ge["discovered_docs"][0]["file_name"] == "약관.pdf"
+    assert ge["seeds"] == ["요약서.pdf"]
