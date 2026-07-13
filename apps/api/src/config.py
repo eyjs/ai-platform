@@ -124,6 +124,8 @@ class Settings(BaseSettings):
 
     # 캐시 정리 주기 (초)
     cache_cleanup_interval: int = 300    # 5분마다 만료 캐시 삭제
+    # 내부 링크(KMS·DocForge) 상시 연결 감시 주기 (초). 0이면 부팅 1회만 점검
+    link_check_interval: int = 60
     # 레이트리밋 유휴 버킷 정리 TTL (초). 이만큼 미사용 버킷은 만석 상태이므로 삭제 안전 (B5)
     rate_limit_idle_ttl: int = 3600
 

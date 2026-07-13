@@ -301,7 +301,10 @@ class QueueWorker:
             result = await self._handler(payload)
             await self._queue.complete(job_id, result=result)
         except Exception as e:
-            logger.error("Job %s failed: %s", job_id, e)
-            await self._queue.fail(job_id, str(e))
+            # str(e) 가 빈 예외(TimeoutError 류)는 무음 실패가 된다 — 타입명을
+            # 항상 포함해 last_error/로그에서 원인을 식별 가능하게 한다.
+            error_desc = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            logger.error("Job %s failed: %s", job_id, error_desc, exc_info=True)
+            await self._queue.fail(job_id, error_desc)
         finally:
             heartbeat.cancel()

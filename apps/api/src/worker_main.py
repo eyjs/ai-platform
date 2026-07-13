@@ -54,6 +54,15 @@ async def run_worker() -> None:
     parsing_provider = provider_factory.get_parsing_provider()
     logger.info("worker_parser_ready", type=type(parsing_provider).__name__)
 
+    # 내부 링크(KMS·DocForge) 상시 연결 감시 — 워커는 두 서비스에 가장 많이
+    # 의존하는 프로세스다(파일 fetch·파싱). 끊김을 잡 실패로만 알게 되면 늦다.
+    from src.services.link_monitor import LinkMonitor, build_link_targets
+    link_monitor = LinkMonitor(
+        build_link_targets(settings),
+        interval_seconds=settings.link_check_interval,
+    )
+    await link_monitor.start()
+
     # 3. Ingest Pipeline
     ingest_pipeline = IngestPipeline(
         vector_store=vector_store,
@@ -199,6 +208,7 @@ async def run_worker() -> None:
 
     # 9. 정리
     logger.info("worker_draining")
+    await link_monitor.stop()
     await ingest_worker.stop(timeout=30.0)
     await kms_sync_worker.stop(timeout=30.0)
     await vlm_enhance_worker.stop(timeout=30.0)

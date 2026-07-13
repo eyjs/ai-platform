@@ -72,6 +72,16 @@ async def lifespan(app: FastAPI):
 
     await seed_dev_api_keys(state.vector_store.pool)
 
+    # 내부 링크(KMS·DocForge) 상시 연결 감시 — 부팅 1회 + 주기 점검 (운영 원칙:
+    # KMS ↔ ai-platform ↔ DocForge 는 항상 연결. 끊김은 즉시 관측돼야 한다)
+    from src.services.link_monitor import LinkMonitor, build_link_targets
+    link_monitor = LinkMonitor(
+        build_link_targets(settings),
+        interval_seconds=settings.link_check_interval,
+    )
+    await link_monitor.start()
+    app.state.link_monitor = link_monitor
+
     # app.state에 컴포넌트 등록 (AppState 필드 자동 매핑)
     # _workflow_checkpointer_cm: psycopg 풀 컨텍스트 매니저 — app.state 노출 차단 (G1 ②안)
     _INTERNAL_FIELDS = {"cleanup_task", "providers", "saju_report_worker", "_workflow_checkpointer_cm"}
@@ -85,6 +95,7 @@ async def lifespan(app: FastAPI):
     # Graceful shutdown: Profile watcher 중지 + 진행 중 요청 완료 대기
     if hasattr(state, 'profile_store') and state.profile_store:
         state.profile_store.stop_watcher()
+    await link_monitor.stop()
     await wait_for_pending_requests(timeout=30.0)
 
     await shutdown(state)

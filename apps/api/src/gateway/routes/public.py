@@ -24,12 +24,17 @@ _HW_SERVERS = [
 @router.get("/health")
 async def health(request: Request):
     state = _get_app_state(request)
-    return {
+    payload = {
         "status": "ok",
         "version": APP_VERSION,
         "provider_mode": state.settings.provider_mode.value,
         "profiles_loaded": state.profile_store.profile_count,
     }
+    # 내부 링크(KMS·DocForge) 최신 상태 — 상시 연결 원칙의 외부 관측점
+    link_monitor = getattr(request.app.state, "link_monitor", None)
+    if link_monitor:
+        payload["links"] = link_monitor.status
+    return payload
 
 
 @router.get("/health/hardware")
