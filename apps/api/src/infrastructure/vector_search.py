@@ -486,8 +486,11 @@ class VectorSearchMixin:
     def _select_columns(metadata_only: bool, score_expr: str) -> str:
         """검색 쿼리의 SELECT 절 생성. metadata_only=True이면 content 제외."""
         if metadata_only:
+            # `|| ''`는 PG 16.12 회귀(CVE-2026-2006 여파: 압축 저장된 멀티바이트 컬럼의
+            # SUBSTRING 부분해제가 "invalid byte sequence" 오류) 우회 — full detoast 강제.
+            # 16.13+ 업그레이드 후 제거 가능하나 있어도 무해하다.
             return f"""c.id, c.document_id, c.chunk_index,
-                   SUBSTRING(c.content, 1, 250) AS summary,
+                   SUBSTRING(c.content || '', 1, 250) AS summary,
                    c.domain_code, c.security_level,
                    {score_expr} AS score,
                    d.file_name, d.title"""
