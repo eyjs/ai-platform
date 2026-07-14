@@ -10,7 +10,7 @@ from typing import AsyncIterator, Optional
 from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
 from src.agent.state import create_initial_state
 from src.agent.executors._helpers import (
-    _extract_faithfulness_score, is_no_answer, widen_plan,
+    _extract_faithfulness_score, is_no_answer_dominant, widen_plan,
 )
 from src.domain.agent_context import AgentContext
 from src.domain.execution_plan import ExecutionPlan
@@ -37,7 +37,7 @@ class DeterministicExecutorMixin:
         result = await self._deterministic_app.ainvoke(initial_state)
 
         # 무답변 확장 재시도 (스트리밍 경로와 동일 계약 — _stream_deterministic 참조)
-        if plan.strategy.needs_rag and is_no_answer(result.get("answer", "")):
+        if plan.strategy.needs_rag and is_no_answer_dominant(result.get("answer", "")):
             widened = widen_plan(plan)
             logger.info(
                 "no_answer_widen_retry",
@@ -255,7 +255,7 @@ class DeterministicExecutorMixin:
         if (
             _widen_attempt == 0
             and plan.strategy.needs_rag
-            and is_no_answer(_probe_answer)
+            and is_no_answer_dominant(_probe_answer)
         ):
             widened = widen_plan(plan)
             logger.info(

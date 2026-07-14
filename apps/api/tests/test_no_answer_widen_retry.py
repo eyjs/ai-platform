@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.executors._helpers import is_no_answer, widen_plan
+from src.agent.executors._helpers import is_no_answer, is_no_answer_dominant, widen_plan
 from src.agent.graph_executor import GraphExecutor
 from src.domain.execution_plan import (
     ExecutionPlan, QuestionStrategy, QuestionType, ToolCall,
@@ -28,6 +28,34 @@ class TestIsNoAnswer:
     def test_normal_answer_not_flagged(self):
         assert not is_no_answer("가입 나이는 만 15세부터 70세까지입니다.")
         assert not is_no_answer("")
+
+
+class TestIsNoAnswerDominant:
+    """무답변 "지배" 판정 — 장문 답변의 말미 관용구는 재시도 트리거가 아니다."""
+
+    def test_short_hedge_answer_is_dominant(self):
+        """짧은 "확인 필요" 답변 = 실질 무답변 → 재시도 유효."""
+        assert is_no_answer_dominant("해당 내용은 확인이 필요합니다. 보험사에 문의하세요.")
+
+    def test_refusal_opening_is_dominant(self):
+        """서두부터 부재 선언(없는 상품 등) → 재시도 유효."""
+        text = "제공된 문서에는 해당 상품 정보가 포함되어 있지 않습니다. " + "관련 상품 안내: " + "가" * 400
+        assert is_no_answer_dominant(text)
+
+    def test_long_answer_with_tail_hedge_not_dominant(self):
+        """장문 실질 답변 + 말미 관용구 → 답변 보존 (재시도 안 함).
+
+        구조적 교훈: 이미 답변하던 것을 강제로 끊고 검색 루프를 재실행하면
+        멀쩡한 답변을 버리고 같은 모델로 재굴림 — 순수 낭비.
+        """
+        body = "공제금액은 10만원과 보상대상의료비의 30% 중 큰 금액입니다. " * 12
+        text = body + "기타 세부 항목은 확인이 필요합니다."
+        assert len(text) > 350
+        assert not is_no_answer_dominant(text)
+
+    def test_no_marker_not_dominant(self):
+        assert not is_no_answer_dominant("가입 나이는 만 15세부터 70세까지입니다.")
+        assert not is_no_answer_dominant("")
 
 
 class TestWidenPlan:

@@ -68,15 +68,39 @@ def _build_agentic_user_turn(question: str, plan: "ExecutionPlan") -> str:
 
 
 def is_no_answer(text: str) -> bool:
-    """답변이 '정보 부재' 정형 문구(시스템 프롬프트 처방)를 선언하는지 판정.
-
-    경계선 정원 컷으로 정답 청크가 빠졌을 때 모델은 정직하게 "확인 필요"라
-    답한다 — 이 신호를 잡아 검색을 넓혀 1회 재시도한다(무답변 확장 재시도).
-    """
+    """답변에 '정보 부재' 정형 문구(시스템 프롬프트 처방)가 포함되는지."""
     from src.locale.bundle import get_locale
     if not text:
         return False
     return any(m in text for m in get_locale().raw_patterns("no_answer_markers"))
+
+
+# 무답변 "지배" 판정 경계 — 이보다 짧으면 실질 내용이 없는 답변으로 본다.
+NO_ANSWER_DOMINANT_MAX_LENGTH = 350
+# 문구가 이 위치 안에서 시작하면 답변의 본질이 "부재 선언"이다.
+NO_ANSWER_DOMINANT_HEAD_CHARS = 100
+
+
+def is_no_answer_dominant(text: str) -> bool:
+    """무답변이 답변의 **본질**인지 판정 — 확장 재시도의 트리거.
+
+    구조적 구분(실사고 교훈):
+    - 검색 빈손/정원 컷 → 짧은 "확인 필요" 답변 → 재시도 유효
+    - 장문 답변 말미의 관용적 얼버무림("자세한 건 확인 필요") → 답변은
+      유효 — 재시도하면 멀쩡한 답변을 버리고 같은 모델로 재굴림(순수 낭비)
+
+    판정: 문구 포함 AND (전체가 짧거나 OR 문구가 서두에 등장).
+    """
+    from src.locale.bundle import get_locale
+    if not text:
+        return False
+    markers = get_locale().raw_patterns("no_answer_markers")
+    positions = [text.find(m) for m in markers if m in text]
+    if not positions:
+        return False
+    if len(text) <= NO_ANSWER_DOMINANT_MAX_LENGTH:
+        return True
+    return min(positions) < NO_ANSWER_DOMINANT_HEAD_CHARS
 
 
 def widen_plan(plan, cap: int = 16):
