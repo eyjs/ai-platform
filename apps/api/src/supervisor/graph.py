@@ -347,6 +347,11 @@ def _create_delegate(runner: SubAgentRunner, limits: SupervisorLimits):
                     if event["type"] in ("token", "replace"):
                         emitter.put_nowait((event["type"], event["data"]))
                         forwarded = True
+                    elif event["type"] == "trace":
+                        # 진행 관측 중계 (stream_final = 이 위임이 곧 최종 답변이므로
+                        # 서브의 진행 상황이 사용자 화면의 진행 상황이다).
+                        # forwarded에는 세지 않는다 — streamed는 답변 토큰 기준.
+                        emitter.put_nowait(("trace", event["data"]))
                     elif event["type"] == "result":
                         result = event["data"]
         except TimeoutError:

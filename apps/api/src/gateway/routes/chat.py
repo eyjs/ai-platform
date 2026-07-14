@@ -207,6 +207,9 @@ async def _run_supervisor_chat_stream(
                     yield {"event": "token", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
                 elif event_type == "replace":
                     yield {"event": "replace", "data": json.dumps({"delta": event["data"]}, ensure_ascii=False)}
+                elif event_type == "trace":
+                    # 위임 서브의 진행 관측 중계 (도구 실행 등) — trace 패널 표시용
+                    yield {"event": "trace", "data": json.dumps(event["data"], ensure_ascii=False)}
                 elif event_type == "done":
                     response = event["data"]["response"]
                     streamed = event["data"]["streamed"]

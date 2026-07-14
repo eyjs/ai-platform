@@ -212,6 +212,7 @@ async def test_chat_stream_supervisor_emits_initial_trace_and_request_log(monkey
     supervisor = AsyncMock()
 
     async def fake_stream(question, ctx, user_ctx_arg, trace=None):
+        yield {"type": "trace", "data": {"step": "tool_execution", "status": "start"}}
         yield {"type": "token", "data": "답변"}
         yield {"type": "done", "data": {
             "response": AgentResponse(answer="답변", sources=[]),
@@ -238,6 +239,10 @@ async def test_chat_stream_supervisor_emits_initial_trace_and_request_log(monkey
     assert events[0]["event"] == "trace"
     first = json_lib.loads(events[0]["data"])
     assert first == {"step": "supervisor", "status": "start"}
+
+    # 위임 서브의 진행 trace도 SSE로 중계된다
+    trace_events = [json_lib.loads(e["data"]) for e in events if e["event"] == "trace"]
+    assert {"step": "tool_execution", "status": "start"} in trace_events
 
     # request_log 기록 (기존 관측 공백 해소)
     assert len(captured) == 1

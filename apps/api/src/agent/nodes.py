@@ -419,12 +419,18 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
         prompt_results = _top_results_by_score(results, max_chunks)
 
         prompt = build_prompt(question, plan, prompt_results)
+        # 비스트리밍 생성도 트레이스에 기록 — 없으면 graph_execute 총합만 보여
+        # 지배적 지연(생성)이 breakdown에서 사라진다 (스트리밍 경로와 동일 계약).
+        trace = state.get("trace")
+        trace_node = trace.start_node("generate_with_context") if trace else None
         # plan.system_prompt = cacheable(persona+grounding), plan.volatile_system_prompt = 날짜.
         answer = await llm.generate(
             prompt,
             cacheable_system=plan.system_prompt,
             volatile_system=plan.volatile_system_prompt,
         )
+        if trace_node:
+            trace_node.finish(answer_len=len(answer), chunks=len(prompt_results))
 
         logger.info("llm_generate", answer_len=len(answer), context_chunks=len(prompt_results))
         return {"answer": answer}
@@ -473,9 +479,13 @@ def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
             response_policy=plan.response_policy,
         )
 
+        trace = state.get("trace")
+        trace_node = trace.start_node("run_guardrails") if trace else None
         answer, results = await run_guardrail_chain(
             answer, plan.guardrail_chain, guardrails, context,
         )
+        if trace_node:
+            trace_node.finish()
 
         # Guardrail 재생성 판단: warn + score < 0.35이면 재생성 후보
         # (0.5에서 0.35로 하향: 과도한 재생성 루프 억제)

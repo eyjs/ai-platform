@@ -69,6 +69,7 @@ async def test_stream_single_passthrough_streams_sub_tokens():
     runner = AsyncMock()
 
     async def fake_run_stream(profile_id, subquery, ctx, *, user_security_level, tenant_id, trace=None, workflow_policy="block"):
+        yield {"type": "trace", "data": {"step": "tool_execution", "status": "start"}}
         yield {"type": "token", "data": "대인배상은 "}
         yield {"type": "token", "data": "사람 피해 보상입니다"}
         yield {"type": "result", "data": SubAgentResult(
@@ -84,9 +85,12 @@ async def test_stream_single_passthrough_streams_sub_tokens():
 
     tokens = [e["data"] for e in events if e["type"] == "token"]
     assert tokens == ["대인배상은 ", "사람 피해 보상입니다"]
+    # 서브 진행 trace가 중계된다 (첫 토큰까지 무신호 구간 해소)
+    traces = [e["data"] for e in events if e["type"] == "trace"]
+    assert traces == [{"step": "tool_execution", "status": "start"}]
     done = [e for e in events if e["type"] == "done"]
     assert len(done) == 1
-    assert done[0]["data"]["streamed"] is True
+    assert done[0]["data"]["streamed"] is True  # trace는 streamed 판정에 안 섞임
     assert done[0]["data"]["response"].answer == "대인배상은 사람 피해 보상입니다"
     planner.synthesize.assert_not_awaited()
 
@@ -260,6 +264,8 @@ async def test_runner_run_stream_forwards_tokens_and_assembles_result():
     agent = AsyncMock()
 
     async def fake_execute_stream(*, question, plan, session_id, trace, context):
+        yield {"type": "trace", "data": {"step": "tool_execution", "status": "start"}}
+        yield {"type": "thinking", "data": "내부 사고"}
         yield {"type": "token", "data": "안녕"}
         yield {"type": "token", "data": "하세요"}
         yield {"type": "done", "data": {"sources": [{"document_id": "d1", "title": "t"}]}}
@@ -277,7 +283,8 @@ async def test_runner_run_stream_forwards_tokens_and_assembles_result():
         user_security_level="PUBLIC", tenant_id="default",
     ))
 
-    assert [e["type"] for e in events] == ["token", "token", "result"]
+    # trace는 중계, thinking은 서브 내부 관측이라 제외
+    assert [e["type"] for e in events] == ["trace", "token", "token", "result"]
     result = events[-1]["data"]
     assert result.ok is True
     assert result.answer == "안녕하세요"

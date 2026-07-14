@@ -168,7 +168,8 @@ class SubAgentRunner:
     ):
         """run()의 토큰 스트리밍 판 — 같은 가드·같은 결과 계약.
 
-        yield 이벤트: {"type": "token"|"replace", "data": str} 진행 중,
+        yield 이벤트: {"type": "token"|"replace", "data": str} 및
+        {"type": "trace", "data": dict}(진행 상황 — 도구 실행 등) 진행 중,
         마지막에 반드시 {"type": "result", "data": SubAgentResult} 1건.
         워크플로우 핸드오프는 단계 질문이 짧아 토큰 없이 result만 낸다(버퍼드).
         hub 계약 동일: 결과에 재라우팅 정보 없음, 서브는 메인에만 반환(§0-5).
@@ -218,7 +219,11 @@ class SubAgentRunner:
                     yield {"type": "replace", "data": event["data"]}
                 elif event_type == "done":
                     sources = event.get("data", {}).get("sources", [])
-                # thinking/trace 이벤트는 서브 내부 관측 — 위임 경로에선 중계하지 않는다.
+                elif event_type == "trace":
+                    # 진행 관측 중계 — 첫 토큰까지 수십 초 구간의 무신호 해소.
+                    # 호출자(위임 경로)가 최종 답변 확정 여부에 따라 노출을 결정한다.
+                    yield {"type": "trace", "data": event["data"]}
+                # thinking 이벤트는 서브 내부 관측 — 위임 경로에선 중계하지 않는다.
 
             yield {"type": "result", "data": SubAgentResult(
                 profile=profile_id, answer="".join(answer_parts), sources=sources, ok=True,
