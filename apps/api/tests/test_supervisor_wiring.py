@@ -373,3 +373,29 @@ async def test_chat_nonstream_records_nonzero_latency(monkeypatch):
 
     assert len(captured) == 1
     assert captured[0].latency_ms > 0
+
+
+@pytest.mark.asyncio
+async def test_supervisor_faithfulness_score_persisted(monkeypatch):
+    """서브 가드레일 점수가 request_log에 영속되고 클라이언트 응답에선 제거된다."""
+    user_ctx = _make_user_ctx()
+    supervisor = AsyncMock()
+    supervisor.supervise.return_value = AgentResponse(
+        answer="답", sources=[], guardrail_score=0.87,
+    )
+    state = _make_state(supervisor=supervisor)
+    state.request_log_service = MagicMock()
+    captured = _capture_enqueue(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "_get_app_state", lambda request: state)
+    monkeypatch.setattr(chat_module, "_authenticate", AsyncMock(return_value=user_ctx))
+    monkeypatch.setattr(chat_module, "_check_rate_limit", AsyncMock(return_value=None))
+
+    req = ChatRequest(question="q", chatbot_id="supervisor")
+    request = MagicMock()
+    request.client = None
+
+    resp = await chat_module.chat(req, request)
+
+    assert captured[0].faithfulness_score == 0.87  # 로그 영속
+    assert resp.guardrail_score is None  # 내부 필드는 응답에서 제거 (레거시 계약)

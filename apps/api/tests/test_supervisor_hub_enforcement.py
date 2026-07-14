@@ -101,9 +101,11 @@ def test_subagent_result_fields_are_exactly_declared_contract():
     field_names = {f.name for f in SubAgentResult.__dataclass_fields__.values()}
     # review_passed/review_note(P1-4)는 메인의 판정 기록이지 재라우팅 필드가 아니다 —
     # 값을 쓰는 주체도 메인(finalize 검토 게이트)이고, 다음 위임 대상을 정하지 않는다.
+    # faithfulness_score는 서브 가드레일 점수의 관측 필드 — 값을 쓰는 주체는
+    # 메인(요청 로그 영속)이고 다음 위임 대상을 정하지 않는다(재라우팅 아님).
     assert field_names == {
         "profile", "answer", "sources", "trace", "ok", "error", "workflow_handoff",
-        "review_passed", "review_note",
+        "review_passed", "review_note", "faithfulness_score",
     }
 
 

@@ -65,6 +65,11 @@ def extract_aliases(file_name: str, title: str = "") -> set[str]:
             deprefixed = _ASCII_PREFIX_RE.sub("", stripped)
             if deprefixed != stripped and len(deprefixed) >= MIN_ALIAS_LENGTH:
                 aliases.add(deprefixed)
+            # 한정사 접미 '용' 제거판 — "(유병력자용)"을 "유병력자"로도 부를 수 있게
+            # (실사고: "나 유병력자인데" 질문이 별칭 "유병력자용"과 한 글자 차이로 미스).
+            for a in (stripped, deprefixed):
+                if a.endswith("용") and len(a) - 1 >= MIN_ALIAS_LENGTH:
+                    aliases.add(a[:-1])
     return aliases
 
 

@@ -207,3 +207,23 @@ class TestAsciiPrefixVariant:
         idx = self._index()
         m = idx.match("간편간병보험 조건 알려줘")
         assert m.doc_ids == {"d1", "d2"}  # New간편간병 문서만
+
+
+class TestQualifierSuffixVariant:
+    """한정사 접미 '용' 제거판 — "유병력자용" 문서를 "유병력자"로 매칭 (실사고 720)."""
+
+    def _index(self):
+        idx = EntityDocIndex()
+        idx.build(DOCS)
+        return idx
+
+    def test_suffix_stripped_alias_extracted(self):
+        aliases = extract_aliases(
+            "무배당 프로미라이프 간편실손의료비보험(유병력자용)2604 상품요약서.pdf")
+        assert "유병력자" in aliases
+
+    def test_colloquial_condition_mention_matches(self):
+        """"나 유병력자인데 실손..." 구어 질문이 실손(유병력자용) 문서로 좁혀진다."""
+        idx = self._index()
+        m = idx.match("나 유병력자인데 입원했거든 실손의료비 자부담금 궁금해")
+        assert "d6" in m.doc_ids

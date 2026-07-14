@@ -68,6 +68,7 @@ async def _run_supervisor_chat(
     log_status_code = 200
     log_error_code: Optional[str] = None
     log_response_preview: Optional[str] = None
+    log_faithfulness_score: Optional[float] = None
     try:
         tenant_id = user_ctx.tenant_id or state.settings.default_tenant_id
         await state.session_memory.create_session(
@@ -106,6 +107,9 @@ async def _run_supervisor_chat(
         trace.log_summary()
         response.response_id = response_id
         log_response_preview = RequestLogEntry.truncate_preview(response.answer)
+        # 서브 가드레일 점수 — 로그 영속 후 내부 전달용 필드는 응답에서 제거(레거시 계약)
+        log_faithfulness_score = response.guardrail_score
+        response.guardrail_score = None
         return response
     except Exception:
         log_status_code = 500
@@ -124,6 +128,7 @@ async def _run_supervisor_chat(
                     request_preview=RequestLogEntry.truncate_preview(req.question),
                     response_preview=log_response_preview,
                     response_id=response_id,
+                    faithfulness_score=log_faithfulness_score,
                     client_ip=(request.client.host if request and request.client else None),
                     user_id=getattr(user_ctx, "user_id", None),
                     latency_breakdown=trace.summary(),
@@ -164,6 +169,7 @@ async def _run_supervisor_chat_stream(
         log_status_code = 200
         log_error_code: Optional[str] = None
         log_response_preview: Optional[str] = None
+        log_faithfulness_score: Optional[float] = None
         try:
             # 즉시 진행 이벤트 방출 — supervisor 경로는 첫 토큰까지 수십 초간
             # 무신호라 화면이 죽은 것처럼 보인다. 연결 생존 신호를 먼저 보낸다.
@@ -233,11 +239,13 @@ async def _run_supervisor_chat_stream(
                 "response_id": response_id,
                 "confidence": None,
                 "traversal_path": [],
+                "faithfulness_score": response.guardrail_score,
                 "sources": [s.model_dump() if hasattr(s, "model_dump") else s for s in response.sources],
             }, ensure_ascii=False)}
 
             trace.log_summary()
             log_response_preview = RequestLogEntry.truncate_preview(response.answer)
+            log_faithfulness_score = response.guardrail_score
         except Exception as stream_err:
             log_status_code = 500
             log_error_code = "supervisor_stream_error"
@@ -256,6 +264,7 @@ async def _run_supervisor_chat_stream(
                         request_preview=RequestLogEntry.truncate_preview(req.question),
                         response_preview=log_response_preview,
                         response_id=response_id,
+                        faithfulness_score=log_faithfulness_score,
                         client_ip=(request.client.host if request and request.client else None),
                         user_id=getattr(user_ctx, "user_id", None),
                         latency_breakdown=trace.summary(),

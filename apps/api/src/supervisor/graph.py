@@ -536,7 +536,11 @@ def _create_finalize(planner: SupervisorPlanner, limits: SupervisorLimits):
             r0 = results[0]
             logger.info("supervisor_single_passthrough", profile=r0.profile)
             return {
-                "response": AgentResponse(answer=r0.answer, sources=r0.sources, trace=trace_info)
+                "response": AgentResponse(
+                    answer=r0.answer, sources=r0.sources, trace=trace_info,
+                    # 단일 위임 = 서브 답변이 곧 최종 답변 — 서브 가드레일 점수 승계
+                    guardrail_score=r0.faithfulness_score,
+                )
             }
 
         sources = []

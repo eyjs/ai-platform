@@ -56,6 +56,8 @@ class SubAgentResult:
     # 답변(다음 단계 질문)을 그대로 사용자에게 전달해야 함(synthesize 금지).
     # hub 유지 — "다음 턴을 누가 받나"는 여전히 메인이 sticky 감지로 결정한다.
     workflow_handoff: bool = False
+    # 서브 가드레일의 faithfulness 점수 — 요청 로그 영속용 (passthrough 시 응답에 승계)
+    faithfulness_score: float | None = None
     # P1-4 메인 검토 게이트 판정. None=미검토(게이트 off), True/False=판정 결과.
     # 판정은 메인이 하며 서브 재생성은 없다. 재라우팅 필드가 아니다(hub 계약 유지).
     review_passed: bool | None = None

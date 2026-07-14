@@ -145,6 +145,7 @@ class SubAgentRunner:
                 trace=resp.trace,
                 ok=True,
                 workflow_handoff=is_workflow,
+                faithfulness_score=resp.guardrail_score,
             )
         except Exception as e:  # noqa: BLE001 - 서브 실패는 삼키되 메인에 명시 반환(부분실패 degrade 입력)
             logger.error(
@@ -205,6 +206,7 @@ class SubAgentRunner:
 
             answer_parts: list[str] = []
             sources: list = []
+            faithfulness_score = None
             async for event in self._agent.execute_stream(
                 question=query, plan=plan, session_id=ctx.session_id,
                 trace=trace, context=ctx,
@@ -219,6 +221,7 @@ class SubAgentRunner:
                     yield {"type": "replace", "data": event["data"]}
                 elif event_type == "done":
                     sources = event.get("data", {}).get("sources", [])
+                    faithfulness_score = event.get("data", {}).get("faithfulness_score")
                 elif event_type == "trace":
                     # 진행 관측 중계 — 첫 토큰까지 수십 초 구간의 무신호 해소.
                     # 호출자(위임 경로)가 최종 답변 확정 여부에 따라 노출을 결정한다.
@@ -227,6 +230,7 @@ class SubAgentRunner:
 
             yield {"type": "result", "data": SubAgentResult(
                 profile=profile_id, answer="".join(answer_parts), sources=sources, ok=True,
+                faithfulness_score=faithfulness_score,
             )}
         except Exception as e:  # noqa: BLE001 - 서브 실패는 삼키되 메인에 명시 반환(부분실패 degrade 입력)
             logger.error(
