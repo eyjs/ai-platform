@@ -65,3 +65,25 @@ def _build_agentic_user_turn(question: str, plan: "ExecutionPlan") -> str:
     if not prefix_parts:
         return question
     return "\n\n".join(prefix_parts + [f"[현재 질문]\n{question}"])
+
+
+def is_no_answer(text: str) -> bool:
+    """답변이 '정보 부재' 정형 문구(시스템 프롬프트 처방)를 선언하는지 판정.
+
+    경계선 정원 컷으로 정답 청크가 빠졌을 때 모델은 정직하게 "확인 필요"라
+    답한다 — 이 신호를 잡아 검색을 넓혀 1회 재시도한다(무답변 확장 재시도).
+    """
+    from src.locale.bundle import get_locale
+    if not text:
+        return False
+    return any(m in text for m in get_locale().raw_patterns("no_answer_markers"))
+
+
+def widen_plan(plan, cap: int = 16):
+    """검색 정원을 2배(상한 cap)로 넓힌 새 plan을 반환한다 (원본 불변)."""
+    import dataclasses
+    widened_strategy = dataclasses.replace(
+        plan.strategy,
+        max_vector_chunks=min(cap, max(1, plan.strategy.max_vector_chunks) * 2),
+    )
+    return dataclasses.replace(plan, strategy=widened_strategy)

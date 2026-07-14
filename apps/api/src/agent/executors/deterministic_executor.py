@@ -9,7 +9,9 @@ from typing import AsyncIterator, Optional
 
 from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
 from src.agent.state import create_initial_state
-from src.agent.executors._helpers import _extract_faithfulness_score
+from src.agent.executors._helpers import (
+    _extract_faithfulness_score, is_no_answer, widen_plan,
+)
 from src.domain.agent_context import AgentContext
 from src.domain.execution_plan import ExecutionPlan
 from src.domain.models import AgentResponse, SourceRef, TraceInfo
@@ -34,6 +36,17 @@ class DeterministicExecutorMixin:
         initial_state = create_initial_state(question, plan, session_id, trace=trace)
         result = await self._deterministic_app.ainvoke(initial_state)
 
+        # 무답변 확장 재시도 (스트리밍 경로와 동일 계약 — _stream_deterministic 참조)
+        if plan.strategy.needs_rag and is_no_answer(result.get("answer", "")):
+            widened = widen_plan(plan)
+            logger.info(
+                "no_answer_widen_retry",
+                from_chunks=plan.strategy.max_vector_chunks,
+                to_chunks=widened.strategy.max_vector_chunks,
+            )
+            retry_state = create_initial_state(question, widened, session_id, trace=trace)
+            result = await self._deterministic_app.ainvoke(retry_state)
+
         tools_called = result.get("tools_called", [])
         sources = [SourceRef(**s) for s in result.get("sources", [])]
         guardrail_score = _extract_faithfulness_score(result.get("guardrail_results") or {})
@@ -56,6 +69,7 @@ class DeterministicExecutorMixin:
         session_id: str,
         trace: Optional[RequestTrace] = None,
         context: Optional[AgentContext] = None,
+        _widen_attempt: int = 0,
     ) -> AsyncIterator[dict]:
         """결정론적 모드 스트리밍.
 
@@ -231,6 +245,38 @@ class DeterministicExecutorMixin:
             "chunks": total_chunks,
             "thinking_chunks": thinking_chunks,
         }}
+
+        # 무답변 확장 재시도 — 답변이 "정보 부재" 정형 문구면 검색 정원을 2배로
+        # 넓혀 전체(검색→생성)를 1회 재실행한다. 경계선 정원 컷으로 정답 청크가
+        # 빠진 비결정 오답을 결정론적으로 복구한다(실사고: 실손 가입자격 —
+        # 정답 청크 fused 0.646이 정원 5 밖 6위, 실행에 따라 성패 왕복).
+        # 넓혀도 무답변이면 그때가 진짜 "없음"(정직 답변 유지).
+        _probe_answer = "".join(answer_tokens)
+        if (
+            _widen_attempt == 0
+            and plan.strategy.needs_rag
+            and is_no_answer(_probe_answer)
+        ):
+            widened = widen_plan(plan)
+            logger.info(
+                "no_answer_widen_retry",
+                from_chunks=plan.strategy.max_vector_chunks,
+                to_chunks=widened.strategy.max_vector_chunks,
+            )
+            yield {"type": "trace", "data": {
+                "step": "widen_retry", "status": "start",
+                "reason": "no_answer_detected",
+                "from_chunks": plan.strategy.max_vector_chunks,
+                "to_chunks": widened.strategy.max_vector_chunks,
+            }}
+            # 이미 스트리밍된 무답변 텍스트를 화면에서 비우고 재시도 결과로 대체
+            yield {"type": "replace", "data": ""}
+            async for event in self._stream_deterministic(
+                question, widened, session_id,
+                trace=trace, context=context, _widen_attempt=1,
+            ):
+                yield event
+            return
 
         # Guardrail (래퍼에서 직접 처리)
         full_answer = "".join(answer_tokens)

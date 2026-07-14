@@ -96,7 +96,11 @@ async def rerank_3tier(
             "fused_score": fused,
         })
 
-    scored.sort(key=lambda x: x["fused_score"], reverse=True)
+    # 동점 tie-break을 chunk_id로 고정 — 실행 간 순서 안정성(경계선 청크가
+    # 동점 정렬 순서에 따라 정원 안팎을 왕복하는 비결정 제거).
+    scored.sort(
+        key=lambda x: (-x["fused_score"], str(x["data"].get("chunk_id", ""))),
+    )
 
     # 5. tier 필터링 — 임계값은 정규화된 [0,1] fused 점수 기준.
     #    (C10: 운영 리랭커 출력 분포로 경험적 재캘리브레이션 대상 — observability 로깅 필요)

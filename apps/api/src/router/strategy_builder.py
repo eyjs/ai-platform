@@ -20,15 +20,23 @@ from src.tools.base import ScopedTool, Tool
 logger = logging.getLogger(__name__)
 
 # QuestionType별 기본 전략 (L3 책임)
+# max_vector_chunks 8: 경계선 마진 — 후보 풀이 실행마다 조금씩 달라(확장/이웃/그래프)
+# min-max 정규화 점수가 흔들리는데, 정원 5는 정답 청크(예: fused 0.64, 6위권)를
+# 실행에 따라 자르거나 살리는 비결정 오답을 만든다(실사고: 실손 가입자격).
+# 8이면 문서 다양성 캡(DIVERSITY_MIN_TOP_K=8)도 함께 활성화된다.
 STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
     QuestionType.GREETING: QuestionStrategy(needs_rag=False, history_turns=0),
     QuestionType.SYSTEM_META: QuestionStrategy(needs_rag=False, history_turns=0),
-    QuestionType.STANDALONE: QuestionStrategy(needs_rag=True, history_turns=3),
+    QuestionType.STANDALONE: QuestionStrategy(
+        needs_rag=True, history_turns=3, max_vector_chunks=8,
+    ),
     QuestionType.SAME_DOC_FOLLOWUP: QuestionStrategy(
+        # 문서 고정(allowed_doc_ids) 후속질문 — 좁은 정원이 의도값.
+        # 부족하면 무답변 확장 재시도가 3→6으로 커버한다.
         needs_rag=True, history_turns=3, max_vector_chunks=3,
     ),
     QuestionType.ANSWER_BASED_FOLLOWUP: QuestionStrategy(
-        needs_rag=True, history_turns=5,
+        needs_rag=True, history_turns=5, max_vector_chunks=8,
     ),
     QuestionType.CROSS_DOC_INTEGRATION: QuestionStrategy(
         needs_rag=True, history_turns=3, max_vector_chunks=10,
