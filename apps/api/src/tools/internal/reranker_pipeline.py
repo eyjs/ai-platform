@@ -9,6 +9,46 @@ FALLBACK_MIN_SCORE = 0.25
 RERANKER_WEIGHT = 0.7
 VECTOR_SCORE_WEIGHT = 0.3
 SLIDING_WINDOW_SIZE = 1500
+# 문서 다양성 캡: top_k가 이 값 이상(비교/통합 등 넓은 검색)일 때만 적용.
+# 문서당 최대 채택 수 = max(2, top_k // 3).
+DIVERSITY_MIN_TOP_K = 8
+
+
+def _apply_document_diversity(
+    selected: list[dict], eligible: list[dict], top_k: int,
+) -> list[dict]:
+    """문서당 채택 상한을 적용해 한 문서의 정원 독식을 막는다.
+
+    fused 내림차순 그리디로 문서당 캡 이내에서 먼저 채우고, 남은 정원은
+    캡 때문에 밀린 상위 후보로 백필한다(총 개수는 줄지 않음 — 품질 상한만 분산).
+    """
+    per_doc_cap = max(2, top_k // 3)
+    doc_counts: dict = {}
+    diversified: list[dict] = []
+    overflow: list[dict] = []
+    for s in eligible:
+        if len(diversified) >= top_k:
+            break
+        doc = s["data"].get("document_id")
+        if doc_counts.get(doc, 0) >= per_doc_cap:
+            overflow.append(s)
+            continue
+        doc_counts[doc] = doc_counts.get(doc, 0) + 1
+        diversified.append(s)
+    # 다양한 문서가 부족해 정원이 안 차면 캡 초과분으로 백필 (fused 순 유지)
+    for s in overflow:
+        if len(diversified) >= top_k:
+            break
+        diversified.append(s)
+    if len(diversified) != len(selected) or any(
+        a is not b for a, b in zip(diversified, selected)
+    ):
+        logger.info(
+            "rerank_diversity_applied",
+            per_doc_cap=per_doc_cap,
+            docs=len(doc_counts),
+        )
+    return diversified
 
 
 async def rerank_3tier(
@@ -73,6 +113,14 @@ async def rerank_3tier(
         # 모든 후보가 fallback 미만이면 빈 결과. RAG 충실성(faithfulness)을 위해
         # 저품질 컨텍스트를 강제 반환하지 않는다(환각 방지) — last-resort tier 미적용.
         results = []
+
+    # 문서 다양성 캡 (넓은 검색에서만) — 비교/통합 질문에서 한 문서(상품)가
+    # 정원을 독식하면 다른 비교 대상이 컨텍스트에서 사라져 "문서에 없음" 오답이
+    # 된다(실사고). top_k가 좁은 일반 질문(단일 문서 심층)은 건드리지 않는다.
+    if top_k >= DIVERSITY_MIN_TOP_K and results:
+        results = _apply_document_diversity(
+            results, tier1 + tier2, top_k,
+        )
 
     logger.info(
         "rerank_3tier",
