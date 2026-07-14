@@ -252,3 +252,48 @@ class TestLLMFallbackSkipConditions:
         assert qtype == QuestionType.STANDALONE
         assert custom == "INSURANCE_INQUIRY"
         mock_llm.generate_json.assert_not_called()
+
+
+class TestComparisonDetection:
+    """비교 신호 감지 — 이력·커스텀 인텐트와 직교 (첫 질문 비교 오분류 회귀)."""
+
+    async def test_comparison_first_question_no_history(self):
+        """이력 없는 첫 질문도 비교 마커로 CROSS_DOC_INTEGRATION 분류."""
+        classifier = IntentClassifier(llm=None)
+        qtype, custom = await classifier.classify(
+            "New간편간병보험이랑 참좋은더보장간병보험 가입 조건 차이만 표로 비교해줘",
+            [], _make_profile(),
+        )
+        assert qtype == QuestionType.CROSS_DOC_INTEGRATION
+
+    async def test_comparison_beats_custom_intent_standalone(self):
+        """커스텀 인텐트 매칭돼도 비교 신호가 구조 유형을 결정한다 (직교)."""
+        from src.domain.agent_profile import AgentProfile, IntentHint
+        profile = AgentProfile(
+            id="test", name="Test", domain_scopes=["보험"],
+            intent_hints=[IntentHint(
+                name="INSURANCE_INQUIRY", patterns=["보험"], description="보험 문의",
+            )],
+        )
+        classifier = IntentClassifier(llm=None)
+        qtype, custom = await classifier.classify(
+            "두 보험 상품 차이점 알려줘", [], profile,
+        )
+        assert qtype == QuestionType.CROSS_DOC_INTEGRATION
+        assert custom == "INSURANCE_INQUIRY"  # 커스텀 인텐트 라벨은 보존
+
+    async def test_non_comparison_custom_intent_still_standalone(self):
+        """비교 신호 없는 커스텀 인텐트 질문은 기존대로 STANDALONE."""
+        from src.domain.agent_profile import AgentProfile, IntentHint
+        profile = AgentProfile(
+            id="test", name="Test", domain_scopes=["보험"],
+            intent_hints=[IntentHint(
+                name="INSURANCE_INQUIRY", patterns=["보험"], description="보험 문의",
+            )],
+        )
+        classifier = IntentClassifier(llm=None)
+        qtype, custom = await classifier.classify(
+            "간병보험 가입 나이 알려줘", [], profile,
+        )
+        assert qtype == QuestionType.STANDALONE
+        assert custom == "INSURANCE_INQUIRY"

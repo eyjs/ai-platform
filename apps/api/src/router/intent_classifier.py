@@ -42,30 +42,48 @@ class IntentClassifier:
         Returns:
             (question_type, custom_intent_name)
         """
-        # 1. 커스텀 Intent 체크
+        # 1. 커스텀 Intent 체크 (도메인 라벨 — 구조 유형과 직교)
         custom = self._check_custom_intents(query, profile.intent_hints)
+
+        # 2. 비교/통합 신호 — 이력 불필요("A랑 B 차이 비교"는 첫 질문으로도 온다).
+        #    커스텀 인텐트보다 먼저 확정해야 STANDALONE 강제를 피한다
+        #    (실사고: 두 상품 비교가 INSURANCE_INQUIRY→STANDALONE으로 강등 →
+        #    검색 청크 5개가 한 상품에 쏠려 "문서에 없음" 오답).
+        comparison_type = self._detect_comparison(query)
+        if comparison_type:
+            return comparison_type, custom
+
         if custom:
             return QuestionType.STANDALONE, custom
 
-        # 2. 패턴 기반 분류
+        # 3. 패턴 기반 분류
         pattern_type = self._pattern_classify(query, profile.domain_scopes)
         if pattern_type:
             return pattern_type, None
 
-        # 3. 대화 이력 기반 후속 질문 판단
+        # 4. 대화 이력 기반 후속 질문 판단
         if history:
             followup_type = self._detect_followup(query)
             if followup_type:
                 return followup_type, None
 
-        # 4. LLM 폴백 (설정된 경우 + 대화 이력 있을 때)
+        # 5. LLM 폴백 (설정된 경우 + 대화 이력 있을 때)
         if self._llm and history:
             llm_type = await self._classify_with_llm(query, history)
             if llm_type:
                 return llm_type, None
 
-        # 5. 최종 기본: STANDALONE
+        # 6. 최종 기본: STANDALONE
         return QuestionType.STANDALONE, None
+
+    @staticmethod
+    def _detect_comparison(query: str) -> Optional[QuestionType]:
+        """비교/통합 질문 신호 — 대화 이력과 무관한 구조 신호."""
+        locale = get_locale()
+        for marker in locale.raw_patterns("comparison_markers"):
+            if marker in query:
+                return QuestionType.CROSS_DOC_INTEGRATION
+        return None
 
     @staticmethod
     def _check_custom_intents(query: str, hints: List[IntentHint]) -> Optional[str]:
@@ -171,8 +189,6 @@ class IntentClassifier:
             if marker in query:
                 return QuestionType.SAME_DOC_FOLLOWUP
 
-        for marker in locale.raw_patterns("comparison_markers"):
-            if marker in query:
-                return QuestionType.CROSS_DOC_INTEGRATION
+        # 비교 신호는 _detect_comparison(이력 불필요)으로 승격 — 여기서 중복 검사 안 함
 
         return None
