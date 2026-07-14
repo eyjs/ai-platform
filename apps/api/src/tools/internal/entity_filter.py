@@ -103,9 +103,13 @@ class EntityDocIndex:
         )
 
     def match(self, query: str) -> EntityMatch:
-        """질문에 등장하는 별칭들의 문서 ID 합집합을 반환한다.
+        """질문에 등장하는 별칭들의 문서 집합을 반환한다.
 
-        비교 질문("A랑 B 차이")은 두 별칭이 모두 걸려 양쪽 문서가 포함된다.
+        결합 규칙 (결정론):
+        - **교집합이 비어있지 않으면 교집합** — "A상품 약관"처럼 상품+유형을
+          함께 말한 질문은 정확히 그 문서로 좁힌다(최대 정밀).
+        - **교집합이 비면 합집합** — "A랑 B 비교"는 서로소 집합이라 자동으로
+          양쪽 문서가 모두 포함된다(recall 보장).
         긴 별칭이 매칭되면 그 부분문자열인 짧은 별칭은 중복이라 제외한다.
         """
         norm_query = _normalize(query)
@@ -115,7 +119,9 @@ class EntityDocIndex:
             a for a in hits
             if not any(a != other and a in other for other in hits)
         ]
-        doc_ids: set[str] = set()
-        for alias in maximal:
-            doc_ids |= self._alias_to_docs[alias]
+        if not maximal:
+            return EntityMatch()
+        sets = [self._alias_to_docs[a] for a in maximal]
+        intersection = set.intersection(*sets)
+        doc_ids = intersection if intersection else set().union(*sets)
         return EntityMatch(doc_ids=doc_ids, aliases=sorted(maximal))

@@ -86,6 +86,48 @@ class VectorStore(VectorSearchMixin, AbstractVectorStore):
         tenant_id = tenant_id or current_tenant.get() or _DEFAULT_TENANT
         doc_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
+            # external_id 가 있으면 그것이 정본 식별자(KMS documents.id) —
+            # file_hash 보다 먼저 판별해야 한다. 재처리(reprocess)로 파서가
+            # 바뀌면 같은 문서의 file_hash 가 달라질 수 있는데, 그때
+            # (file_hash, domain) arbiter 로는 충돌이 안 잡히고 external_id
+            # 유니크 인덱스가 raw UniqueViolationError 를 던져 인제스트가
+            # 죽는다 (실측: KMS 일괄 재파싱 13건 전건 실패, 2026-07-14).
+            #
+            # conflict target 은 부분 유니크 인덱스 uq_documents_external_id_domain
+            # (WHERE external_id IS NOT NULL, 마이그레이션 022) — PostgreSQL 은
+            # 부분 인덱스 arbiter 추론에 동일한 WHERE 술어가 필요하다.
+            # 재처리 시 내용이 바뀌므로 file_hash/file_name 도 함께 갱신한다.
+            if external_id is not None:
+                try:
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO documents (id, external_id, title, file_name, file_hash,
+                            domain_code, security_level, source_url, metadata, tenant_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        ON CONFLICT (external_id, domain_code) WHERE external_id IS NOT NULL DO UPDATE
+                            SET title = EXCLUDED.title,
+                                file_name = EXCLUDED.file_name,
+                                file_hash = EXCLUDED.file_hash,
+                                security_level = EXCLUDED.security_level,
+                                source_url = EXCLUDED.source_url,
+                                metadata = EXCLUDED.metadata
+                        RETURNING id
+                        """,
+                        uuid.UUID(doc_id), external_id, title, file_name, file_hash,
+                        domain_code, security_level, source_url,
+                        json.dumps(metadata or {}, ensure_ascii=False), tenant_id,
+                    )
+                    return str(row["id"])
+                except asyncpg.UniqueViolationError as exc:
+                    # 다른 external_id 의 기존 행이 같은 file_hash 를 갖는 경우
+                    # (동일 내용 문서가 KMS 에 별도 문서로 존재) —
+                    # documents_file_hash_domain_code_key 가 raw 로 터진다.
+                    # 종전 계약(내용 기준 dedupe: 기존 행 재사용)으로 폴백.
+                    if exc.constraint_name != "documents_file_hash_domain_code_key":
+                        raise
+                    if not file_hash:  # pragma: no cover - hash 없이는 불가능한 조합
+                        raise
+
             if file_hash:
                 # INSERT ON CONFLICT: race condition 없는 atomic upsert
                 row = await conn.fetchrow(
@@ -94,35 +136,6 @@ class VectorStore(VectorSearchMixin, AbstractVectorStore):
                         domain_code, security_level, source_url, metadata, tenant_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (file_hash, domain_code) DO UPDATE
-                        SET title = EXCLUDED.title,
-                            security_level = EXCLUDED.security_level,
-                            source_url = EXCLUDED.source_url,
-                            metadata = EXCLUDED.metadata
-                    RETURNING id
-                    """,
-                    uuid.UUID(doc_id), external_id, title, file_name, file_hash,
-                    domain_code, security_level, source_url,
-                    json.dumps(metadata or {}, ensure_ascii=False), tenant_id,
-                )
-                return str(row["id"])
-
-            # file_hash가 없는 경로(스트림 업로드 등). external_id가 있으면
-            # (external_id, domain_code) 기준으로 멱등 UPSERT — 동일 외부 문서가
-            # 복수 행으로 적재되는 것을 막는다(at-least-once 수신측 정합, Step25/Step18).
-            #
-            # conflict target 은 부분 유니크 인덱스 uq_documents_external_id_domain
-            # (WHERE external_id IS NOT NULL, 마이그레이션 022)이다. PostgreSQL 은
-            # 부분 인덱스를 ON CONFLICT arbiter 로 추론(infer)하려면 동일한 술어를
-            # ON CONFLICT 에 명시해야 한다. WHERE 술어가 없으면 "no unique or
-            # exclusion constraint matching the ON CONFLICT specification" 로
-            # 실패하여 at-least-once 중복 수신이 멱등이 아니게 된다(Step18 봉합 대상).
-            if external_id is not None:
-                row = await conn.fetchrow(
-                    """
-                    INSERT INTO documents (id, external_id, title, file_name, file_hash,
-                        domain_code, security_level, source_url, metadata, tenant_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (external_id, domain_code) WHERE external_id IS NOT NULL DO UPDATE
                         SET title = EXCLUDED.title,
                             security_level = EXCLUDED.security_level,
                             source_url = EXCLUDED.source_url,

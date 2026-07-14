@@ -157,3 +157,29 @@ async def test_rag_search_respects_preset_doc_ids():
     )
     assert captured["scope"].allowed_doc_ids == ["dX"]
     store.list_document_names.assert_not_awaited()
+
+
+class TestIntersectionRule:
+    """교집합 우선 결합 — 상품+유형은 정밀, 비교는 합집합."""
+
+    def _index(self):
+        idx = EntityDocIndex()
+        idx.build(DOCS)
+        return idx
+
+    def test_product_plus_type_intersects_to_one_doc(self):
+        """'A상품 약관' → 그 상품의 약관 1문서로 정밀 축소."""
+        idx = self._index()
+        m = idx.match("New간편간병보험 보험약관에서 청구 서류 알려줘")
+        assert m.doc_ids == {"d1"}
+
+    def test_comparison_disjoint_falls_back_to_union(self):
+        """'A랑 B 비교' → 교집합 공집합 → 합집합 (양쪽 보장)."""
+        idx = self._index()
+        m = idx.match("New간편간병보험이랑 참좋은더보장간병보험 보험약관 비교")
+        assert {"d1", "d2", "d3", "d4"} <= m.doc_ids
+
+    def test_single_alias_unchanged(self):
+        idx = self._index()
+        m = idx.match("참좋은더보장간병보험 가입 조건")
+        assert m.doc_ids == {"d3", "d4"}

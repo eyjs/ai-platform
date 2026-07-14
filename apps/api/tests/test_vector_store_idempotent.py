@@ -76,8 +76,10 @@ async def test_no_hash_no_external_id_plain_insert():
 
 
 @pytest.mark.asyncio
-async def test_file_hash_path_unchanged():
-    # Arrange: file_hash 있음 → 기존 (file_hash, domain_code) UPSERT 유지
+async def test_external_id_takes_precedence_over_file_hash():
+    # 계약 변경(2026-07-14): external_id 가 있으면 그것이 정본 식별자 —
+    # 재처리(reprocess)로 file_hash 가 바뀌어도 external_id upsert 로 잡는다
+    # (실사고: KMS 일괄 재파싱 13건 UniqueViolation 전건 실패).
     conn = AsyncMock()
     conn.fetchrow = AsyncMock(return_value={"id": "doc-fh"})
     vs = _store_with_conn(conn)
@@ -88,6 +90,22 @@ async def test_file_hash_path_unchanged():
         tenant_id="t1",
     )
 
-    # Assert
+    # Assert: external_id 부분 유니크 인덱스가 arbiter
+    sql = conn.fetchrow.call_args[0][0]
+    assert "ON CONFLICT (external_id, domain_code)" in sql
+    assert "WHERE external_id IS NOT NULL" in sql
+
+
+@pytest.mark.asyncio
+async def test_file_hash_path_without_external_id():
+    # external_id 없이 file_hash 만 있으면 기존 (file_hash, domain_code) UPSERT 유지
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value={"id": "doc-fh"})
+    vs = _store_with_conn(conn)
+
+    await vs.insert_document(
+        title="t", domain_code="d", file_hash="abc", tenant_id="t1",
+    )
+
     sql = conn.fetchrow.call_args[0][0]
     assert "ON CONFLICT (file_hash, domain_code)" in sql
