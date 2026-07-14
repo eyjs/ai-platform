@@ -5,6 +5,7 @@ L1 쿼리확장 -> 멀티쿼리 검색 -> L2 노이즈필터 -> L3 이웃확장 
 """
 
 import asyncio
+import dataclasses
 import time
 from typing import Optional
 
@@ -17,6 +18,7 @@ from src.tools.base import ToolResult
 from src.tools.internal.query_expander import expand_queries
 from src.tools.internal.noise_filter import filter_noise
 from src.tools.internal.neighbor_expander import expand_neighbors
+from src.tools.internal.entity_filter import EntityDocIndex, EntityMatch
 from src.tools.internal.reranker_pipeline import rerank_3tier
 from src.tools.internal.result_guard import guard_results
 
@@ -83,6 +85,36 @@ class RAGSearchTool:
         self._reranker = reranker
         self._router_llm = router_llm
         self._default_top_k = default_top_k
+        # 깔때기 1단계: 질문 기반 엔티티 메타필터 인덱스 (코퍼스 문서명에서 유도, TTL 갱신)
+        self._entity_index = EntityDocIndex()
+
+    async def _entity_scope(
+        self, query: str, scope: SearchScope,
+    ) -> tuple[SearchScope, Optional[EntityMatch]]:
+        """질문에 코퍼스 문서 별칭이 등장하면 해당 문서들로 스코프를 좁힌다.
+
+        - 이미 문서가 고정된 스코프(SAME_DOC 후속 등)는 건드리지 않는다.
+        - 매칭 없으면 원본 스코프 그대로 (필터 없음 = 기존 동작).
+        """
+        if scope.allowed_doc_ids is not None:
+            return scope, None
+        try:
+            if self._entity_index.is_stale:
+                self._entity_index.build(await self._store.list_document_names())
+            match = self._entity_index.match(query)
+        except Exception as e:  # noqa: BLE001 - 필터는 최적화 — 실패해도 검색은 계속
+            logger.warning("entity_filter_error", error=str(e))
+            return scope, None
+        if not match.doc_ids:
+            return scope, None
+        logger.info(
+            "entity_filter_applied",
+            aliases=match.aliases,
+            docs=len(match.doc_ids),
+        )
+        return dataclasses.replace(
+            scope, allowed_doc_ids=sorted(match.doc_ids),
+        ), match
 
     async def execute(
         self,
@@ -109,15 +141,37 @@ class RAGSearchTool:
         if disclosure_level == 1:
             return await self._execute_level1(query, scope, t_start)
 
+        # 깔때기 1단계: 질문의 엔티티(상품명·문서유형)로 후보 문서 축소 (P2 메타필터)
+        effective_scope, entity_match = await self._entity_scope(query, scope)
+
         # Level 2: 기존 5-layer 파이프라인 (기본값)
         results, query_embedding, trace_detail = await self._execute_full_pipeline(
-            query, scope, top_k,
+            query, effective_scope, top_k,
         )
+
+        if entity_match:
+            trace_detail.setdefault("filter", {})["entity_filter"] = {
+                "aliases": entity_match.aliases,
+                "docs": len(entity_match.doc_ids),
+                "fallback": False,
+            }
+            if not results:
+                # 필터가 과하게 좁혔을 가능성 — 무필터로 1회 폴백 (recall 보증)
+                logger.info("entity_filter_fallback", aliases=entity_match.aliases)
+                results, query_embedding, trace_detail = await self._execute_full_pipeline(
+                    query, scope, top_k,
+                )
+                trace_detail.setdefault("filter", {})["entity_filter"] = {
+                    "aliases": entity_match.aliases,
+                    "docs": len(entity_match.doc_ids),
+                    "fallback": True,
+                }
+                effective_scope = scope
 
         # Level 3: Level 2 + references 조건부 로드 (임베딩 재사용)
         if disclosure_level == 3 and results:
             results = await self._append_references(
-                query, scope, results, t_start,
+                query, effective_scope, results, t_start,
                 query_embedding=query_embedding,
             )
 

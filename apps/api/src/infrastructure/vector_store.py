@@ -261,6 +261,22 @@ class VectorStore(VectorSearchMixin, AbstractVectorStore):
             },
         }
 
+    async def list_document_names(self) -> list[dict]:
+        """전 문서의 (id, file_name, title) 경량 목록 — 엔티티 메타필터 인덱스용.
+
+        RLS 활성 시 acquire 단계에서 테넌트 격리가 적용된다.
+        """
+        if not self._pool:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, file_name, title FROM documents",
+            )
+        return [
+            {"id": str(r["id"]), "file_name": r["file_name"] or "", "title": r["title"] or ""}
+            for r in rows
+        ]
+
     async def get_document_meta(self, document_id: str) -> dict | None:
         """문서 메타 + 청크 수 (원본 문서 뷰어 헤더)."""
         if not self._pool:
