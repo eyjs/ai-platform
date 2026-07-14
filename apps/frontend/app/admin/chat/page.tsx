@@ -92,7 +92,7 @@ export default function AdminChatPage() {
       },
       onDone: (data: {
         answer?: string;
-        sources?: Array<{ title: string; url?: string }>;
+        sources?: Array<{ title: string; document_id?: string; url?: string }>;
         response_id?: string;
       }) => {
         const sid = activeSessionIdRef.current;

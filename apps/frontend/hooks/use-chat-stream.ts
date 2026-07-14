@@ -11,7 +11,7 @@ interface UseChatStreamCallbacks {
   onDone: (data: {
     /** api 가 생성한 최종 답변 전문. 토큰 누적이 누락돼도 이 값으로 보정. */
     answer?: string;
-    sources?: Array<{ title: string; url?: string }>;
+    sources?: Array<{ title: string; document_id?: string; url?: string }>;
     /** api 가 생성한 응답 식별자. 피드백 전송 시 사용. */
     response_id?: string;
   }) => void;

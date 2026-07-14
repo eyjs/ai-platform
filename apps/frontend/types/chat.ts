@@ -10,7 +10,7 @@ export interface ChatMessage {
   isStreaming: boolean;
   isError: boolean;
   errorMessage?: string;
-  sources?: Array<{ title: string; url?: string }>;
+  sources?: Array<{ title: string; document_id?: string; url?: string }>;
   traceData?: Record<string, unknown>;
   /** RAG 파이프라인 트레이스 — SSE trace 이벤트를 순서대로 누적(답변별 펼쳐보기용). */
   traceEvents?: Array<Record<string, unknown>>;

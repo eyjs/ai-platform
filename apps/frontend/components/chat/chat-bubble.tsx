@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { Avatar } from '@/components/ui/avatar';
 import { MarkdownRenderer } from './markdown-renderer';
@@ -86,14 +87,26 @@ export function ChatBubble({ message, className, onFeedback }: ChatBubbleProps) 
               출처
             </p>
             <div className="flex flex-wrap gap-1">
-              {message.sources.map((source, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-neutral-100)] px-2 py-0.5 text-[var(--font-size-xs)] text-[var(--color-neutral-600)]"
-                >
-                  {source.title}
-                </span>
-              ))}
+              {message.sources.map((source, i) =>
+                source.document_id ? (
+                  // 문서 뷰어로 이동 가능한 출처 — 링크임을 명확히 (색·밑줄·화살표)
+                  <Link
+                    key={i}
+                    href={`/admin/documents/${source.document_id}`}
+                    className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-primary-50)] px-2 py-0.5 text-[var(--font-size-xs)] text-[var(--color-primary-700)] underline decoration-[var(--color-primary-300)] underline-offset-2 transition-colors hover:bg-[var(--color-primary-100)] hover:decoration-[var(--color-primary-600)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-primary-500)]"
+                  >
+                    {source.title}
+                    <span aria-hidden="true">↗</span>
+                  </Link>
+                ) : (
+                  <span
+                    key={i}
+                    className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-neutral-100)] px-2 py-0.5 text-[var(--font-size-xs)] text-[var(--color-neutral-600)]"
+                  >
+                    {source.title}
+                  </span>
+                ),
+              )}
             </div>
           </div>
         )}

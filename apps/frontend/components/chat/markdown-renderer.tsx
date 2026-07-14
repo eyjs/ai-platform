@@ -70,6 +70,32 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         pre({ children }) {
           return <>{children}</>;
         },
+        a({ href, children }) {
+          // LLM이 간혹 만드는 가짜 링크(http://문서:... 등)는 클릭하면 404가
+          // 되므로 일반 텍스트로 무해화. 유효한 http(s) 링크만 링크로 렌더
+          // (밑줄로 클릭 가능함을 명확히, 새 탭).
+          let valid = false;
+          try {
+            const url = new URL(href ?? '', 'http://invalid.local');
+            valid =
+              (url.protocol === 'http:' || url.protocol === 'https:') &&
+              url.hostname.includes('.') &&
+              Boolean(href?.startsWith('http'));
+          } catch {
+            valid = false;
+          }
+          if (!valid) return <span>{children}</span>;
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--color-primary-700)] underline underline-offset-2 hover:text-[var(--color-primary-800)]"
+            >
+              {children}
+            </a>
+          );
+        },
         code({ className, children, ...props }) {
           const isInline = !className;
           if (isInline) {
