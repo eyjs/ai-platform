@@ -10,6 +10,7 @@ import { useChatSessions } from '@/hooks/use-chat-sessions';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { useAuth } from '@/lib/auth/auth-context';
 import { fetchProfiles } from '@/lib/api/chat';
+import { traceToStatus } from '@/lib/trace-status';
 import { submitFeedback } from '@/lib/api/bff-feedback';
 import type { ChatMessage, ChatProfileOption, ChatRequest } from '@/types/chat';
 import type { FeedbackScore } from '@/types/feedback';
@@ -58,7 +59,12 @@ export default function AdminChatPage() {
       onToken: (text: string) => {
         const sid = activeSessionIdRef.current;
         if (!sid) return;
-        updateLastMessage(sid, (msg) => ({ ...msg, content: msg.content + text }));
+        // 토큰이 흐르기 시작하면 진행 상태 문구는 걷어낸다 (답변이 곧 상태)
+        updateLastMessage(sid, (msg) => ({
+          ...msg,
+          content: msg.content + text,
+          statusText: undefined,
+        }));
       },
       onReplace: (text: string) => {
         const sid = activeSessionIdRef.current;
@@ -68,11 +74,21 @@ export default function AdminChatPage() {
       onTrace: (data: Record<string, unknown>) => {
         const sid = activeSessionIdRef.current;
         if (!sid) return;
-        updateLastMessage(sid, (msg) => ({
-          ...msg,
-          traceData: data,
-          traceEvents: [...(msg.traceEvents ?? []), data],
-        }));
+        const status = traceToStatus(data);
+        updateLastMessage(sid, (msg) => {
+          // 확장 재시도 이후의 진행 문구엔 "다시 확인" 맥락을 유지한다
+          const widened =
+            data.step !== 'widen_retry' &&
+            (msg.traceEvents ?? []).some((e) => e.step === 'widen_retry');
+          const finalStatus =
+            status && widened ? `검색 범위를 넓혀 ${status}` : status;
+          return {
+            ...msg,
+            traceData: data,
+            traceEvents: [...(msg.traceEvents ?? []), data],
+            ...(finalStatus ? { statusText: finalStatus } : {}),
+          };
+        });
       },
       onDone: (data: {
         answer?: string;
@@ -84,6 +100,7 @@ export default function AdminChatPage() {
         updateLastMessage(sid, (msg) => ({
           ...msg,
           isStreaming: false,
+          statusText: undefined,
           content: data.answer && data.answer.length > 0 ? data.answer : msg.content,
           sources: data.sources,
           responseId: data.response_id ?? msg.responseId,

@@ -18,6 +18,12 @@ export interface ChatMessage {
   responseId?: string;
   /** 사용자가 남긴 피드백 (UI 반영용). 아직 제출 전이면 undefined/null */
   feedback?: 1 | -1 | null;
+  /**
+   * 답변 시작 전 실시간 진행 상태 문구 (trace 이벤트 → 사람이 읽는 문장).
+   * 예: "관련 문서를 검색하는 중...", "검색 범위를 넓혀 다시 확인하는 중..."
+   * 토큰이 흐르기 시작하면 지워진다. 영속 의미 없음(스트리밍 중에만 표시).
+   */
+  statusText?: string;
 }
 
 /** 채팅 세션 — 사이드바 + localStorage 저장 단위 */

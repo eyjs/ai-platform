@@ -19,6 +19,7 @@ export function loadSessions(): ChatSession[] {
           ? {
               ...m,
               isStreaming: false,
+              statusText: undefined,
               ...(m.content.length === 0
                 ? { isError: true, errorMessage: '응답을 받지 못했습니다.' }
                 : {}),

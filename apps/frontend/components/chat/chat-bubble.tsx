@@ -60,6 +60,16 @@ export function ChatBubble({ message, className, onFeedback }: ChatBubbleProps) 
           <p className="text-[var(--font-size-base)] whitespace-pre-wrap">
             {message.content}
           </p>
+        ) : message.isStreaming && !message.content ? (
+          // 답변 시작 전 — 현재 무엇을 하고 있는지 회색 글씨로 고지
+          // (검색 중, 확장 재시도 중 등. trace 이벤트가 실시간 갱신)
+          <p
+            className="animate-pulse text-[var(--font-size-sm)] text-[var(--color-neutral-400)]"
+            role="status"
+            aria-live="polite"
+          >
+            {message.statusText || '요청을 처리하는 중...'}
+          </p>
         ) : (
           <div
             className={cn(
