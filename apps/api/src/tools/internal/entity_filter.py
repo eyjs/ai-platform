@@ -28,6 +28,8 @@ INDEX_TTL_SECONDS = 300
 _SPLIT_RE = re.compile(r"[\s_/()\[\]{}·,‧]+")
 _TRAILING_DIGITS_RE = re.compile(r"\d+$")
 _EXTENSION_RE = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+# 브랜드성 ASCII 접두(New, THE 등) — 사용자가 흔히 생략하는 부분
+_ASCII_PREFIX_RE = re.compile(r"^[a-z0-9]+")
 
 
 def _normalize(text: str) -> str:
@@ -57,6 +59,12 @@ def extract_aliases(file_name: str, title: str = "") -> set[str]:
             stripped = _TRAILING_DIGITS_RE.sub("", norm)
             if len(stripped) >= MIN_ALIAS_LENGTH:
                 aliases.add(stripped)
+            # 브랜드성 ASCII 접두 제거판 — "New간편암건강보험"을 "간편암건강보험"으로도
+            # 부를 수 있게 (사용자가 접두를 흔히 생략). 변별력 필터가 뒤에서
+            # 과매칭 별칭을 걸러주므로 안전하게 추가만 한다.
+            deprefixed = _ASCII_PREFIX_RE.sub("", stripped)
+            if deprefixed != stripped and len(deprefixed) >= MIN_ALIAS_LENGTH:
+                aliases.add(deprefixed)
     return aliases
 
 

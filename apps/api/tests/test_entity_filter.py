@@ -183,3 +183,27 @@ class TestIntersectionRule:
         idx = self._index()
         m = idx.match("참좋은더보장간병보험 가입 조건")
         assert m.doc_ids == {"d3", "d4"}
+
+
+class TestAsciiPrefixVariant:
+    """브랜드 접두(New 등) 생략 질문도 매칭 — t3 케이스."""
+
+    def _index(self):
+        idx = EntityDocIndex()
+        idx.build(DOCS)
+        return idx
+
+    def test_deprefixed_alias_extracted(self):
+        aliases = extract_aliases("무배당 프로미라이프 New간편암건강보험2601 보험약관.pdf")
+        assert "간편암건강보험" in aliases
+
+    def test_query_without_brand_prefix_matches(self):
+        idx = self._index()
+        m = idx.match("간편암건강보험 가입나이 알려줘")
+        assert "d5" in m.doc_ids  # New간편암건강보험 약관
+
+    def test_deprefixed_does_not_cross_match_other_product(self):
+        """"간편간병보험"(New 접두 제거판)이 참좋은더보장간병보험에 오매칭되지 않는다."""
+        idx = self._index()
+        m = idx.match("간편간병보험 조건 알려줘")
+        assert m.doc_ids == {"d1", "d2"}  # New간편간병 문서만
