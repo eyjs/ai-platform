@@ -9,6 +9,8 @@ import {
   setAuthMarkerCookie,
   clearAuthMarkerCookie,
   clearAllTokens,
+  decodeTokenExp,
+  isTokenExpiringSoon,
 } from './token-storage';
 
 const ACCESS_TOKEN_KEY = 'aip-access-token';
@@ -120,5 +122,44 @@ describe('clearAllTokens()', () => {
     const cookieValue = spy.mock.calls[0][0] as string;
     expect(cookieValue).toContain('Max-Age=0');
     spy.mockRestore();
+  });
+});
+
+describe('decodeTokenExp() / isTokenExpiringSoon()', () => {
+  const makeToken = (exp: number) => {
+    const payload = btoa(JSON.stringify({ sub: 'u1', exp }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    return `header.${payload}.sig`;
+  };
+
+  it('JWT payload의 exp를 파싱한다', () => {
+    const exp = Math.floor(Date.now() / 1000) + 900;
+    expect(decodeTokenExp(makeToken(exp))).toBe(exp);
+  });
+
+  it('잘못된 토큰은 null을 반환한다', () => {
+    expect(decodeTokenExp('not-a-jwt')).toBeNull();
+    expect(decodeTokenExp('a.%%%.c')).toBeNull();
+  });
+
+  it('만료 임박(30초 이내) 토큰을 감지한다', () => {
+    const soon = Math.floor(Date.now() / 1000) + 10;
+    expect(isTokenExpiringSoon(makeToken(soon))).toBe(true);
+  });
+
+  it('이미 만료된 토큰도 임박으로 판정한다', () => {
+    const past = Math.floor(Date.now() / 1000) - 60;
+    expect(isTokenExpiringSoon(makeToken(past))).toBe(true);
+  });
+
+  it('여유 있는 토큰은 임박이 아니다', () => {
+    const later = Math.floor(Date.now() / 1000) + 600;
+    expect(isTokenExpiringSoon(makeToken(later))).toBe(false);
+  });
+
+  it('exp를 못 읽는 토큰은 임박으로 취급하지 않는다 (서버 판정 위임)', () => {
+    expect(isTokenExpiringSoon('opaque-token')).toBe(false);
   });
 });

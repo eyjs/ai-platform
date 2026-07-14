@@ -18,6 +18,7 @@ import {
   setRefreshToken,
   clearAllTokens,
   setAuthMarkerCookie,
+  isTokenExpiringSoon,
 } from './token-storage';
 
 interface AuthContextValue {
@@ -27,6 +28,12 @@ interface AuthContextValue {
   accessToken: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /**
+   * 유효한 access token을 보장해 반환한다.
+   * 만료/임박 시 refresh로 재발급하고, 실패하면 로그아웃 + /login 이동 후 null.
+   * (13분 인터벌 갱신은 탭이 잠들면 안 돌아 만료를 놓친다 — API 호출 직전 선제 보강용)
+   */
+  ensureFreshAccessToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -120,6 +127,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login');
   }, [router]);
 
+  const ensureFreshAccessToken = useCallback(async (): Promise<string | null> => {
+    const current = getAccessToken();
+    if (current && !isTokenExpiringSoon(current)) {
+      return current;
+    }
+    const refresh = getRefreshToken();
+    if (refresh) {
+      try {
+        const result = await authApi.refreshToken(refresh);
+        applyTokens(result.accessToken, result.refreshToken);
+        return result.accessToken;
+      } catch {
+        // 아래 공통 로그아웃 처리로 진행
+      }
+    }
+    clearAllTokens();
+    setUser(null);
+    setAccessTokenState(null);
+    router.push('/login');
+    return null;
+  }, [applyTokens, router]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -129,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken,
         login,
         logout,
+        ensureFreshAccessToken,
       }}
     >
       {children}

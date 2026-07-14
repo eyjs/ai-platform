@@ -21,6 +21,8 @@ interface UseChatStreamCallbacks {
    * 말풍선이 스트리밍 상태로 영구 고착되지 않도록 호출자가 마감 처리한다.
    */
   onIncomplete: (reason: 'aborted' | 'no_done') => void;
+  /** 401/403 — 호출자가 토큰 갱신 후 재시도하거나 로그인으로 보낸다. */
+  onAuthError: () => void;
 }
 
 export function useChatStream(callbacks: UseChatStreamCallbacks) {
@@ -33,7 +35,8 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
-      let sawDone = false;
+      // done/error/auth_error 중 하나라도 받으면 종단 처리됨 — onIncomplete로 덮지 않는다
+      let sawTerminal = false;
       try {
         const stream = streamChat(request, token, abortController.signal);
         const reader = stream.getReader();
@@ -62,11 +65,16 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
                   callbacks.onTrace(data);
                   break;
                 case 'done':
-                  sawDone = true;
+                  sawTerminal = true;
                   callbacks.onDone(data);
                   break;
                 case 'error':
+                  sawTerminal = true;
                   callbacks.onError(new Error(data.message || 'SSE 에러'));
+                  break;
+                case 'auth_error':
+                  sawTerminal = true;
+                  callbacks.onAuthError();
                   break;
               }
             } catch {
@@ -78,8 +86,8 @@ export function useChatStream(callbacks: UseChatStreamCallbacks) {
           }
         }
 
-        if (!sawDone) {
-          // done 없이 연결이 끝남(중단/유실) — 고착 방지 마감
+        if (!sawTerminal) {
+          // 종단 이벤트 없이 연결이 끝남(중단/유실) — 고착 방지 마감
           callbacks.onIncomplete(
             abortController.signal.aborted ? 'aborted' : 'no_done',
           );

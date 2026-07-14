@@ -11,18 +11,24 @@ import { useChatStream } from '@/hooks/use-chat-stream';
 import { useAuth } from '@/lib/auth/auth-context';
 import { fetchProfiles } from '@/lib/api/chat';
 import { submitFeedback } from '@/lib/api/bff-feedback';
-import type { ChatMessage, ChatProfileOption } from '@/types/chat';
+import type { ChatMessage, ChatProfileOption, ChatRequest } from '@/types/chat';
 import type { FeedbackScore } from '@/types/feedback';
 
 /** RAG 검증용 채팅 — 어드민 셸(/admin) 안에서 동작하는 풀높이 페이지. */
 export default function AdminChatPage() {
-  const { accessToken } = useAuth();
+  const { ensureFreshAccessToken } = useAuth();
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedProfileName, setSelectedProfileName] = useState('자동 선택');
   const [profiles, setProfiles] = useState<ChatProfileOption[]>([]);
   // 스트림 콜백은 handleSend 호출 시점의 세션 id 가 필요하다. state 는 비동기라
   // 새 세션의 첫 메시지에서 stale null 이 잡히므로 ref 로 활성 세션을 추적한다.
   const activeSessionIdRef = useRef<string | null>(null);
+  // 401 자동 재시도용 — 마지막 요청과 sendMessage 참조(콜백↔훅 순환 회피), 재시도 1회 제한
+  const lastRequestRef = useRef<ChatRequest | null>(null);
+  const sendMessageRef = useRef<
+    ((request: ChatRequest, token: string) => Promise<void>) | null
+  >(null);
+  const authRetriedRef = useRef(false);
 
   const {
     sessions,
@@ -112,11 +118,34 @@ export default function AdminChatPage() {
           };
         });
       },
+      onAuthError: () => {
+        // 401/403 — 토큰 갱신 후 같은 요청을 1회 자동 재시도. 갱신 실패면
+        // ensureFreshAccessToken이 로그아웃 + /login 이동까지 처리한다.
+        void (async () => {
+          const sid = activeSessionIdRef.current;
+          const token = await ensureFreshAccessToken();
+          const request = lastRequestRef.current;
+          if (token && request && sendMessageRef.current && !authRetriedRef.current) {
+            authRetriedRef.current = true;
+            await sendMessageRef.current(request, token);
+            return;
+          }
+          if (sid) {
+            updateLastMessage(sid, (msg) => ({
+              ...msg,
+              isStreaming: false,
+              isError: true,
+              errorMessage: '로그인이 만료되었습니다. 다시 로그인해주세요.',
+            }));
+          }
+        })();
+      },
     }),
-    [updateLastMessage],
+    [updateLastMessage, ensureFreshAccessToken],
   );
 
   const { sendMessage, isStreaming, abort } = useChatStream(streamCallbacks);
+  sendMessageRef.current = sendMessage;
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -151,14 +180,20 @@ export default function AdminChatPage() {
       };
       addMessage(activeSessionId!, aiMessage);
 
-      await sendMessage(
-        {
-          question: text,
-          chatbot_id: selectedProfileId || undefined,
-          session_id: activeSessionId || undefined,
-        },
-        accessToken ?? '',
-      );
+      // 전송 직전 토큰 선제 검증·갱신 — 만료 토큰으로 쏘고 401 받는 왕복을 제거.
+      // 갱신 불가면 /login으로 이동됨(빈 말풍선은 로드 정규화가 마감).
+      const token = await ensureFreshAccessToken();
+      if (!token) return;
+
+      const request: ChatRequest = {
+        question: text,
+        chatbot_id: selectedProfileId || undefined,
+        session_id: activeSessionId || undefined,
+      };
+      lastRequestRef.current = request;
+      authRetriedRef.current = false;
+
+      await sendMessage(request, token);
     },
     [
       currentSessionId,
@@ -168,7 +203,7 @@ export default function AdminChatPage() {
       createSession,
       addMessage,
       sendMessage,
-      accessToken,
+      ensureFreshAccessToken,
     ],
   );
 

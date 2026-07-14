@@ -59,3 +59,27 @@ export function clearAllTokens(): void {
   clearRefreshToken();
   clearAuthMarkerCookie();
 }
+
+/** JWT payload의 exp(초 단위 epoch)를 파싱한다. 파싱 불가 시 null. */
+export function decodeTokenExp(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, '+').replace(/_/g, '/')),
+    );
+    return typeof decoded.exp === 'number' ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 토큰이 만료됐거나 임박(기본 30초 이내)했는지.
+ * exp를 못 읽는 토큰은 만료 임박으로 취급하지 않는다(서버 판정에 맡김).
+ */
+export function isTokenExpiringSoon(token: string, marginSeconds = 30): boolean {
+  const exp = decodeTokenExp(token);
+  if (exp === null) return false;
+  return exp - Date.now() / 1000 < marginSeconds;
+}

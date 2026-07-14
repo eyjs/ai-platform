@@ -31,8 +31,14 @@ export function streamChat(
 
         if (!res.ok) {
           const errorText = await res.text();
+          // 인증 실패는 별도 이벤트 — 호출자가 토큰 갱신·재시도/로그인 이동 처리
+          const eventName =
+            res.status === 401 || res.status === 403 ? 'auth_error' : 'error';
           controller.enqueue(
-            `event: error\ndata: ${JSON.stringify({ message: errorText })}\n\n`,
+            `event: ${eventName}\ndata: ${JSON.stringify({
+              status: res.status,
+              message: errorText,
+            })}\n\n`,
           );
           controller.close();
           return;
