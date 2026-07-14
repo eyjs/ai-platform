@@ -476,3 +476,80 @@ async def test_planner_no_append_when_needs_rag_false():
 
     result = await planner(state)
     assert [s["tool"] for s in result["planned_steps"]] == ["fact_lookup"]
+
+
+@pytest.mark.asyncio
+async def test_planner_chunks_floor_applied():
+    """플래너가 max_vector_chunks를 전략값보다 작게 넣으면 하한으로 끌어올린다.
+
+    실사고: 두 상품 비교 질문에 플래너가 '비교 대상 2개 = 청크 2개'로 착각 →
+    리랭커 통과 15개 중 2개만 채택 → '문서에 없음' 오답.
+    """
+    from src.domain.execution_plan import QuestionStrategy
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_json = AsyncMock(return_value={
+        "steps": [
+            {"step_id": "s1", "tool": "rag_search",
+             "params": {"query": "두 상품 비교", "max_vector_chunks": 2}, "group": 1},
+        ],
+        "reasoning": "비교 대상이 2개이므로 청크 2개",
+    })
+
+    mock_tool = MagicMock()
+    mock_tool.name = "rag_search"
+    mock_tool.description = "벡터 검색"
+    mock_tool.input_schema = {"query": {"type": "string"}}
+    mock_resolver = MagicMock(return_value=[mock_tool])
+
+    planner = create_planner(mock_llm, mock_resolver)
+
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tool_groups=[[ToolCall("rag_search", {"query": "q"})]],
+        question_type=QuestionType.CROSS_DOC_INTEGRATION,
+        strategy=QuestionStrategy(needs_rag=True, history_turns=3, max_vector_chunks=10),
+        needs_planning=True,
+    )
+    state = create_initial_state("두 상품 가입 조건 차이 비교해줘", plan, "sess-1")
+
+    result = await planner(state)
+    step = result["planned_steps"][0]
+    assert step["params"]["max_vector_chunks"] == 10  # 2 → 전략 하한 10
+
+
+@pytest.mark.asyncio
+async def test_planner_chunks_above_floor_respected():
+    """플래너가 전략값보다 크게 잡은 max_vector_chunks는 존중한다 (늘리기는 허용)."""
+    from src.domain.execution_plan import QuestionStrategy
+
+    mock_llm = AsyncMock()
+    mock_llm.generate_json = AsyncMock(return_value={
+        "steps": [
+            {"step_id": "s1", "tool": "rag_search",
+             "params": {"query": "광범위 조사", "max_vector_chunks": 15}, "group": 1},
+        ],
+        "reasoning": "넓은 검색 필요",
+    })
+
+    mock_tool = MagicMock()
+    mock_tool.name = "rag_search"
+    mock_tool.description = "벡터 검색"
+    mock_tool.input_schema = {"query": {"type": "string"}}
+    mock_resolver = MagicMock(return_value=[mock_tool])
+
+    planner = create_planner(mock_llm, mock_resolver)
+
+    plan = ExecutionPlan(
+        mode=AgentMode.DETERMINISTIC,
+        scope=SearchScope(),
+        tool_groups=[[ToolCall("rag_search", {"query": "q"})]],
+        question_type=QuestionType.STANDALONE,
+        strategy=QuestionStrategy(needs_rag=True, max_vector_chunks=5),
+        needs_planning=True,
+    )
+    state = create_initial_state("질문", plan, "sess-1")
+
+    result = await planner(state)
+    assert result["planned_steps"][0]["params"]["max_vector_chunks"] == 15

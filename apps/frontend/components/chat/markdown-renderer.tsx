@@ -2,8 +2,21 @@
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import { useCallback, useState } from 'react';
+
+// LLM 답변의 인라인 HTML(<br> 등, 특히 표 셀 안 줄바꿈)을 렌더링하되
+// sanitize로 스크립트·이벤트 핸들러류는 차단한다.
+// code의 className은 rehype-highlight 언어 감지에 필요해 허용 목록에 추가.
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code ?? []), ['className', /^language-/]],
+  },
+} as typeof defaultSchema;
 
 interface MarkdownRendererProps {
   content: string;
@@ -52,7 +65,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeHighlight]}
       components={{
         pre({ children }) {
           return <>{children}</>;

@@ -169,6 +169,25 @@ def create_planner(
             })
             logger.info("planner_rag_guard_appended", steps_count=len(valid_steps))
 
+        # 검색 하한 가드: 플래너 LLM이 max_vector_chunks를 전략 매트릭스보다 작게
+        # 넣으면 검색이 굶는다(실사고: 두 상품 비교 질문에 "비교 대상 2개 = 청크 2개"로
+        # 착각 → 리랭커 통과 15개 중 2개만 채택 → "문서에 없음" 오답). 플래너는
+        # 검색량을 늘릴 수만 있고, 전략값 아래로는 줄일 수 없다.
+        strategy_chunks = getattr(getattr(plan, "strategy", None), "max_vector_chunks", 0)
+        for s in valid_steps:
+            if s["tool"] != "rag_search":
+                continue
+            try:
+                planned = int(s["params"].get("max_vector_chunks", strategy_chunks))
+            except (TypeError, ValueError):
+                planned = strategy_chunks
+            if planned < strategy_chunks:
+                logger.info(
+                    "planner_chunks_floor_applied",
+                    planned=planned, floor=strategy_chunks,
+                )
+                s["params"] = {**s["params"], "max_vector_chunks": strategy_chunks}
+
         logger.info(
             "planner_success",
             steps_count=len(valid_steps),
