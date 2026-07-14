@@ -81,7 +81,11 @@ class SupervisorLimits:
     single_passthrough: bool = False
     # 위임 1건의 실행 상한(초). 서브가 응답 없이 잡히면(예: 외부 의존 행)
     # supervise 전체가 무한 대기하며 SSE가 ping만 보내는 사고를 차단한다.
-    delegation_timeout_sec: float = 120.0
+    # 240s 근거: 무답변 확장 재시도(1회 보증)가 서브 안에서 발동하면
+    # (검색+생성)×2가 정당한 소요 — 120s는 그 최악 케이스를 자르는
+    # 상호작용 버그였다(실사고: 복수 주제 질문 2위임 전건 타임아웃 →
+    # "유효한 답변을 받지 못했습니다" degrade). 로컬 MLX 생성 60~90s 실측 기준.
+    delegation_timeout_sec: float = 240.0
     # 워크플로우 핸드오프 전용 상한. 로컬 LLM에서 dynamic 스텝(페르소나+맥락 생성)이
     # 스텝당 50~120s+ 걸리는 실측 — 직접 모드와 동일한 인내심을 준다.
     workflow_handoff_timeout_sec: float = 300.0
