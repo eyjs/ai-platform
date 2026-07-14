@@ -55,6 +55,9 @@ guardrails:
 
 router_model: "haiku"
 main_model: "sonnet"
+# 생성 토큰 하드 캡 — 프롬프트 지시가 무시돼도 장문 폭주(로컬 MLX 2분+)를 차단.
+# 정상 답변(~1,500자)은 여유롭게 통과하는 수준.
+max_output_tokens: 2048
 
 memory_type: "short"
 memory_ttl_seconds: 3600

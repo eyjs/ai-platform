@@ -45,8 +45,13 @@ class OllamaProvider(LLMProvider):
         except Exception:
             return False
 
-    async def generate(self, prompt: str, system: str = "") -> str:
+    async def generate(
+        self, prompt: str, system: str = "", max_tokens: int | None = None,
+    ) -> str:
         system_msg = self._build_system(system)
+        options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
         response = await self._client.post(
             f"{self._base_url}/api/chat",
             json={
@@ -56,7 +61,7 @@ class OllamaProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
-                "options": {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS},
+                "options": options,
             },
         )
         response.raise_for_status()
@@ -87,8 +92,13 @@ class OllamaProvider(LLMProvider):
             content = content.split("</think>")[-1].strip()
         return json.loads(content)
 
-    async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
+    async def generate_stream(
+        self, prompt: str, system: str = "", max_tokens: int | None = None,
+    ) -> AsyncIterator[str]:
         system_msg = self._build_system(system)
+        stream_options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
+        if max_tokens is not None:
+            stream_options["num_predict"] = max_tokens
         async with self._client.stream(
             "POST",
             f"{self._base_url}/api/chat",
@@ -99,7 +109,7 @@ class OllamaProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": True,
-                "options": {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS},
+                "options": stream_options,
             },
         ) as response:
             in_think = False

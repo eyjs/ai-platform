@@ -78,6 +78,9 @@ class AgentProfile:
     # LLM 설정
     router_model: str = "haiku"
     main_model: str = "sonnet"
+    # 최종 답변 생성 토큰 하드 캡. None이면 프로바이더 기본값 사용.
+    # 프롬프트 지시(1차)가 실패해도 생성 시간 폭주를 막는 안전망(2차).
+    max_output_tokens: int | None = None
 
     # 메모리
     memory_type: str = "short"  # "short" | "session" | "long"

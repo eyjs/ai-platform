@@ -44,6 +44,7 @@ class HttpLLMProvider(LLMProvider):
 
     async def _post_completion(
         self, system_msg: str, prompt: str, temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """비스트리밍 chat completion 1회 호출 — 재시도/서킷은 호출부가 감싼다.
 
@@ -56,7 +57,7 @@ class HttpLLMProvider(LLMProvider):
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
-            "max_tokens": self._max_tokens,
+            "max_tokens": max_tokens or self._max_tokens,
         }
         if temperature is not None:
             payload["temperature"] = temperature
@@ -105,13 +106,14 @@ class HttpLLMProvider(LLMProvider):
     async def generate(
         self, prompt: str, system: str = "",
         cacheable_system: str = "", volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> str:
         """답변만 반환한다 (thinking 제거). cacheable/volatile은 결합(캐싱 미지원)."""
         system_msg = self._build_system(
             self._combine_system(system, cacheable_system, volatile_system)
         )
         text = await retry_async(
-            lambda: self._post_completion(system_msg, prompt),
+            lambda: self._post_completion(system_msg, prompt, max_tokens=max_tokens),
             attempts=self._retry_attempts,
             breaker=self._breaker,
             name="llm",
@@ -157,10 +159,12 @@ class HttpLLMProvider(LLMProvider):
     async def generate_stream(
         self, prompt: str, system: str = "",
         cacheable_system: str = "", volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """하위 호환: 답변 텍스트만 yield (thinking 제거)."""
         async for chunk in self.generate_stream_typed(
             prompt, system, cacheable_system=cacheable_system, volatile_system=volatile_system,
+            max_tokens=max_tokens,
         ):
             if chunk.kind == "answer":
                 yield chunk.content
@@ -168,6 +172,7 @@ class HttpLLMProvider(LLMProvider):
     async def generate_stream_typed(
         self, prompt: str, system: str = "",
         cacheable_system: str = "", volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """thinking/answer를 StreamChunk로 구분하여 yield.
 
@@ -186,7 +191,7 @@ class HttpLLMProvider(LLMProvider):
             attempt += 1
             emitted = False
             try:
-                async for chunk in self._stream_once(system_msg, prompt):
+                async for chunk in self._stream_once(system_msg, prompt, max_tokens=max_tokens):
                     emitted = True
                     yield chunk
                 self._breaker.record_success()
@@ -200,7 +205,7 @@ class HttpLLMProvider(LLMProvider):
                 raise
 
     async def _stream_once(
-        self, system_msg: str, prompt: str
+        self, system_msg: str, prompt: str, max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """스트리밍 chat completion 1회 — 파싱 로직. 재시도/서킷은 호출부가 감싼다."""
         in_thinking = False
@@ -214,7 +219,7 @@ class HttpLLMProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": True,
-                "max_tokens": self._max_tokens,
+                "max_tokens": max_tokens or self._max_tokens,
             },
         ) as response:
             response.raise_for_status()

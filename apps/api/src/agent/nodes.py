@@ -428,6 +428,7 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
             prompt,
             cacheable_system=plan.system_prompt,
             volatile_system=plan.volatile_system_prompt,
+            max_tokens=plan.max_output_tokens,
         )
         if trace_node:
             trace_node.finish(answer_len=len(answer), chunks=len(prompt_results))
@@ -449,6 +450,7 @@ def create_direct_generate(llm: LLMProvider) -> Callable:
             question,
             cacheable_system=plan.system_prompt,
             volatile_system=plan.volatile_system_prompt,
+            max_tokens=plan.max_output_tokens,
         )
         logger.info("direct_generate", answer_len=len(answer))
         return {"answer": answer}

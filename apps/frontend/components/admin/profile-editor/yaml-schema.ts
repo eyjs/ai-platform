@@ -26,6 +26,7 @@ export const PROFILE_SCHEMA: FieldSchema[] = [
   { key: 'guardrails', description: '안전장치', type: 'array', enumValues: ['faithfulness', 'pii_filter'] },
   { key: 'router_model', description: '라우터 LLM', type: 'enum', enumValues: ['haiku', 'sonnet', 'opus'] },
   { key: 'main_model', description: '메인 LLM', type: 'enum', enumValues: ['haiku', 'sonnet', 'opus'] },
+  { key: 'max_output_tokens', description: '생성 토큰 하드 캡 (미지정 시 프로바이더 기본값)', type: 'number' },
   { key: 'memory_type', description: '메모리 타입', type: 'enum', enumValues: ['short', 'session', 'long'] },
   { key: 'memory_ttl_seconds', description: '메모리 TTL (초)', type: 'number' },
   { key: 'memory_scopes', description: '메모리 범위', type: 'array', enumValues: ['local', 'project'] },

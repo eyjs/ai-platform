@@ -4,6 +4,7 @@ STRATEGY_MATRIX 소유 + SearchScope + tools + system_prompt + guardrails + conv
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import List, Optional, Union
 
@@ -37,6 +38,9 @@ STRATEGY_MATRIX: dict[QuestionType, QuestionStrategy] = {
 
 class StrategyBuilder:
     """ExecutionPlan 조립기."""
+
+    # 간결 요청 신호 (결정론적 — 로컬 LLM 원칙: 판단은 신호로).
+    _BREVITY_PATTERN = re.compile(r"핵심만|간단히|간략히|짧게|요약해|요약만|한\s?줄로")
 
     def get_strategy(self, question_type: QuestionType) -> QuestionStrategy:
         """QuestionType에 대응하는 전략을 반환한다."""
@@ -129,6 +133,18 @@ class StrategyBuilder:
                 f"'올해'는 {today.year}년, '내년'은 {today.year + 1}년, '작년'은 {today.year - 1}년이다."
             )
 
+        # 간결 신호 감지 — 사용자가 짧은 답을 요청하면 생성 지시를 주입한다(1차 방어).
+        # 결정론적 패턴 매칭(LLM 판단 없음). per-turn 지시라 volatile에 붙여 캐시 경계 보호.
+        if query and self._BREVITY_PATTERN.search(query):
+            brevity = (
+                "[응답 지시] 사용자가 간결한 답변을 요청했다. "
+                "핵심 정보만 골라 짧게 답하라(목록이면 항목당 한 줄). "
+                "배경 설명·유의사항·중복 부연은 생략하고, 사용자가 추가로 물으면 그때 상세히 답한다."
+            )
+            volatile_system_prompt = (
+                f"{volatile_system_prompt}\n{brevity}" if volatile_system_prompt else brevity
+            )
+
         # needs_planning 판단
         needs_planning = self._determine_needs_planning(
             question_type, profile,
@@ -158,6 +174,7 @@ class StrategyBuilder:
             # strategy_builder 는 alias를 전달만 함 — resolver/factory import 금지.
             main_model=profile.main_model,
             router_model=profile.router_model,
+            max_output_tokens=profile.max_output_tokens,
         )
 
     @staticmethod

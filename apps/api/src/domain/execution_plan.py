@@ -72,3 +72,5 @@ class ExecutionPlan:
     # router_model KNOWN GAP: plan 에 실려 있지만 L0-L2 라우팅 LLM 교체는 미구현 — model_aliases.py 참조.
     main_model: str = ""
     router_model: str = ""
+    # 최종 답변 생성 토큰 하드 캡 (Profile.max_output_tokens). None = 프로바이더 기본값.
+    max_output_tokens: int | None = None

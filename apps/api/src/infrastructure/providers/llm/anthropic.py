@@ -197,10 +197,11 @@ class AnthropicLLMProvider(LLMProvider):
         system: str = "",
         cacheable_system: str = "",
         volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> str:
         resp = await self._client.messages.create(
             model=self._model,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens or self._max_tokens,
             messages=[{"role": "user", "content": prompt}],
             **self._system_kwarg(system, cacheable_system, volatile_system),
         )
@@ -247,10 +248,11 @@ class AnthropicLLMProvider(LLMProvider):
         system: str = "",
         cacheable_system: str = "",
         volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         async with self._client.messages.stream(
             model=self._model,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens or self._max_tokens,
             messages=[{"role": "user", "content": prompt}],
             **self._system_kwarg(system, cacheable_system, volatile_system),
         ) as stream:
@@ -265,12 +267,14 @@ class AnthropicLLMProvider(LLMProvider):
         system: str = "",
         cacheable_system: str = "",
         volatile_system: str = "",
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         async for token in self.generate_stream(
             prompt,
             system=system,
             cacheable_system=cacheable_system,
             volatile_system=volatile_system,
+            max_tokens=max_tokens,
         ):
             yield StreamChunk(kind="answer", content=token)
 

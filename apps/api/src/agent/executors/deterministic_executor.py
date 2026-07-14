@@ -71,7 +71,10 @@ class DeterministicExecutorMixin:
         # RAG 불필요 -> 직접 스트리밍
         if not plan.strategy.needs_rag:
             async for chunk in self._main_llm.generate_stream_typed(
-                question, system=plan.system_prompt,
+                question,
+                cacheable_system=plan.system_prompt,
+                volatile_system=plan.volatile_system_prompt,
+                max_tokens=plan.max_output_tokens,
             ):
                 if chunk.kind == "thinking":
                     yield {"type": "thinking", "data": chunk.content}
@@ -186,8 +189,12 @@ class DeterministicExecutorMixin:
         thinking_chunks = 0
         answer_chunk_count = 0
         # thinking/answer 분리 스트리밍 (base 기본 구현은 전부 answer)
+        # volatile(날짜·간결 지시 등 per-turn)도 전달 — 기존엔 스트리밍 경로에서 유실됐다.
         async for chunk in self._main_llm.generate_stream_typed(
-            prompt, system=plan.system_prompt,
+            prompt,
+            cacheable_system=plan.system_prompt,
+            volatile_system=plan.volatile_system_prompt,
+            max_tokens=plan.max_output_tokens,
         ):
             if ttft_ms is None:
                 ttft_ms = (time.time() - gen_start) * 1000

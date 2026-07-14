@@ -91,18 +91,39 @@ class LLMProvider(ABC):
         return True
 
     @abstractmethod
-    async def generate(self, prompt: str, system: str = "") -> str: ...
+    async def generate(self, prompt: str, system: str = "") -> str:
+        """최종 답변 생성.
+
+        구현체는 `max_tokens: int | None = None` 키워드 인자를 추가로 받아
+        per-call 출력 토큰 캡을 지원한다(None = 인스턴스 기본값).
+        """
+        ...
 
     @abstractmethod
     async def generate_json(self, prompt: str, system: str = "") -> dict: ...
 
-    async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
+    async def generate_stream(
+        self, prompt: str, system: str = "", max_tokens: "int | None" = None,
+    ) -> AsyncIterator[str]:
         """토큰 단위 스트리밍. 기본 구현은 generate() 결과를 한 번에 yield."""
-        yield await self.generate(prompt, system=system)
+        if max_tokens is None:
+            # 캡 미지정이면 구버전 generate 시그니처(테스트 더블 포함)와 호환 유지
+            yield await self.generate(prompt, system=system)
+        else:
+            yield await self.generate(prompt, system=system, max_tokens=max_tokens)
 
-    async def generate_stream_typed(self, prompt: str, system: str = "") -> AsyncIterator[StreamChunk]:
-        """thinking/answer 구분 스트리밍. 기본 구현은 전부 answer로 전달."""
-        async for token in self.generate_stream(prompt, system):
+    async def generate_stream_typed(
+        self, prompt: str, system: str = "",
+        cacheable_system: str = "", volatile_system: str = "",
+        max_tokens: "int | None" = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """thinking/answer 구분 스트리밍. 기본 구현은 전부 answer로 전달.
+
+        cacheable/volatile은 캐싱 미지원 백엔드용으로 단일 system으로 결합한다
+        (캐싱 지원 구현체는 이 메서드를 오버라이드해 경계를 유지).
+        """
+        combined = self._combine_system(system, cacheable_system, volatile_system)
+        async for token in self.generate_stream(prompt, combined, max_tokens=max_tokens):
             yield StreamChunk(kind="answer", content=token)
 
 

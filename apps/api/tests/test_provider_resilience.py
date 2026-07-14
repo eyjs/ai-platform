@@ -169,7 +169,7 @@ async def test_llm_stream_retries_before_first_chunk(monkeypatch):
     p = HttpLLMProvider("http://mlx:8106", retry_attempts=3)
     state = {"n": 0}
 
-    async def fake_stream_once(system_msg, prompt):
+    async def fake_stream_once(system_msg, prompt, max_tokens=None):
         state["n"] += 1
         if state["n"] < 2:
             raise httpx.ConnectError("blip")
@@ -191,7 +191,7 @@ async def test_llm_stream_no_retry_after_first_chunk(monkeypatch):
     p = HttpLLMProvider("http://mlx:8106", retry_attempts=3)
     state = {"n": 0}
 
-    async def fake_stream_once(system_msg, prompt):
+    async def fake_stream_once(system_msg, prompt, max_tokens=None):
         state["n"] += 1
         yield StreamChunk(kind="answer", content="partial")
         raise httpx.ConnectError("mid-stream")
@@ -218,7 +218,7 @@ async def test_llm_stream_fast_fails_when_circuit_open(monkeypatch):
 
     called = {"n": 0}
 
-    async def fake_stream_once(system_msg, prompt):
+    async def fake_stream_once(system_msg, prompt, max_tokens=None):
         called["n"] += 1
         yield  # pragma: no cover
 

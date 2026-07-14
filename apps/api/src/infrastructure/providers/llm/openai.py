@@ -66,11 +66,13 @@ class OpenAILLMProvider(LLMProvider):
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    async def generate(self, prompt: str, system: str = "") -> str:
+    async def generate(
+        self, prompt: str, system: str = "", max_tokens: int | None = None,
+    ) -> str:
         messages = self._build_messages(prompt, system)
         response = await self._client.chat.completions.create(
             model=self._model, messages=messages,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens or self._max_tokens,
         )
         self._log_cache_usage(response)
         return response.choices[0].message.content or ""
@@ -87,11 +89,13 @@ class OpenAILLMProvider(LLMProvider):
         content = response.choices[0].message.content or "{}"
         return json.loads(content)
 
-    async def generate_stream(self, prompt: str, system: str = "") -> AsyncIterator[str]:
+    async def generate_stream(
+        self, prompt: str, system: str = "", max_tokens: int | None = None,
+    ) -> AsyncIterator[str]:
         messages = self._build_messages(prompt, system)
         stream = await self._client.chat.completions.create(
             model=self._model, messages=messages, stream=True,
-            max_tokens=self._max_tokens,
+            max_tokens=max_tokens or self._max_tokens,
             stream_options={"include_usage": True},
         )
         async for chunk in stream:
