@@ -74,10 +74,13 @@ class Settings(BaseSettings):
     # 0.5(logit≈0)에 못박고 관련 청크만 그 위로 올린다. fused 점수는 벡터 min-max
     # 정규화 때문에 무관 청크도 tier를 통과하므로(0.7*0.5+0.3*1.0=0.65), 리랭커
     # 절대점수가 이 값 미만인 청크는 컨텍스트에서 제외한다. 전부 미달이면 RAG가
-    # 빈 결과 → "관련 자료 없음" 정직 반려(환각 방지). 0.501=순수 노이즈(0.5) 바로
-    # 위 — 실측상 무관 청크는 0.5000~0.5004, 관련 청크는 0.5473. 약신호까지 살리는
-    # 보수적 기본값(recall 손실 최소). 운영 로그 rerank_top_score로 상향 튜닝 가능.
-    rag_min_rerank_score: float = 0.501
+    # 빈 결과 → "관련 자료 없음" 정직 반려(환각 방지). 실코퍼스 실측 보정:
+    # 무관 질문(횡단보도 교통사고) rerank_top=0.5104, 관련 질문(실손 입원비)=0.5911
+    # → 0.08 갭 사이 0.53으로 분리(무관 반려·관련 통과). 어휘 중첩만 있는 무관
+    # 청크는 0.51까지 올라오므로 순수 노이즈(0.5) 기준으론 부족했다. 오답(환각)의
+    # 비용 > 오반려(재질문 가능)라 무관 차단 쪽으로 약간 치우침. env로 튜닝,
+    # 운영 로그 rerank_top_score/below_floor로 재보정.
+    rag_min_rerank_score: float = 0.53
     openai_api_key: str = ""
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"
