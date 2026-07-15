@@ -134,6 +134,12 @@ class ProviderFactory:
                 model=self._settings.dgx_main_model,
                 num_ctx=self._settings.ollama_num_ctx,
                 system_prefix=get_locale().prompt("llm_system_prefix"),
+                # 원격 DGX가 다운되면 짧은 connect 타임아웃으로 즉시 감지 → 로컬 폴백.
+                # read는 무제한(None) — 복잡한 쿼리 생성이 수 분~수십 분 걸려도 자르지
+                # 않는다(부하 큰 generation 위임이 이 경로의 목적). connect만 짧게 잡아
+                # "다운은 즉시 폴백, 생성은 끝까지 대기"를 동시에 만족.
+                connect_timeout=3.0,
+                read_timeout=None,
             )
             logger.info(
                 "Using DGX Spark ollama (main, primary): %s @ %s — fallback: 현행 로컬",

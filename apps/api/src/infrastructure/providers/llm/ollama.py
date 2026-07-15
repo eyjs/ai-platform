@@ -20,12 +20,24 @@ class OllamaProvider(LLMProvider):
         model: str = "qwen3:8b",
         num_ctx: int = 16384,
         system_prefix: str = "",
+        connect_timeout: float = 5.0,
+        read_timeout: float | None = 120.0,
     ):
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._num_ctx = num_ctx
         self._system_prefix = system_prefix
-        self._client = httpx.AsyncClient(timeout=120.0)
+        # 타임아웃 두 축을 분리한다:
+        #  - connect: 짧게. 원격(DGX 등)이 오프라인이면 SYN 무응답으로 connect가
+        #    hang → 짧아야 다운 즉시 감지 → FailoverLLMProvider가 초 단위로 폴백.
+        #  - read: 길게/무제한(None). 복잡한 쿼리는 생성에 수 분~수십 분 걸릴 수 있어
+        #    짧으면 정상 생성이 중간에 잘린다. 스트리밍은 청크 간 간격에 적용되므로
+        #    토큰이 흐르는 한 만료되지 않는다.
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=connect_timeout, read=read_timeout, write=10.0, pool=5.0,
+            )
+        )
 
     @property
     def capability(self) -> ProviderCapability:

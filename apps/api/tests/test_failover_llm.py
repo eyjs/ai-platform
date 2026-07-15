@@ -97,3 +97,18 @@ async def test_stream_after_first_chunk_propagates():
     with pytest.raises(httpx.ReadError):
         async for _ in prov.generate_stream_typed("q"):
             pass
+
+
+def test_ollama_dgx_timeout_axes():
+    """DGX primary: connect은 짧게(다운 즉시 폴백), read는 무제한(긴 생성 허용).
+
+    - connect이 길면 원격 오프라인 시 매 재프로브가 stall → 이중화 무의미.
+    - read가 짧으면 수 분~수십 분 걸리는 복잡한 생성이 중간에 잘린다.
+    """
+    from src.infrastructure.providers.llm.ollama import OllamaProvider
+
+    prov = OllamaProvider(
+        base_url="http://remote:11434", connect_timeout=3.0, read_timeout=None,
+    )
+    assert prov._client.timeout.connect == 3.0
+    assert prov._client.timeout.read is None
