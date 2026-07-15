@@ -173,6 +173,7 @@ class StrategyBuilder:
             cache_padding_text=profile.cache_padding_text,
             profile_id=profile.id,
             rag_min_rerank_score=profile.rag_min_rerank_score,
+            empty_response_fallback=profile.empty_response_fallback,
             conversation_context=conversation_context,
             response_policy=profile.response_policy,
             max_tool_calls=profile.max_tool_calls,

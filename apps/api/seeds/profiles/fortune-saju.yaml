@@ -118,9 +118,9 @@ hybrid_triggers:
 tools:
   - name: "saju_lookup"
     config: {}
-  - name: "rag_search"
-    config:
-      max_vector_chunks: 5
+  # rag_search 제거: 사주 데이터 경로는 saju_lookup(백엔드 API)이고, domain_scopes의
+  # "사주명리"는 코퍼스 청크가 0이라 rag_search가 항상 빈손 = dead tool. 사주 참고
+  # 문서가 KMS에 인덱싱되면(사주명리 도메인 매핑 추가) 그때 재도입한다.
   - name: "fact_lookup"
     config: {}
   - name: "saju_report_paper"
@@ -230,7 +230,7 @@ intent_hints:
     patterns: ["오늘", "일진", "오늘의 운세", "하루", "당일"]
     description: "오늘의 운세 또는 일진 관련 질문"
   - name: "YEARLY_FORTUNE"
-    patterns: ["올해", "신년", "세운", "연간", "2026년"]
+    patterns: ["올해", "신년", "세운", "연간", "내년"]  # 절대연도 하드코딩 금지(매년 stale) — 상대표현으로
     description: "신년운세 또는 연간 운세 질문"
   - name: "PERIOD_FORTUNE"
     patterns: ["대운", "10년", "시기", "전환기", "언제"]

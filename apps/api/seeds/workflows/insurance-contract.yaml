@@ -15,26 +15,9 @@ steps:
     type: "select"
     prompt: "어떤 보험에 가입하시겠어요?"
     save_as: "insurance_type"
-    options: ["자동차보험", "화재보험", "실손보험"]
-    branches:
-      "자동차보험": "ask_car_year"
-      "화재보험": "ask_building_type"
-      "실손보험": "ask_name"
-
-  # --- 자동차보험 분기 ---
-  - id: "ask_car_year"
-    type: "input"
-    prompt: "차량 연식(출고 연도)을 알려주세요. (예: 2022)"
-    save_as: "car_year"
-    validation: "number"
-    next: "ask_name"
-
-  # --- 화재보험 분기 ---
-  - id: "ask_building_type"
-    type: "select"
-    prompt: "건물 용도를 선택해주세요."
-    save_as: "building_type"
-    options: ["주거용", "상업용", "공장/창고"]
+    # 실제 취급 상품(코퍼스 기준): 실손·간병·암. 과거 자동차/화재보험은 KMS 재편으로
+    # 소멸(seeds/domain_mapping.yaml 참조)해 제거했다.
+    options: ["실손보험", "간병보험", "암보험"]
     next: "ask_name"
 
   # --- 공통 경로 ---

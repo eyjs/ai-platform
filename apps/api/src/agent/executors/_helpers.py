@@ -16,11 +16,15 @@ def insufficient_context_refusal(plan, prompt_results: list) -> Optional[str]:
     지어내는 것을 원천 차단한다 — 근거 없는 답 대신 "자료 없음"을 말한다.
     needs_rag=False(일반 대화 등)는 컨텍스트가 없어도 정상이므로 게이트하지 않는다.
     반려 불필요 시 None.
+
+    메시지: 프로필이 empty_response_fallback(페르소나별 문구)을 지정하면 그것을,
+    없으면 도메인 중립 기본 메시지를 쓴다 — 전역 메시지에 특정 도메인 언급 금지.
     """
     from src.locale.bundle import get_locale
 
     if getattr(plan.strategy, "needs_rag", False) and not prompt_results:
-        return get_locale().message("insufficient_relevance")
+        return getattr(plan, "empty_response_fallback", None) or \
+            get_locale().message("insufficient_relevance")
     return None
 
 

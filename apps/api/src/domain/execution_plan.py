@@ -58,6 +58,9 @@ class ExecutionPlan:
     profile_id: str = ""  # 그래프 캐시 엔트리 태깅용 → 프로필 변경 시 targeted invalidation
     # RAG 관련도 하한(프로필 지정, None이면 전역 기본값). rag_search에 params로 주입.
     rag_min_rerank_score: float | None = None
+    # 관련 컨텍스트가 없을 때의 페르소나별 반려 문구(프로필 지정). None이면 도메인
+    # 중립 기본 메시지(locale insufficient_relevance) 사용.
+    empty_response_fallback: str | None = None
     conversation_context: str = ""
     response_policy: str = ResponsePolicy.BALANCED
     max_tool_calls: int = 5
