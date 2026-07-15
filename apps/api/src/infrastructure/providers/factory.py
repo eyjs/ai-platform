@@ -121,6 +121,7 @@ class ProviderFactory:
             local_model=self._settings.main_model,
             anthropic_model=self._settings.anthropic_main_model,
             label="main",
+            backend_override=self._settings.main_llm_backend,
         )
 
     # === 하이브리드 라우팅용 명시 provider (provider_mode 무시) ===
@@ -175,10 +176,15 @@ class ProviderFactory:
     def _create_llm(
         self, server_url: str, local_model: str, label: str,
         anthropic_model: str = "claude-haiku-4-5",
+        backend_override: str = "",
     ) -> LLMProvider:
-        """결정론 경로용 LLMProvider 생성. 백엔드는 _llm_backend가 단일 결정."""
+        """결정론 경로용 LLMProvider 생성. 백엔드는 _llm_backend가 단일 결정.
+
+        backend_override가 지정되면 provider_mode보다 우선한다 —
+        main만 상용으로 스왑하는 선택적 하이브리드용(AIP_MAIN_LLM_BACKEND).
+        """
         system_prefix = get_locale().prompt("llm_system_prefix")
-        backend = self._llm_backend(server_url)
+        backend = backend_override or self._llm_backend(server_url)
         max_tokens = self._settings.llm_max_tokens
 
         if backend == "http":

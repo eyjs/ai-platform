@@ -198,6 +198,10 @@ class Settings(BaseSettings):
     # 자동 라우팅 파리티(레거시는 선택된 프로파일 답변을 그대로 반환) + 지연 절감.
     # 켜면 단일 위임 응답이 "메인 종합 문체"가 아닌 서브 원문으로 나간다.
     supervisor_single_passthrough: bool = False
+    # 최종 답변(main) LLM만 백엔드 강제 오버라이드. ""=provider_mode 따름.
+    # "anthropic"이면 판단 레이어(라우터·플래너)는 로컬 유지, 생성만 상용 —
+    # 로컬 LLM 원칙("상용은 최종 답변 LLM만 스왑") 그대로의 스위치.
+    main_llm_backend: str = ""
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 
