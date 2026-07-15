@@ -10,7 +10,8 @@ from typing import AsyncIterator, Optional
 from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
 from src.agent.state import create_initial_state
 from src.agent.executors._helpers import (
-    _extract_faithfulness_score, is_no_answer_dominant, widen_plan,
+    _extract_faithfulness_score, _collect_guardrail_warnings,
+    REGENERATE_SCORE_THRESHOLD, is_no_answer_dominant, widen_plan,
 )
 from src.domain.agent_context import AgentContext
 from src.domain.execution_plan import ExecutionPlan
@@ -293,11 +294,62 @@ class DeterministicExecutorMixin:
             modified, results = await run_guardrail_chain(
                 full_answer, plan.guardrail_chain, self._guardrails, guardrail_ctx,
             )
+            # Task 014: faithfulness 스코어 포집 → done 이벤트 동봉
+            faithfulness_score = _extract_faithfulness_score(results)
+
+            # 가드레일 판정 기반 재생성 — "내용이 올바른가"의 결정권은 가드레일.
+            # 심각 위반(score < 0.35: 연산 왜곡 0.2, deep_eval fail 0.3)이면 같은
+            # 컨텍스트로 경고를 주입해 1회 재생성한다(검색은 무죄 — 재검색 없음.
+            # 비스트리밍 그래프의 regenerate 노드와 동일 계약을 스트림에 이식).
+            if (
+                faithfulness_score is not None
+                and faithfulness_score < REGENERATE_SCORE_THRESHOLD
+                and _widen_attempt == 0  # 확장 재시도와 합산 폭주 방지(총 2패스 상한)
+            ):
+                warning_text = _collect_guardrail_warnings(results)
+                logger.info(
+                    "guardrail_regenerate",
+                    score=faithfulness_score, warnings=warning_text,
+                )
+                yield {"type": "trace", "data": {
+                    "step": "regenerate", "status": "start",
+                    "reason": warning_text, "score": faithfulness_score,
+                }}
+                yield {"type": "replace", "data": ""}
+                feedback = (
+                    f"[IMPORTANT] 이전 답변이 품질 검증에서 심각한 지적을 받았습니다: "
+                    f"{warning_text}. 참고 문서의 계산 조항은 원문 연산 그대로 "
+                    f"인용하고, 근거 없는 내용은 포함하지 마세요."
+                )
+                volatile_extra = (
+                    f"{plan.volatile_system_prompt}\n\n{feedback}"
+                    if plan.volatile_system_prompt else feedback
+                )
+                answer_tokens = []
+                async for chunk in self._main_llm.generate_stream_typed(
+                    prompt,
+                    cacheable_system=plan.system_prompt,
+                    volatile_system=volatile_extra,
+                    max_tokens=plan.max_output_tokens,
+                ):
+                    if chunk.kind == "thinking":
+                        yield {"type": "thinking", "data": chunk.content}
+                    else:
+                        answer_tokens.append(chunk.content)
+                        yield {"type": "token", "data": chunk.content}
+                full_answer = "".join(answer_tokens)
+                modified, results = await run_guardrail_chain(
+                    full_answer, plan.guardrail_chain, self._guardrails, guardrail_ctx,
+                )
+                faithfulness_score = _extract_faithfulness_score(results)
+                yield {"type": "trace", "data": {
+                    "step": "regenerate", "status": "end",
+                    "score": faithfulness_score,
+                }}
+
             if modified != full_answer:
                 yield {"type": "trace", "data": {"step": "guardrail_modified", "results": results}}
                 yield {"type": "replace", "data": modified}
-            # Task 014: faithfulness 스코어 포집 → done 이벤트 동봉
-            faithfulness_score = _extract_faithfulness_score(results)
             gr_ms = (time.time() - gr_start) * 1000
             logger.info("guardrail_complete", ms=round(gr_ms, 1), modified=(modified != full_answer))
             if trace:

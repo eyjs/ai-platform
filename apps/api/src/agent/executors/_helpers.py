@@ -111,3 +111,20 @@ def widen_plan(plan, cap: int = 16):
         max_vector_chunks=min(cap, max(1, plan.strategy.max_vector_chunks) * 2),
     )
     return dataclasses.replace(plan, strategy=widened_strategy)
+
+
+# 가드레일 판정 기반 재생성 임계 — 이 미만이면 "내용이 틀렸다"는 판정으로 본다
+# (연산 왜곡 0.2, deep_eval 근거실패 0.3 해당. 경미한 warn 0.5는 재생성 안 함).
+REGENERATE_SCORE_THRESHOLD = 0.35
+
+
+def _collect_guardrail_warnings(results: dict) -> str:
+    """가드레일 결과에서 warn 사유를 재생성 피드백용 문장으로 모은다."""
+    warnings = []
+    for name, v in results.items():
+        if name.startswith("_") or not isinstance(v, dict):
+            continue
+        if v.get("action") == "warn":
+            reason = v.get("reason") or v.get("message") or name
+            warnings.append(f"{name}: {reason}")
+    return "; ".join(warnings) if warnings else "품질 미달"

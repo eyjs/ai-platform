@@ -545,6 +545,8 @@ async def run_guardrail_chain(
                 "action": result.action,
                 "ms": round(ms, 1),
                 "score": result.score,
+                # 재생성 피드백·관측용 판정 사유 (pass면 None)
+                "reason": result.reason,
             }
 
             if result.action == "block":

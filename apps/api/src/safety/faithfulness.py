@@ -68,6 +68,11 @@ class FaithfulnessGuard:
                 if result:
                     return result
 
+        # --- Quick-check 2.5: 계산 연산 왜곡 (max→합산 등) ---
+        distortion = self._check_operator_distortion(answer, context.source_documents)
+        if distortion:
+            return distortion
+
         # --- Quick-check 3: 인용 검증 ---
         citation_result = self._check_citations(answer, context.source_documents)
         if citation_result:
@@ -81,6 +86,52 @@ class FaithfulnessGuard:
 
         # 모든 검증 통과 → 1.0
         return GuardrailResult.passed(score=1.0)
+
+    # 소스의 max 연산 패턴: "A와 B 중 큰 금액" (숫자·금액·비율 쌍)
+    _MAX_PAIR_RE = re.compile(
+        r'([\d,.]+\s*[만억천]?\s*원|[\d.]+\s*%)'
+        r'\s*[과와]\s*.{0,40}?'
+        r'([\d,.]+\s*[만억천]?\s*원|[\d.]+\s*%)'
+        r'\s*중\s*큰'
+    )
+    # 답변의 합산 표현
+    _SUM_WORD_RE = re.compile(r'합산|합한|합친|더한|더하여|더해서|\+')
+
+    @classmethod
+    def _check_operator_distortion(
+        cls, answer: str, docs: list[dict],
+    ) -> Optional[GuardrailResult]:
+        """계산 연산 왜곡 검사 — 금전 도메인 치명 오류의 결정론 검출.
+
+        소스가 "A와 B **중 큰 금액**"(max)인데 답변이 같은 숫자쌍을
+        "합산"으로 서술하면 심각 위반(실사고: 실손 공제금액 max→합산 왜곡 —
+        숫자 자체는 전부 소스에 있어 기존 숫자 검증을 전부 통과했다).
+        """
+        def norm(s: str) -> str:
+            return re.sub(r'[\s,]', '', s)
+
+        pairs = set()
+        for doc in docs:
+            for a, b in cls._MAX_PAIR_RE.findall(doc.get("content", "")):
+                pairs.add((norm(a), norm(b)))
+        if not pairs:
+            return None
+
+        answer_norm = re.sub(r'[\s,]', '', answer)
+        for a, b in pairs:
+            ia, ib = answer_norm.find(a), answer_norm.find(b)
+            if ia < 0 or ib < 0:
+                continue
+            lo, hi = min(ia, ib), max(ia, ib) + max(len(a), len(b))
+            window = answer_norm[max(0, lo - 20):hi + 20]
+            if cls._SUM_WORD_RE.search(window) and '중큰' not in window:
+                warning = (
+                    f"원문은 '{a}'와 '{b}' 중 큰 금액(max) 연산인데 "
+                    f"답변이 합산으로 서술 — 계산 왜곡"
+                )
+                logger.warning("faithfulness_operator_distortion", detail=warning)
+                return GuardrailResult.warn(warning, None, score=0.2)
+        return None
 
     @staticmethod
     def _check_cooccurrence(
