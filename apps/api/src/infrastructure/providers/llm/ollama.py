@@ -64,6 +64,7 @@ class OllamaProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
+                "think": False,
                 "options": options,
             },
         )
@@ -85,6 +86,7 @@ class OllamaProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
+                "think": False,
                 "format": "json",
                 "options": {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS},
             },
@@ -115,6 +117,7 @@ class OllamaProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 "stream": True,
+                "think": False,
                 "options": stream_options,
             },
         ) as response:
@@ -126,6 +129,10 @@ class OllamaProvider(LLMProvider):
                 if data.get("done"):
                     break
                 token = data.get("message", {}).get("content", "")
+                # thinking 모델(qwen3 계열)은 사고를 message.thinking으로 보내고
+                # content=""인 청크를 다수 방출 — 빈 토큰은 스킵(빈 답변 실사고).
+                if not token:
+                    continue
                 if "<think>" in token:
                     in_think = True
                     continue
