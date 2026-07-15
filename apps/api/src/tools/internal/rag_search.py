@@ -79,12 +79,15 @@ class RAGSearchTool:
         reranker: Optional[RerankerProvider] = None,
         router_llm: Optional[LLMProvider] = None,
         default_top_k: int = 5,
+        min_rerank_score: float = 0.0,
     ):
         self._embedder = embedding_provider
         self._store = vector_store
         self._reranker = reranker
         self._router_llm = router_llm
         self._default_top_k = default_top_k
+        # 리랭커 절대 관련도 하한 — 무관 청크(sigmoid≈0.5)를 컨텍스트에서 제외.
+        self._min_rerank_score = min_rerank_score
         # 깔때기 1단계: 질문 기반 엔티티 메타필터 인덱스 (코퍼스 문서명에서 유도, TTL 갱신)
         self._entity_index = EntityDocIndex()
 
@@ -293,6 +296,7 @@ class RAGSearchTool:
             try:
                 results, rerank_audit = await rerank_3tier(
                     self._reranker, query, candidates, top_k,
+                    min_rerank_score=self._min_rerank_score,
                 )
                 trace_detail["reranked_by"] = "reranker_3tier"
             except Exception as e:

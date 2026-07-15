@@ -281,6 +281,8 @@ async def create_app_state(settings: Settings) -> AppState:
         reranker=reranker,
         # 쿼리 확장은 생성적 오케스트레이션 → 4B orchestration_llm (분류용 router_llm 아님)
         router_llm=orchestration_llm,
+        # 무관 검색(리랭커 절대점수 하한 미달) → 빈 결과 → 정직 반려(환각 방지)
+        min_rerank_score=settings.rag_min_rerank_score,
     ))
     tool_registry.register(FactLookupTool(fact_store=fact_store))
     from src.tools.internal import SajuLookupTool, SajuReportPaperTool, SajuReportCompatibilityTool

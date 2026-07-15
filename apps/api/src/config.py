@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     main_model: str = "qwen3.5:27b"
     dev_embedding_model: str = "dragonkue/BGE-m3-ko"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    # RAG 관련도 하한(리랭커 절대점수). bge-reranker-v2-m3는 무관 청크를 sigmoid
+    # 0.5(logit≈0)에 못박고 관련 청크만 그 위로 올린다. fused 점수는 벡터 min-max
+    # 정규화 때문에 무관 청크도 tier를 통과하므로(0.7*0.5+0.3*1.0=0.65), 리랭커
+    # 절대점수가 이 값 미만인 청크는 컨텍스트에서 제외한다. 전부 미달이면 RAG가
+    # 빈 결과 → "관련 자료 없음" 정직 반려(환각 방지). 0.501=순수 노이즈(0.5) 바로
+    # 위 — 실측상 무관 청크는 0.5000~0.5004, 관련 청크는 0.5473. 약신호까지 살리는
+    # 보수적 기본값(recall 손실 최소). 운영 로그 rerank_top_score로 상향 튜닝 가능.
+    rag_min_rerank_score: float = 0.501
     openai_api_key: str = ""
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"

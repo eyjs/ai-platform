@@ -12,6 +12,7 @@ from src.agent.state import create_initial_state
 from src.agent.executors._helpers import (
     _extract_faithfulness_score, _collect_guardrail_warnings,
     REGENERATE_SCORE_THRESHOLD, is_no_answer_dominant, widen_plan,
+    insufficient_context_refusal,
 )
 from src.domain.agent_context import AgentContext
 from src.domain.execution_plan import ExecutionPlan
@@ -191,9 +192,15 @@ class DeterministicExecutorMixin:
         prompt_results = search_results[:plan.strategy.max_vector_chunks]
         prompt = build_prompt(question, plan, prompt_results)
 
+        # 관련도 게이트: needs_rag인데 관련 컨텍스트가 하나도 없으면(무관 검색이
+        # 리랭커 하한 미달로 빈 결과) LLM을 태우지 않고 정직 반려를 결정론적으로
+        # 방출한다 — 무관 청크로 지어내는 것을 원천 차단(환각 방지).
+        refusal = insufficient_context_refusal(plan, prompt_results)
+
         yield {"type": "trace", "data": {
             "step": "generation", "status": "start",
             "context_chunks": len(prompt_results),
+            "refused": refusal is not None,
         }}
 
         answer_tokens = []
@@ -203,23 +210,34 @@ class DeterministicExecutorMixin:
         ttft_ms: Optional[float] = None
         thinking_chunks = 0
         answer_chunk_count = 0
-        # thinking/answer 분리 스트리밍 (base 기본 구현은 전부 answer)
-        # volatile(날짜·간결 지시 등 per-turn)도 전달 — 기존엔 스트리밍 경로에서 유실됐다.
-        async for chunk in self._main_llm.generate_stream_typed(
-            prompt,
-            cacheable_system=plan.system_prompt,
-            volatile_system=plan.volatile_system_prompt,
-            max_tokens=plan.max_output_tokens,
-        ):
-            if ttft_ms is None:
-                ttft_ms = (time.time() - gen_start) * 1000
-            if chunk.kind == "thinking":
-                thinking_chunks += 1
-                yield {"type": "thinking", "data": chunk.content}
-            else:
-                answer_chunk_count += 1
-                answer_tokens.append(chunk.content)
-                yield {"type": "token", "data": chunk.content}
+        if refusal is not None:
+            logger.info(
+                "insufficient_context_refusal",
+                context_chunks=len(prompt_results),
+                needs_rag=plan.strategy.needs_rag,
+            )
+            ttft_ms = 0.0
+            answer_chunk_count = 1
+            answer_tokens.append(refusal)
+            yield {"type": "token", "data": refusal}
+        else:
+            # thinking/answer 분리 스트리밍 (base 기본 구현은 전부 answer)
+            # volatile(날짜·간결 지시 등 per-turn)도 전달 — 기존엔 스트리밍 경로에서 유실됐다.
+            async for chunk in self._main_llm.generate_stream_typed(
+                prompt,
+                cacheable_system=plan.system_prompt,
+                volatile_system=plan.volatile_system_prompt,
+                max_tokens=plan.max_output_tokens,
+            ):
+                if ttft_ms is None:
+                    ttft_ms = (time.time() - gen_start) * 1000
+                if chunk.kind == "thinking":
+                    thinking_chunks += 1
+                    yield {"type": "thinking", "data": chunk.content}
+                else:
+                    answer_chunk_count += 1
+                    answer_tokens.append(chunk.content)
+                    yield {"type": "token", "data": chunk.content}
 
         gen_ms = (time.time() - gen_start) * 1000
         total_chunks = thinking_chunks + answer_chunk_count
@@ -255,6 +273,7 @@ class DeterministicExecutorMixin:
         _probe_answer = "".join(answer_tokens)
         if (
             _widen_attempt == 0
+            and refusal is None  # 결정론 반려(빈 컨텍스트)는 정원 확대로 못 살림 — 재시도 무의미
             and plan.strategy.needs_rag
             and is_no_answer_dominant(_probe_answer)
         ):

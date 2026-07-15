@@ -66,6 +66,55 @@ async def test_all_irrelevant_returns_empty():
 
 
 @pytest.mark.asyncio
+async def test_relevance_floor_rejects_pinned_irrelevant():
+    """[실사고] bge-reranker-v2-m3는 무관 청크를 sigmoid≈0.5(logit≈0)에 못박는데,
+    fused=0.7*0.5+0.3*vector_norm(=1.0)=0.65라 tier1을 통과해버린다.
+    리랭커 절대 하한(min_rerank_score)이 이 무관 배치를 빈 결과로 만든다.
+    """
+    from src.tools.internal.reranker_pipeline import rerank_3tier
+    reranker = AsyncMock()
+    # 무관 배치: 전부 0.5(리랭커 무변별 baseline)
+    reranker.rerank.return_value = [{"index": i, "score": 0.5} for i in range(3)]
+    candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
+    result, audit = await rerank_3tier(
+        reranker, "무관 질문", candidates, top_k=5, min_rerank_score=0.505,
+    )
+    assert result == []  # 전부 하한 미달 → 빈 결과 (정직 반려의 근거)
+    assert all(a["fate"] == "below_floor" for a in audit)
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_keeps_relevant():
+    """관련 청크(리랭커 baseline 초과)는 하한을 통과해 채택된다."""
+    from src.tools.internal.reranker_pipeline import rerank_3tier
+    reranker = AsyncMock()
+    # a=관련(0.55 > 0.505), b/c=무관(0.5)
+    reranker.rerank.return_value = [
+        {"index": 0, "score": 0.55},
+        {"index": 1, "score": 0.5},
+        {"index": 2, "score": 0.5},
+    ]
+    candidates = [_chunk("a", 0.016), _chunk("b", 0.012), _chunk("c", 0.008)]
+    result, _audit = await rerank_3tier(
+        reranker, "질문", candidates, top_k=5, min_rerank_score=0.505,
+    )
+    assert [r["chunk_id"] for r in result] == ["a"]  # 관련 청크만 생존
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_default_noop():
+    """min_rerank_score 기본(0.0)이면 무동작 — 기존 tier 동작 그대로(하위호환)."""
+    from src.tools.internal.reranker_pipeline import rerank_3tier
+    reranker = AsyncMock()
+    reranker.rerank.return_value = [
+        {"index": 0, "score": 0.9}, {"index": 1, "score": 0.7},
+    ]
+    candidates = [_chunk("a", 0.016), _chunk("b", 0.008)]
+    result, _audit = await rerank_3tier(reranker, "질문", candidates, top_k=5)
+    assert len(result) == 2  # floor 없음 → 둘 다 채택
+
+
+@pytest.mark.asyncio
 async def test_vector_signal_breaks_ties():
     """[C8 회귀] 리랭커 점수가 동일하면 정규화된 벡터 신호가 순위를 가른다.
 

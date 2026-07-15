@@ -418,6 +418,17 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
         max_chunks = plan.strategy.max_vector_chunks
         prompt_results = _top_results_by_score(results, max_chunks)
 
+        # 관련도 게이트: needs_rag인데 관련 컨텍스트가 없으면 LLM을 태우지 않고
+        # 정직 반려(무관 청크로 지어내기 방지 — 스트리밍 경로와 동일 계약).
+        from src.agent.executors._helpers import insufficient_context_refusal
+        refusal = insufficient_context_refusal(plan, prompt_results)
+        if refusal is not None:
+            logger.info(
+                "insufficient_context_refusal",
+                context_chunks=len(prompt_results), needs_rag=plan.strategy.needs_rag,
+            )
+            return {"answer": refusal}
+
         prompt = build_prompt(question, plan, prompt_results)
         # 비스트리밍 생성도 트레이스에 기록 — 없으면 graph_execute 총합만 보여
         # 지배적 지연(생성)이 breakdown에서 사라진다 (스트리밍 경로와 동일 계약).

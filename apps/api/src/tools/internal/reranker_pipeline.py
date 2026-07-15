@@ -56,6 +56,7 @@ async def rerank_3tier(
     query: str,
     candidates: list[dict],
     top_k: int,
+    min_rerank_score: float = 0.0,
 ) -> tuple[list[dict], list[dict]]:
     """2-tier 리랭킹 + 스케일 정규화 융합 스코어.
 
@@ -102,10 +103,16 @@ async def rerank_3tier(
         key=lambda x: (-x["fused_score"], str(x["data"].get("chunk_id", ""))),
     )
 
-    # 5. tier 필터링 — 임계값은 정규화된 [0,1] fused 점수 기준.
+    # 5a. 관련도 하한(리랭커 절대점수) — fused는 벡터 min-max 정규화 때문에 무관
+    #     배치에서도 top 청크가 vector_score≈1.0을 받아 tier를 통과한다(무관 청크의
+    #     리랭커 sigmoid≈0.5 → fused≈0.65). fused 이전에 리랭커 절대점수로 먼저 걸러야
+    #     "무관 검색=빈 결과=정직 반려"가 성립한다(min_rerank_score=0.0이면 무동작).
+    eligible = [s for s in scored if s["rerank_score"] >= min_rerank_score]
+
+    # 5b. tier 필터링 — 임계값은 정규화된 [0,1] fused 점수 기준.
     #    (C10: 운영 리랭커 출력 분포로 경험적 재캘리브레이션 대상 — observability 로깅 필요)
-    tier1 = [s for s in scored if s["fused_score"] >= PREFERRED_MIN_SCORE]
-    tier2 = [s for s in scored if FALLBACK_MIN_SCORE <= s["fused_score"] < PREFERRED_MIN_SCORE]
+    tier1 = [s for s in eligible if s["fused_score"] >= PREFERRED_MIN_SCORE]
+    tier2 = [s for s in eligible if FALLBACK_MIN_SCORE <= s["fused_score"] < PREFERRED_MIN_SCORE]
 
     if tier1:
         results = tier1[:top_k]
@@ -126,12 +133,19 @@ async def rerank_3tier(
             results, tier1 + tier2, top_k,
         )
 
+    # 관측: 리랭커 절대점수 최댓값 — 관련도 하한 튜닝의 근거. below_floor는
+    # "검색은 됐으나 리랭커가 관련 없다고 판정"한 청크 수(무관 질문의 시그니처).
+    top_rerank = max((s["rerank_score"] for s in scored), default=0.0)
+    below_floor = len(scored) - len(eligible)
     logger.info(
         "rerank_3tier",
         input=len(candidates),
         tier1=len(tier1),
         tier2=len(tier2),
         output=len(results),
+        rerank_top_score=round(top_rerank, 4),
+        min_rerank_score=min_rerank_score,
+        below_floor=below_floor,
     )
 
     # 전 후보 판정 감사 — 채택/탈락과 그 사유를 후보 단위로 남긴다 (역방향 분석)
@@ -139,11 +153,16 @@ async def rerank_3tier(
     audit = []
     for r in scored:
         fused = r["fused_score"]
-        tier = 1 if fused >= PREFERRED_MIN_SCORE else (
-            2 if fused >= FALLBACK_MIN_SCORE else 0
+        below_relevance = r["rerank_score"] < min_rerank_score
+        tier = 0 if below_relevance else (
+            1 if fused >= PREFERRED_MIN_SCORE else (
+                2 if fused >= FALLBACK_MIN_SCORE else 0
+            )
         )
         if id(r) in selected_ids:
             fate = "selected"
+        elif below_relevance:
+            fate = "below_floor"  # 리랭커 절대점수 하한 미달 (무관 판정)
         elif tier > 0:
             fate = "capacity"   # 티어는 통과했으나 top_k 정원 밖
         else:

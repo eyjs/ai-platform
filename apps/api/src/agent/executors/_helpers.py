@@ -9,6 +9,21 @@ from typing import Optional
 from src.domain.execution_plan import ExecutionPlan
 
 
+def insufficient_context_refusal(plan, prompt_results: list) -> Optional[str]:
+    """RAG가 필요한데 관련 컨텍스트가 하나도 없으면 정직 반려 메시지를 반환한다.
+
+    무관 검색(리랭커 하한 미달로 빈 결과)에서 LLM이 파라메트릭 지식으로
+    지어내는 것을 원천 차단한다 — 근거 없는 답 대신 "자료 없음"을 말한다.
+    needs_rag=False(일반 대화 등)는 컨텍스트가 없어도 정상이므로 게이트하지 않는다.
+    반려 불필요 시 None.
+    """
+    from src.locale.bundle import get_locale
+
+    if getattr(plan.strategy, "needs_rag", False) and not prompt_results:
+        return get_locale().message("insufficient_relevance")
+    return None
+
+
 def _content_to_text(content) -> str:
     """LangChain 메시지 content 를 평문 텍스트로 평탄화한다.
 
