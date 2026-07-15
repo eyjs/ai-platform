@@ -116,13 +116,31 @@ class ProviderFactory:
         )
 
     def get_main_llm(self) -> LLMProvider:
-        return self._create_llm(
+        base = self._create_llm(
             server_url=self._settings.main_llm_server_url,
             local_model=self._settings.main_model,
             anthropic_model=self._settings.anthropic_main_model,
             label="main",
             backend_override=self._settings.main_llm_backend,
         )
+        # DGX Spark 우선 + 현행 구조 자동 폴백 (사용자 요구: 연결 끊기면 현재 구조로)
+        if self._settings.dgx_llm_url:
+            from .llm.failover import FailoverLLMProvider
+            from .llm.ollama import OllamaProvider
+            from src.locale.bundle import get_locale
+
+            primary = OllamaProvider(
+                base_url=self._settings.dgx_llm_url,
+                model=self._settings.dgx_main_model,
+                num_ctx=self._settings.ollama_num_ctx,
+                system_prefix=get_locale().prompt("llm_system_prefix"),
+            )
+            logger.info(
+                "Using DGX Spark ollama (main, primary): %s @ %s — fallback: 현행 로컬",
+                self._settings.dgx_main_model, self._settings.dgx_llm_url,
+            )
+            return FailoverLLMProvider(primary, base, label="main")
+        return base
 
     # === 하이브리드 라우팅용 명시 provider (provider_mode 무시) ===
     # 무료/패턴 콘텐츠($0)는 로컬, 고난도 추론은 상용 — 요청별 선택용.

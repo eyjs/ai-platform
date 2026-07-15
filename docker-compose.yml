@@ -37,6 +37,10 @@ services:
       AIP_ANTHROPIC_MAIN_MODEL: claude-haiku-4-5
       AIP_ANTHROPIC_ROUTER_MODEL: claude-haiku-4-5
       # 임베딩/리랭커는 모드와 무관하게 항상 MLX (Anthropic 임베딩 없음 + 기존 코퍼스 동일 모델)
+      # DGX Spark(원격 GPU, Tailscale) — 설정 시 main 생성 우선 담당, 단절 시 로컬 자동 폴백.
+      # 값은 루트 .env에서 주입 (미설정이면 기능 비활성 = 현행 로컬 그대로).
+      AIP_DGX_LLM_URL: ${AIP_DGX_LLM_URL:-}
+      AIP_DGX_MAIN_MODEL: ${AIP_DGX_MAIN_MODEL:-qwen3.6:35b-a3b}
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       # 하이브리드: 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). get_local_llm 전용 변수.

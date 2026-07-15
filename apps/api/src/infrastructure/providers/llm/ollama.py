@@ -47,8 +47,11 @@ class OllamaProvider(LLMProvider):
 
     async def generate(
         self, prompt: str, system: str = "", max_tokens: int | None = None,
+        cacheable_system: str = "", volatile_system: str = "",
     ) -> str:
-        system_msg = self._build_system(system)
+        system_msg = self._build_system(
+            self._combine_system(system, cacheable_system, volatile_system)
+        )
         options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
         if max_tokens is not None:
             options["num_predict"] = max_tokens
@@ -94,8 +97,11 @@ class OllamaProvider(LLMProvider):
 
     async def generate_stream(
         self, prompt: str, system: str = "", max_tokens: int | None = None,
+        cacheable_system: str = "", volatile_system: str = "",
     ) -> AsyncIterator[str]:
-        system_msg = self._build_system(system)
+        system_msg = self._build_system(
+            self._combine_system(system, cacheable_system, volatile_system)
+        )
         stream_options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
         if max_tokens is not None:
             stream_options["num_predict"] = max_tokens

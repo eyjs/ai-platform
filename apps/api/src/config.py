@@ -198,6 +198,11 @@ class Settings(BaseSettings):
     # 자동 라우팅 파리티(레거시는 선택된 프로파일 답변을 그대로 반환) + 지연 절감.
     # 켜면 단일 위임 응답이 "메인 종합 문체"가 아닌 서브 원문으로 나간다.
     supervisor_single_passthrough: bool = False
+    # DGX Spark(원격 GPU, Tailscale) ollama 서빙 — 설정 시 main 생성을 DGX가
+    # 우선 담당하고, 연결 단절 시 현행 로컬 구조로 자동 폴백(FailoverLLMProvider).
+    dgx_llm_url: str = ""          # 예: http://100.102.16.62:11434
+    dgx_main_model: str = "qwen3.6:35b-a3b"
+
     # 최종 답변(main) LLM만 백엔드 강제 오버라이드. ""=provider_mode 따름.
     # "anthropic"이면 판단 레이어(라우터·플래너)는 로컬 유지, 생성만 상용 —
     # 로컬 LLM 원칙("상용은 최종 답변 LLM만 스왑") 그대로의 스위치.
