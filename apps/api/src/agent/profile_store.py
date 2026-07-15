@@ -222,6 +222,7 @@ class ProfileStore:
             workflow_id=data.get("workflow_id"),
             hybrid_triggers=hybrid_triggers,
             tools=tools,
+            rag_min_rerank_score=data.get("rag_min_rerank_score"),
             system_prompt=data.get("system_prompt", ""),
             response_policy=data.get("response_policy", "balanced"),
             guardrails=data.get("guardrails", []),
@@ -260,6 +261,7 @@ class ProfileStore:
                 for t in profile.hybrid_triggers
             ],
             "tools": [{"name": t.name, "config": t.config} for t in profile.tools],
+            "rag_min_rerank_score": profile.rag_min_rerank_score,
             "system_prompt": profile.system_prompt,
             "response_policy": profile.response_policy,
             "guardrails": profile.guardrails,

@@ -70,6 +70,14 @@ class AgentProfile:
     # 활성 도구
     tools: list[ToolRef] = field(default_factory=list)
 
+    # RAG 관련도 하한(리랭커 절대점수) — 이 프로필의 도메인 코퍼스에 맞춰
+    # 캘리브레이션한 값. None이면 전역 기본값(Settings.rag_min_rerank_score) 사용.
+    # 도메인마다 관련/무관 리랭커 점수 분포가 달라 프로필별로 오버라이드한다
+    # (예: 보험 0.58, 해석적 답변이 많은 도메인은 더 낮게). scripts/probe_rerank_floor.py
+    # 로 도메인별 재보정. 크로스 도메인 차단은 오케스트레이터 라우팅이 담당하고,
+    # 이 값은 "도메인 내부에서 내 문서가 이 질문에 답하나"의 최종 게이트다.
+    rag_min_rerank_score: float | None = None
+
     # 응답 설정
     system_prompt: str = ""
     response_policy: str = ResponsePolicy.BALANCED

@@ -42,6 +42,11 @@ async def main():
     _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     set_locale(LocaleBundle.load(os.path.join(_src, "src", "locale", f"{s.locale}.yaml")))
 
+    import sys
+    # 도메인 인자화 — 프로필의 domain_scopes에 맞춰 코퍼스를 좁혀 측정한다.
+    # 사용: python -m scripts.probe_rerank_floor [도메인코드 ...]  (기본: 보험)
+    domain_codes = sys.argv[1:] or ["보험"]
+
     factory = ProviderFactory(s)
     store = VectorStore(s.database_url)
     await store.connect()
@@ -53,8 +58,9 @@ async def main():
         router_llm=factory.get_orchestration_llm(),
         min_rerank_score=0.0,
     )
+    print(f"domain_codes = {domain_codes}")
     scope = SearchScope(
-        domain_codes=["보험"], security_level_max=SecurityLevel.INTERNAL, tenant_id="default",
+        domain_codes=domain_codes, security_level_max=SecurityLevel.INTERNAL, tenant_id="default",
     )
     ctx = AgentContext(session_id="probe", tenant_id="default")
 

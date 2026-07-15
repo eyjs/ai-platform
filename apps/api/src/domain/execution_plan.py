@@ -56,6 +56,8 @@ class ExecutionPlan:
     context_adapter: str | None = None  # dynamic 스텝 enrichment 어댑터 이름 (Profile 지정)
     cache_padding_text: str = ""  # 캐시 패딩 도메인 배경 텍스트 (Profile 지정, 양 경로 공유)
     profile_id: str = ""  # 그래프 캐시 엔트리 태깅용 → 프로필 변경 시 targeted invalidation
+    # RAG 관련도 하한(프로필 지정, None이면 전역 기본값). rag_search에 params로 주입.
+    rag_min_rerank_score: float | None = None
     conversation_context: str = ""
     response_policy: str = ResponsePolicy.BALANCED
     max_tool_calls: int = 5

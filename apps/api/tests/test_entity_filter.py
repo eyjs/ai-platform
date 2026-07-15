@@ -82,7 +82,7 @@ async def test_rag_search_applies_entity_scope():
 
     captured = {}
 
-    async def fake_pipeline(query, scope, top_k):
+    async def fake_pipeline(query, scope, top_k, min_rerank_score=None):
         captured["scope"] = scope
         return ([{"chunk_id": "c1", "document_id": "d1", "content": "가입나이", "score": 0.9}],
                 [0.1], {"filter": {}})
@@ -112,7 +112,7 @@ async def test_rag_search_fallback_when_filtered_empty():
 
     calls = []
 
-    async def fake_pipeline(query, scope, top_k):
+    async def fake_pipeline(query, scope, top_k, min_rerank_score=None):
         calls.append(scope.allowed_doc_ids)
         if scope.allowed_doc_ids is not None:
             return ([], [0.1], {"filter": {}})  # 필터 검색 빈손
@@ -143,7 +143,7 @@ async def test_rag_search_respects_preset_doc_ids():
 
     captured = {}
 
-    async def fake_pipeline(query, scope, top_k):
+    async def fake_pipeline(query, scope, top_k, min_rerank_score=None):
         captured["scope"] = scope
         return ([{"chunk_id": "c1", "document_id": "dX", "content": "x", "score": 0.9}],
                 [0.1], {"filter": {}})

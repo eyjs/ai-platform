@@ -13,6 +13,11 @@ domain_scopes:
 category_scopes: []
 security_level_max: "INTERNAL"
 
+# RAG 관련도 하한 — 보험 코퍼스(간병·암·실손) 14문항 배터리로 캘리브레이션(0.58).
+# 무관 질문(자동차·교통 등) rerank_top 0.50~0.57 vs 관련 0.62~0.73 사이. 미지정 시
+# 전역 기본값 폴백. 도메인 추가 시 각 프로필이 probe_rerank_floor.py로 자체 보정.
+rag_min_rerank_score: 0.58
+
 mode: "deterministic"
 workflow_id: null
 hybrid_triggers: []

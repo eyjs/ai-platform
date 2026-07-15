@@ -68,6 +68,10 @@ class RAGSearchTool:
                 "type": "integer",
                 "description": "반환할 최대 청크 수 (미지정 시 전략 기본값)",
             },
+            "min_rerank_score": {
+                "type": "number",
+                "description": "리랭커 관련도 하한 (미지정 시 전역 기본값). 프로필별 오버라이드.",
+            },
         },
         "required": ["query"],
     }
@@ -138,6 +142,11 @@ class RAGSearchTool:
         disclosure_level = params.get(
             "disclosure_level", DEFAULT_DISCLOSURE_LEVEL,
         )
+        # 관련도 하한: 프로필별 오버라이드(params) 우선, 없으면 전역 기본값(생성자).
+        try:
+            min_rerank = float(params.get("min_rerank_score", self._min_rerank_score))
+        except (TypeError, ValueError):
+            min_rerank = self._min_rerank_score
         t_start = time.time()
 
         # Level 1: 메타데이터 전용 (본문 로드 없음)
@@ -149,7 +158,7 @@ class RAGSearchTool:
 
         # Level 2: 기존 5-layer 파이프라인 (기본값)
         results, query_embedding, trace_detail = await self._execute_full_pipeline(
-            query, effective_scope, top_k,
+            query, effective_scope, top_k, min_rerank,
         )
 
         if entity_match:
@@ -162,7 +171,7 @@ class RAGSearchTool:
                 # 필터가 과하게 좁혔을 가능성 — 무필터로 1회 폴백 (recall 보증)
                 logger.info("entity_filter_fallback", aliases=entity_match.aliases)
                 results, query_embedding, trace_detail = await self._execute_full_pipeline(
-                    query, scope, top_k,
+                    query, scope, top_k, min_rerank,
                 )
                 trace_detail.setdefault("filter", {})["entity_filter"] = {
                     "aliases": entity_match.aliases,
@@ -230,6 +239,7 @@ class RAGSearchTool:
 
     async def _execute_full_pipeline(
         self, query: str, scope: SearchScope, top_k: int,
+        min_rerank_score: float | None = None,
     ) -> tuple[list[dict], list[float], dict]:
         """기존 5-layer RAG 파이프라인 (Level 2 기본 경로).
 
@@ -296,7 +306,10 @@ class RAGSearchTool:
             try:
                 results, rerank_audit = await rerank_3tier(
                     self._reranker, query, candidates, top_k,
-                    min_rerank_score=self._min_rerank_score,
+                    min_rerank_score=(
+                        self._min_rerank_score if min_rerank_score is None
+                        else min_rerank_score
+                    ),
                 )
                 trace_detail["reranked_by"] = "reranker_3tier"
             except Exception as e:

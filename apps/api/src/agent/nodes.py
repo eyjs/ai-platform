@@ -131,29 +131,45 @@ def route_by_guardrail(state: AgentState) -> str:
 # --- 노드 팩토리 함수 ---
 
 
-def _inject_strategy_params(tc: ToolCall, registry: ToolRegistry, strategy) -> ToolCall:
-    """도구 스키마가 선언했지만 계획이 누락한 전략 파라미터를 주입한다.
+def _inject_strategy_params(
+    tc: ToolCall, registry: ToolRegistry, strategy,
+    rag_min_rerank_score: float | None = None,
+) -> ToolCall:
+    """도구 스키마가 선언했지만 계획이 누락한 전략/프로필 파라미터를 주입한다.
 
     실사고(배선 갭): strategy.max_vector_chunks(예: CROSS_DOC=10)가 ToolCall
     params에 실리지 않아 rag_search가 항상 기본 top_k(5)로 검색했다 — 프롬프트
     슬롯만 10개로 늘던 반쪽 배선. 도구 이름 하드코딩 대신 input_schema 선언
     기반으로 주입해 Tool 격리 원칙을 지킨다.
+
+    같은 원리로 프로필별 rag_min_rerank_score(관련도 하한)도 스키마에 선언된
+    경우에만 주입한다 — 전역 상수 대신 도메인별 프로필 오버라이드가 되게.
     """
-    max_chunks = getattr(strategy, "max_vector_chunks", None)
-    if max_chunks is None or "max_vector_chunks" in tc.params:
-        return tc
     try:
         tool = registry.get(tc.tool_name)
         schema = getattr(tool, "input_schema", None)
         props = schema.get("properties", {}) if isinstance(schema, dict) else {}
     except Exception:
         props = {}
-    if "max_vector_chunks" not in props:
+
+    injected = dict(tc.params)
+    max_chunks = getattr(strategy, "max_vector_chunks", None)
+    if (
+        max_chunks is not None
+        and "max_vector_chunks" not in tc.params
+        and "max_vector_chunks" in props
+    ):
+        injected["max_vector_chunks"] = max_chunks
+    if (
+        rag_min_rerank_score is not None
+        and "min_rerank_score" not in tc.params
+        and "min_rerank_score" in props
+    ):
+        injected["min_rerank_score"] = rag_min_rerank_score
+
+    if injected == tc.params:
         return tc
-    return ToolCall(
-        tool_name=tc.tool_name,
-        params={**tc.params, "max_vector_chunks": max_chunks},
-    )
+    return ToolCall(tool_name=tc.tool_name, params=injected)
 
 
 def create_execute_tools(registry: ToolRegistry) -> Callable:
@@ -200,9 +216,10 @@ def create_execute_tools(registry: ToolRegistry) -> Callable:
             tool_groups = plan.tool_groups
 
         strategy = getattr(plan, "strategy", None)
+        plan_floor = getattr(plan, "rag_min_rerank_score", None)
         for group in tool_groups:
             group = [
-                _inject_strategy_params(tc, registry, strategy) for tc in group
+                _inject_strategy_params(tc, registry, strategy, plan_floor) for tc in group
             ]
             tasks = [
                 _execute_single(tc, context, plan.scope, trace)

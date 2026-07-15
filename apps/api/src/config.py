@@ -74,16 +74,13 @@ class Settings(BaseSettings):
     # 0.5(logit≈0)에 못박고 관련 청크만 그 위로 올린다. fused 점수는 벡터 min-max
     # 정규화 때문에 무관 청크도 tier를 통과하므로(0.7*0.5+0.3*1.0=0.65), 리랭커
     # 절대점수가 이 값 미만인 청크는 컨텍스트에서 제외한다. 전부 미달이면 RAG가
-    # 빈 결과 → "관련 자료 없음" 정직 반려(환각 방지). 14문항 배터리로 실코퍼스
-    # (간병·암·실손 보험) 튜닝(결정론적 bge 점수, scripts/probe_rerank_floor.py):
-    #   순수 무관(주식·여행·펫·교통) 0.500~0.505, 자동차보험 0.5358, 화재보험 0.5717
-    #   ─ 빈 구간 0.572~0.618 ─ 강한 관련(간병·암·실손 상세) 0.6179~0.7251.
-    # 무관 최댓값(화재 0.5717)이 약한 크로스상품 관련(R4 0.5384)보다 높아 단일
-    # floor로 완전 분리 불가 → 빈 구간 0.58에 두어 무관 6/6 전부 차단, 강한 관련
-    # 6/6 통과, 약한 크로스상품만 정직 반려(오답 비용 > 오반려). 화재/자동차 등
-    # 도메인 밖이나 보험 어휘가 겹치는 부류의 잔여 누수는 도메인/스코프 게이팅이
-    # 근본 해법. env AIP_RAG_MIN_RERANK_SCORE로 튜닝, rerank_top_score 로그로 재보정.
-    rag_min_rerank_score: float = 0.58
+    # RAG 관련도 하한의 "전역 기본값" — 프로필이 rag_min_rerank_score를 지정하지
+    # 않았을 때만 적용된다(도메인별 캘리브레이션은 Profile YAML이 담당).
+    # 여기 값은 도메인 무관 "순수 노이즈 바닥"으로 보수적으로 둔다: bge-reranker는
+    # 무관 청크를 sigmoid 0.5(logit≈0)에 못박으므로 0.505면 순수 노이즈(주식·날씨
+    # 등 0.500)만 걸러 미보정 신규 도메인이 과반려되지 않는다. 도메인이 붙으면
+    # 각 프로필이 probe_rerank_floor.py로 자체 floor를 정해 오버라이드(예: 보험 0.58).
+    rag_min_rerank_score: float = 0.505
     openai_api_key: str = ""
     prod_embedding_model: str = "text-embedding-3-small"
     prod_llm_model: str = "gpt-4o-mini"
