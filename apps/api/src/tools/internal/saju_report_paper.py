@@ -9,7 +9,6 @@ loveRelation, careerWealth, verdictV2) 순차 생성.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.domain.agent_context import AgentContext
@@ -23,28 +22,6 @@ from src.tools.internal.saju_prompts import PAPER_V2_SECTION_KEYS, get_paper_sec
 logger = get_logger(__name__)
 
 _PAPER_REQUIRED_SECTIONS = frozenset(PAPER_V2_SECTION_KEYS)
-
-
-def _extract_json(raw: str) -> dict:
-    """LLM 응답에서 JSON 객체를 추출한다.
-
-    마크다운 코드블록 제거 + 중괄호 범위 추출.
-    """
-    clean = raw.strip()
-    if clean.startswith("```json"):
-        clean = clean[7:]
-    elif clean.startswith("```"):
-        clean = clean[3:]
-    if clean.endswith("```"):
-        clean = clean[:-3]
-    clean = clean.strip()
-
-    start = clean.find("{")
-    end = clean.rfind("}")
-    if start != -1 and end != -1:
-        clean = clean[start : end + 1]
-
-    return json.loads(clean)
 
 
 class SajuReportPaperTool:
@@ -124,12 +101,16 @@ class SajuReportPaperTool:
 
                 user_prompt = user_template.replace("{context_str}", effective_context)
 
-                raw_response = await self._llm.generate(
+                # generate_json = 제약 디코딩(ollama format:"json") — 문법상 유효한 JSON을
+                # 보장한다. generate()+_extract_json은 모델이 규칙("순수 JSON만")을 어기면
+                # 그대로 깨졌다(실측: 7섹션 중 1~2개가 매번 실패 — 따옴표 미이스케이프,
+                # JSON 뒤 잡텍스트, JSON 자체 누락).
+                parsed = await self._llm.generate_json(
                     prompt=user_prompt,
                     system=system_prompt,
                 )
 
-                llm_text = normalize_llm_text(_extract_json(raw_response))
+                llm_text = normalize_llm_text(parsed)
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 

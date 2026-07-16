@@ -40,13 +40,21 @@ def _make_pool() -> MagicMock:
 
 
 def _make_llm_provider(section_keys: list[str]) -> MagicMock:
-    """각 섹션별 LLM 응답을 반환하는 mock LLMProvider."""
+    """각 섹션별 LLM 응답을 반환하는 mock LLMProvider.
+
+    generate와 generate_json 양쪽을 채운다 — paper 툴은 제약 디코딩(generate_json,
+    dict 반환)을, compat/career/wealth 툴은 generate(문자열 반환 + 자체 파싱)를 쓴다.
+    호출 카운트가 서로 오염되지 않도록 이터레이터를 분리한다.
+    """
     llm = MagicMock()
-    responses = iter(
-        json.dumps({"summary": f"{key} 분석 결과", "advice": f"{key} 조언"})
-        for key in section_keys
-    )
-    llm.generate = AsyncMock(side_effect=lambda **kwargs: next(responses))
+
+    def _payload(key: str) -> dict:
+        return {"summary": f"{key} 분석 결과", "advice": f"{key} 조언"}
+
+    text_responses = iter(json.dumps(_payload(key)) for key in section_keys)
+    json_responses = iter(_payload(key) for key in section_keys)
+    llm.generate = AsyncMock(side_effect=lambda **kwargs: next(text_responses))
+    llm.generate_json = AsyncMock(side_effect=lambda **kwargs: next(json_responses))
     return llm
 
 
@@ -97,11 +105,13 @@ class TestSajuReportServicePaper:
         }
 
         await service.process_report_job(payload)
-        assert llm.generate.call_count == 7
+        assert llm.generate_json.call_count == 7
 
     async def test_paper_report_llm_failure_graceful_degradation(self, pool):
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+        # paper 툴은 generate_json을 쓴다 — generate만 막으면 "LLM down" 경로가 아니라
+        # 목 미설정으로 죽어서, 통과해도 의도한 degradation을 검증하지 못한다.
+        llm.generate_json = AsyncMock(side_effect=RuntimeError("LLM down"))
         service = SajuReportService(pool, llm)
 
         job_id = str(uuid.uuid4())
@@ -254,8 +264,8 @@ class TestSajuReportPaperToolDirect:
         from src.tools.internal.saju_report_paper import SajuReportPaperTool
 
         llm = MagicMock()
-        llm.generate = AsyncMock(
-            return_value='{"summary": "ok", "advice": "good"}'
+        llm.generate_json = AsyncMock(
+            return_value={"summary": "ok", "advice": "good"}
         )
         tool = SajuReportPaperTool(llm_provider=llm)
         context = AgentContext(user_id="u1", session_id="s1")

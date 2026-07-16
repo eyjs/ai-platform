@@ -5,6 +5,7 @@ HTTP 서버 URL이 설정되면 GPU 서버를 우선 사용.
 """
 
 import logging
+from typing import Callable
 
 import httpx
 
@@ -20,6 +21,10 @@ from .base import (
 from .registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
+
+# 무료 코어스 콘텐츠(운세·타로 등) 생성 상한. primary(DGX)·fallback(MLX) 양쪽에 같은
+# 값을 걸어야 경로에 따라 길이가 달라지지 않는다.
+_FREE_CONTENT_MAX_TOKENS = 1024
 
 
 class ProviderFactory:
@@ -91,11 +96,14 @@ class ProviderFactory:
         return "openai"
 
     def get_router_llm(self) -> LLMProvider:
-        return self._create_llm(
-            server_url=self._settings.router_llm_server_url,
-            local_model=self._settings.router_model,
-            anthropic_model=self._settings.anthropic_router_model,
-            label="router",
+        return self._wrap_with_dgx(
+            lambda: self._create_llm(
+                server_url=self._settings.router_llm_server_url,
+                local_model=self._settings.router_model,
+                anthropic_model=self._settings.anthropic_router_model,
+                label="router",
+            ),
+            "router", self._dgx_model_for("router"),
         )
 
     def get_orchestration_llm(self) -> LLMProvider:
@@ -106,47 +114,100 @@ class ProviderFactory:
           - 생성적 오케스트레이션(계획·재작성·확장)은 이 provider(4B 등 중경량),
           - 생성은 main_llm(9B+).
         orchestrator_server_url 미설정 시 router_llm_server_url 로 폴백(하위호환).
+
+        DGX 설정 시 라이트사이징은 폴백 경로에만 남는다 — 원격은 MoE 단일 모델이
+        분류든 생성이든 활성 파라미터가 같아 모델을 쪼갤 이득이 없다(_dgx_model_for 참조).
         """
         s = self._settings
-        return self._create_llm(
-            server_url=s.orchestrator_server_url or s.router_llm_server_url,
-            local_model=s.orchestrator_model,
-            anthropic_model=s.anthropic_router_model,
-            label="orchestration",
+        return self._wrap_with_dgx(
+            lambda: self._create_llm(
+                server_url=s.orchestrator_server_url or s.router_llm_server_url,
+                local_model=s.orchestrator_model,
+                anthropic_model=s.anthropic_router_model,
+                label="orchestration",
+            ),
+            "orchestration", self._dgx_model_for("orchestration"),
         )
+
+    def _dgx_model_for(self, role: str) -> str:
+        """역할별 DGX 모델. 미지정이면 dgx_main_model — 즉 전 역할이 한 모델을 공유한다.
+
+        한 모델로 몰아야 하는 이유 두 가지:
+        1. ollama는 동시 상주 모델 수가 제한(기본 3)이라 역할마다 다른 모델을 주면
+           evict↔reload가 돌며 매번 콜드로드를 문다(실측: gpt-oss:120b 로드 143초,
+           그 과정에서 qwen3.6:35b-a3b가 쫓겨남).
+        2. dgx_main_model(qwen3.6:35b-a3b)은 MoE라 활성 파라미터가 3B뿐이다. 분류처럼
+           가벼운 일도 7B급과 지연이 같아(실측 0.66s vs 0.59s) 라이트사이징 실익이 없다.
+        """
+        s = self._settings
+        override = {
+            "report": s.dgx_report_model,
+            "router": s.dgx_router_model,
+            "orchestration": s.dgx_orchestrator_model,
+            "fortune": s.dgx_fortune_model,
+        }.get(role, "")
+        return override or s.dgx_main_model
+
+    def _wrap_with_dgx(
+        self, base_factory: Callable[[], LLMProvider], label: str, model: str,
+        max_tokens: int | None = None,
+    ) -> LLMProvider:
+        """DGX Spark(원격 GPU)를 primary로, base(현행 로컬/상용)를 fallback으로 감싼다.
+
+        dgx_llm_url 미설정이면 base를 그대로 반환 — DGX 없는 환경(CI·타 개발자)은 무영향.
+
+        dgx_local_fallback=False(기본)면 폴백 없이 DGX 단독 provider를 돌려준다 —
+        로컬 MLX를 걷어낸 구성. True면 base를 폴백으로 붙인다(사용자 요구였던
+        "DGX 연결이 끊어지면 현재 구조로 폴백").
+
+        base를 콜러블로 받는 이유: 폴백을 끈 구성에서 base를 아예 만들지 않기 위해서다.
+        미리 만들면 쓰지도 않을 httpx 클라이언트가 뜨고, 무엇보다 "Using LOCAL MLX LLM"
+        같은 로그가 남아 실제 배선을 오독하게 된다.
+
+        max_tokens는 base와 같은 상한을 primary에도 걸기 위한 것 — 안 넘기면 원격만
+        무제한 생성이 된다(무료 콘텐츠 등 상한이 의미 있는 경로에서 필수).
+        """
+        if not self._settings.dgx_llm_url:
+            return base_factory()
+        from .llm.failover import FailoverLLMProvider
+        from .llm.ollama import OllamaProvider
+
+        primary = OllamaProvider(
+            base_url=self._settings.dgx_llm_url,
+            model=model,
+            num_ctx=self._settings.ollama_num_ctx,
+            system_prefix=get_locale().prompt("llm_system_prefix"),
+            # 원격 DGX가 다운되면 짧은 connect 타임아웃으로 즉시 감지 → 로컬 폴백.
+            # read는 무제한(None) — 복잡한 쿼리 생성이 수 분~수십 분 걸려도 자르지
+            # 않는다(부하 큰 generation 위임이 이 경로의 목적). connect만 짧게 잡아
+            # "다운은 즉시 폴백, 생성은 끝까지 대기"를 동시에 만족.
+            connect_timeout=3.0,
+            read_timeout=None,
+            max_tokens=max_tokens,
+        )
+        if not self._settings.dgx_local_fallback:
+            logger.info(
+                "Using DGX Spark ollama (%s, DGX 단독): %s @ %s — 로컬 폴백 없음",
+                label, model, self._settings.dgx_llm_url,
+            )
+            return primary
+        logger.info(
+            "Using DGX Spark ollama (%s, primary): %s @ %s — fallback: 현행 로컬",
+            label, model, self._settings.dgx_llm_url,
+        )
+        return FailoverLLMProvider(primary, base_factory(), label=label)
 
     def get_main_llm(self) -> LLMProvider:
-        base = self._create_llm(
-            server_url=self._settings.main_llm_server_url,
-            local_model=self._settings.main_model,
-            anthropic_model=self._settings.anthropic_main_model,
-            label="main",
-            backend_override=self._settings.main_llm_backend,
+        return self._wrap_with_dgx(
+            lambda: self._create_llm(
+                server_url=self._settings.main_llm_server_url,
+                local_model=self._settings.main_model,
+                anthropic_model=self._settings.anthropic_main_model,
+                label="main",
+                backend_override=self._settings.main_llm_backend,
+            ),
+            "main", self._dgx_model_for("main"),
         )
-        # DGX Spark 우선 + 현행 구조 자동 폴백 (사용자 요구: 연결 끊기면 현재 구조로)
-        if self._settings.dgx_llm_url:
-            from .llm.failover import FailoverLLMProvider
-            from .llm.ollama import OllamaProvider
-            from src.locale.bundle import get_locale
-
-            primary = OllamaProvider(
-                base_url=self._settings.dgx_llm_url,
-                model=self._settings.dgx_main_model,
-                num_ctx=self._settings.ollama_num_ctx,
-                system_prefix=get_locale().prompt("llm_system_prefix"),
-                # 원격 DGX가 다운되면 짧은 connect 타임아웃으로 즉시 감지 → 로컬 폴백.
-                # read는 무제한(None) — 복잡한 쿼리 생성이 수 분~수십 분 걸려도 자르지
-                # 않는다(부하 큰 generation 위임이 이 경로의 목적). connect만 짧게 잡아
-                # "다운은 즉시 폴백, 생성은 끝까지 대기"를 동시에 만족.
-                connect_timeout=3.0,
-                read_timeout=None,
-            )
-            logger.info(
-                "Using DGX Spark ollama (main, primary): %s @ %s — fallback: 현행 로컬",
-                self._settings.dgx_main_model, self._settings.dgx_llm_url,
-            )
-            return FailoverLLMProvider(primary, base, label="main")
-        return base
 
     # === 하이브리드 라우팅용 명시 provider (provider_mode 무시) ===
     # 무료/패턴 콘텐츠($0)는 로컬, 고난도 추론은 상용 — 요청별 선택용.
@@ -159,28 +220,45 @@ class ProviderFactory:
         # 무료 콘텐츠 전용 MLX(8106=9B). main_llm_server_url과 분리 — 챗 모델 자동감지 오염·
         # kms 8104(14B) 폴백 금지. 미설정 시 8106 기본(전용서버), 8104로 폴백하지 않음.
         url = self._settings.fortune_llm_server_url or "http://host.docker.internal:8106"
-        # 무료 코어스 콘텐츠는 간결 → max_tokens 제한(9B 생성시간 bound, 타임아웃 방지).
-        logger.info("Using LOCAL MLX LLM (GPU): %s", url)
-        return HttpLLMProvider(
-            base_url=url, system_prefix=system_prefix, max_tokens=1024,
+
+        def _local() -> LLMProvider:
+            # 무료 코어스 콘텐츠는 간결 → max_tokens 제한(9B 생성시간 bound, 타임아웃 방지).
+            logger.info("Using LOCAL MLX LLM (GPU): %s", url)
+            return HttpLLMProvider(
+                base_url=url, system_prefix=system_prefix,
+                max_tokens=_FREE_CONTENT_MAX_TOKENS,
+            )
+
+        # DGX 우선. 같은 max_tokens를 원격에도 걸어 경로별 길이 차이를 없앤다.
+        return self._wrap_with_dgx(
+            _local, "fortune", self._dgx_model_for("fortune"),
+            max_tokens=_FREE_CONTENT_MAX_TOKENS,
         )
 
     def get_report_llm(self) -> LLMProvider:
-        """사주 리포트 전용 LLM. report_llm_server_url 설정 시 그 MLX 서버(14B 등),
-        미설정 시 get_main_llm()으로 폴백.
+        """사주 리포트 전용 LLM. DGX Spark 우선 + 로컬 MLX 자동 폴백.
 
-        채팅(main=빠른 9B)과 분리 — 리포트는 JSON 안정성이 중요해 14B(8104) 권장.
-        9B는 리포트 JSON에서 반복붕괴 위험이 있어 분리한다.
+        report_llm_server_url이 설정되면 그 MLX 서버(14B 등)가 폴백이 되고,
+        미설정 시 get_main_llm()에 위임한다(그쪽도 DGX 우선 + 9B 폴백).
+
+        폴백을 main(9B)이 아닌 14B로 두는 이유: 리포트는 JSON 안정성이 중요한데
+        9B는 리포트 JSON에서 반복붕괴 위험이 있다. DGX 단절 시에도 품질을 지킨다.
         """
         url = self._settings.report_llm_server_url
         if not url:
             return self.get_main_llm()
         from .llm.http_llm import HttpLLMProvider
 
-        system_prefix = get_locale().prompt("llm_system_prefix")
-        logger.info("Using REPORT LLM server: %s", url)
-        return HttpLLMProvider(
-            base_url=url, system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
+        def _local() -> LLMProvider:
+            logger.info("Using REPORT LLM server: %s", url)
+            return HttpLLMProvider(
+                base_url=url, system_prefix=get_locale().prompt("llm_system_prefix"),
+                max_tokens=self._settings.llm_max_tokens,
+            )
+
+        return self._wrap_with_dgx(
+            _local, "report", self._dgx_model_for("report"),
+            max_tokens=self._settings.llm_max_tokens,
         )
 
     def get_commercial_llm(self) -> LLMProvider:
@@ -246,8 +324,33 @@ class ProviderFactory:
 
         model_name: MLX 자동감지 모델명 override (없으면 모드별 기본 모델).
         ImportError(langchain extra 미설치)는 호출부(bootstrap)에서 흡수 → agentic만 비활성.
+
+        DGX 설정 시 ollama의 OpenAI 호환 엔드포인트(/v1)를 ChatOpenAI로 쓴다.
+        langchain_ollama(ChatOllama)를 안 쓰는 이유: 이 이미지에 미설치이고, /v1로도
+        tool calling이 정상 동작한다(qwen3.6:35b-a3b capabilities에 tools 포함).
+        model_name(로컬 MLX 자동감지 결과)은 DGX 경로에서 무시한다 — 그건 MLX 모델명이라
+        DGX에 존재하지 않는다.
+
+        ★reasoning_effort="none" 필수: qwen3.6은 thinking 모델이라 기본적으로 추론을
+        content가 아닌 `reasoning` 필드로 흘린다. 그러면 LangChain이 읽는 delta.content가
+        계속 비어 agent_timeout_seconds(30s) 안에 토큰이 0개가 되고 챗이 통째로 죽는다.
+        네이티브 API의 think:false는 /v1에서 무시되고(실측), reasoning_effort만 먹는다.
         """
         s = self._settings
+        if s.dgx_llm_url:
+            from langchain_openai import ChatOpenAI
+
+            dgx_model = self._dgx_model_for("main")
+            logger.info(
+                "Using DGX Spark chat model (agentic): %s @ %s/v1 (reasoning off)",
+                dgx_model, s.dgx_llm_url,
+            )
+            return ChatOpenAI(
+                base_url=f"{s.dgx_llm_url.rstrip('/')}/v1",
+                api_key="not-needed", model=dgx_model, streaming=True,
+                reasoning_effort="none",
+            )
+
         backend = self._llm_backend(s.main_llm_server_url)
 
         if backend == "http":
