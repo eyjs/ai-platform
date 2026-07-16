@@ -6,11 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { StatsCard } from '@/components/admin/stats-card';
+import { LlmEnginesPanel } from '@/components/admin/llm-engines/llm-engines-panel';
+import { LLM_ENGINES_POLL_INTERVAL_MS } from '@/hooks/use-llm-engines';
 import { fetchProviderStatus, type ProvidersStatus } from '@/lib/api/bff-providers';
 
 const REFRESH_INTERVAL_MS = 30_000;
+const LLM_REFRESH_INTERVAL_SECONDS = LLM_ENGINES_POLL_INTERVAL_MS / 1000;
 
-export default function ProviderStatusPage() {
+/**
+ * bff provider 캐시 현황(헬스 아님).
+ * 기존 페이지에 있던 기능으로, LLM 서빙 섹션 아래 보조 정보로 유지한다.
+ */
+function ProviderCacheSection() {
   const [status, setStatus] = useState<ProvidersStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,24 +46,23 @@ export default function ProviderStatusPage() {
   }, [loadProviders]);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">
-          Provider Status
-        </h1>
+    <section className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[var(--font-size-lg)] font-semibold text-[var(--color-neutral-900)]">
+          Provider 캐시 현황
+        </h2>
         <div className="flex items-center gap-3">
           {lastRefreshed && (
             <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
               마지막 갱신: {lastRefreshed.toLocaleTimeString('ko-KR')}
             </span>
           )}
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-success)]" />
-            <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
-              30초 자동 갱신
-            </span>
-          </div>
-          <Button variant="ghost" size="sm" onClick={loadProviders}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadProviders}
+            aria-label="Provider 캐시 현황 새로고침"
+          >
             새로고침
           </Button>
         </div>
@@ -64,9 +70,16 @@ export default function ProviderStatusPage() {
 
       {isLoading || !status ? (
         error ? (
-          <div className="flex flex-col items-center gap-3 py-12">
+          <div
+            role="alert"
+            className="flex flex-col items-center gap-3 py-12"
+          >
             <p className="text-[var(--color-error)]">{error}</p>
-            <Button variant="secondary" onClick={loadProviders}>
+            <Button
+              variant="secondary"
+              onClick={loadProviders}
+              aria-label="Provider 캐시 현황 다시 불러오기"
+            >
               재시도
             </Button>
           </div>
@@ -171,6 +184,29 @@ export default function ProviderStatusPage() {
           </Card>
         </div>
       )}
+    </section>
+  );
+}
+
+export default function ProviderStatusPage() {
+  return (
+    <div className="space-y-10">
+      <div>
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-neutral-900)]">
+            LLM 서빙
+          </h1>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-success)]" />
+            <span className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
+              {LLM_REFRESH_INTERVAL_SECONDS}초 자동 갱신
+            </span>
+          </div>
+        </div>
+        <LlmEnginesPanel />
+      </div>
+
+      <ProviderCacheSection />
     </div>
   );
 }

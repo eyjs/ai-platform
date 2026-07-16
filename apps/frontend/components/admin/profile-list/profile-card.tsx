@@ -67,7 +67,7 @@ export function ProfileCard({ profile, onToggleActive, onDelete }: ProfileCardPr
       <div className="text-[var(--font-size-xs)] text-[var(--color-neutral-500)]">
         <span>도구 {profile.toolsCount}개</span>
         <span className="mx-2">|</span>
-        <span>{profile.routerModel} / {profile.mainModel}</span>
+        <span>{profile.mainModel || '(서버 기본)'}</span>
       </div>
 
       <div className="flex flex-wrap gap-1.5">

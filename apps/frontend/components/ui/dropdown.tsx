@@ -6,6 +6,10 @@ import { cn } from '@/lib/cn';
 export interface DropdownOption {
   value: string;
   label: string;
+  /** 선택지 아래 보조 설명 (선택). */
+  description?: string;
+  /** 선택지 옆 배지 문구 (선택). */
+  badges?: string[];
 }
 
 export interface DropdownProps {
@@ -81,7 +85,7 @@ export function Dropdown({
       {isOpen && (
         <div
           className={cn(
-            'absolute z-[var(--z-dropdown)] mt-1 w-full rounded-[var(--radius-md)]',
+            'absolute z-[var(--z-dropdown)] mt-1 max-h-80 w-full overflow-y-auto rounded-[var(--radius-md)]',
             'border border-[var(--color-neutral-200)] bg-[var(--surface-elevated)] py-1 shadow-[var(--shadow-md)]',
           )}
         >
@@ -94,14 +98,34 @@ export function Dropdown({
                 setIsOpen(false);
               }}
               className={cn(
-                'flex w-full items-center px-3 py-2 text-left text-[var(--font-size-sm)]',
+                'flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-[var(--font-size-sm)]',
                 'hover:bg-[var(--color-neutral-100)] transition-colors',
+                'focus:outline-none focus-visible:bg-[var(--color-neutral-100)]',
                 option.value === value
                   ? 'text-[var(--color-primary-600)] font-medium'
                   : 'text-[var(--color-neutral-700)]',
               )}
             >
-              {option.label}
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span>{option.label}</span>
+                {option.badges?.map((badge) => (
+                  <span
+                    key={badge}
+                    className={cn(
+                      'rounded-[var(--radius-sm)] border border-[var(--color-neutral-200)]',
+                      'bg-[var(--color-neutral-100)] px-1.5 py-0.5 text-[10px] font-medium',
+                      'leading-none text-[var(--color-neutral-600)]',
+                    )}
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </span>
+              {option.description && (
+                <span className="text-[var(--font-size-xs)] font-normal text-[var(--color-neutral-500)]">
+                  {option.description}
+                </span>
+              )}
             </button>
           ))}
         </div>

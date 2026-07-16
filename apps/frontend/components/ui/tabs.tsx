@@ -82,10 +82,12 @@ export function TabsTrigger({
   value,
   children,
   className,
+  disabled = false,
 }: {
   value: string;
   children: ReactNode;
   className?: string;
+  disabled?: boolean;
 }) {
   const { activeTab, setActiveTab, variant } = useTabsContext();
   const isActive = activeTab === value;
@@ -93,10 +95,15 @@ export function TabsTrigger({
   return (
     <button
       role="tab"
+      type="button"
       aria-selected={isActive}
-      onClick={() => setActiveTab(value)}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
+      onClick={() => !disabled && setActiveTab(value)}
       className={cn(
         'text-[var(--font-size-sm)] font-medium transition-colors',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-200)]',
+        disabled && 'cursor-not-allowed opacity-50',
         variant === 'underline' && [
           'pb-2 border-b-2 -mb-px',
           isActive

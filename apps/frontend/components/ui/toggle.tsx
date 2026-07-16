@@ -14,6 +14,10 @@ export interface ToggleProps {
   disabled?: boolean;
   className?: string;
   label?: string;
+  id?: string;
+  /** 시각적 label 텍스트가 없거나 별도 설명이 필요할 때의 접근성 이름. */
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
 }
 
 export function Toggle({
@@ -23,6 +27,9 @@ export function Toggle({
   disabled = false,
   className,
   label,
+  id,
+  ariaLabel,
+  ariaDescribedBy,
 }: ToggleProps) {
   const styles = sizeStyles[size];
 
@@ -38,7 +45,10 @@ export function Toggle({
       <button
         type="button"
         role="switch"
+        id={id}
         aria-checked={checked}
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
         className={cn(

@@ -1,4 +1,10 @@
-import type { ProfileListItem, ProfileDetail, ProfileHistoryItem, ToolItem } from '@/types/profile';
+import type {
+  ProfileListItem,
+  ProfileDetail,
+  ProfileHistoryItem,
+  ToolItem,
+  DgxModelsResponse,
+} from '@/types/profile';
 import { getAccessToken } from '@/lib/auth/token-storage';
 
 const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001/bff';
@@ -31,6 +37,20 @@ export async function fetchProfileSchema(): Promise<Record<string, unknown>> {
   });
   const data = await handleResponse<{ schema: Record<string, unknown> }>(res);
   return data.schema;
+}
+
+/**
+ * DGX 에서 서빙 중인 모델 목록.
+ *
+ * 하드코딩 폴백을 두지 않는다 — DGX 가 죽으면 `source: 'unavailable'` 이 그대로
+ * 호출자에게 전달되어야 하며, 존재하지 않는 모델을 제안하는 것보다 목록이 없는
+ * 편이 낫다. 네트워크 자체가 실패한 경우에도 같은 형태로 정규화한다.
+ */
+export async function fetchDgxModels(): Promise<DgxModelsResponse> {
+  const res = await fetch(`${BFF_URL}/profiles/models`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<DgxModelsResponse>(res);
 }
 
 export async function fetchProfileHistoryDiff(

@@ -73,10 +73,19 @@ npx tsc --noEmit
 
 Next.js에서 **클라이언트**에 노출하려면 반드시 `NEXT_PUBLIC_` prefix:
 
-| 변수 | 예시 | 용도 |
+| 변수 | 값 | 용도 |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | FastAPI(apps/api) 직접 호출 (SSE 채팅) |
-| `NEXT_PUBLIC_BFF_URL` | `http://localhost:4000/bff` | NestJS(apps/bff) 호출 (Profile CRUD, 대시보드) |
+| `NEXT_PUBLIC_FASTAPI_URL` | docker: `http://localhost:8020` / 호스트 uvicorn: `http://localhost:8000` | FastAPI(apps/api) 직접 호출 (SSE 채팅, LLM 엔진 현황) |
+| `NEXT_PUBLIC_BFF_URL` | docker: `http://localhost:3011/bff` | NestJS(apps/bff) 호출 (Profile CRUD, 대시보드). **`/bff` prefix 를 포함한 값**이다 — 코드는 `${BFF_URL}/profiles/...` 로 붙이므로 여기에 prefix 가 없으면 404 난다 |
+
+> ⚠️ **`NEXT_PUBLIC_API_URL` 은 존재하지 않는다.** 예전 이 표가 그 이름을 적어놨지만 실제 배선된 이름은
+> `NEXT_PUBLIC_FASTAPI_URL` 이다(`lib/api/chat.ts`, `hardware.ts`, `inspect.ts`). 문서만 보고 `NEXT_PUBLIC_API_URL`
+> 을 세팅하면 조용히 localhost 기본값으로 폴백한다.
+
+> ⚠️ **포트 주의**: compose 는 api 를 `8020:8000`, bff 를 `3011:3001` 로 매핑한다. 컨테이너 내부 포트(8000/3001)가
+> 아니라 **호스트 포트(8020/3011)** 를 써야 한다. `apps/frontend` 에는 `.env*` 파일이 없어 미설정 시 각 클라이언트의
+> 하드코딩 기본값으로 떨어지는데, 그 기본값들이 서로 다르다(`3001/bff`, `4000/bff`, `8000`). 로컬에서 붙일 땐
+> `.env.local` 로 위 두 변수를 명시할 것.
 
 > **주의**: 클라이언트 컴포넌트에서 `AIP_*` env를 읽을 수 없다. 서버 전용 env는 Server Component 또는 Route Handler에서만 사용.
 

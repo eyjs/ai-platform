@@ -1,8 +1,8 @@
 import { cn } from '@/lib/cn';
-import type { ValidationIssue } from '@/hooks/use-yaml-validation';
+import type { FieldIssue } from '@/types/profile';
 
 interface EditorStatusBarProps {
-  issues: ValidationIssue[];
+  issues: FieldIssue[];
   isValid: boolean;
 }
 

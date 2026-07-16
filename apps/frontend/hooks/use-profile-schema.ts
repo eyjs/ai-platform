@@ -1,42 +1,45 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getAccessToken } from '@/lib/auth/token-storage';
+import { fetchProfileSchema } from '@/lib/api/bff-profiles';
+import type { JsonSchema } from '@/lib/profile/schema-meta';
 
-const BFF_URL = process.env.NEXT_PUBLIC_BFF_URL || 'http://localhost:3001';
-
-interface SchemaResponse {
-  schema: Record<string, unknown>;
-}
-
-let cached: Record<string, unknown> | null = null;
+let cached: JsonSchema | null = null;
 
 /**
  * Profile JSON Schema 를 BFF 에서 1회 fetch 하여 메모리에 캐싱.
- * Monaco YAML validation 에 주입하는 용도.
+ *
+ * 폼 렌더링(설명·enum·범위)과 저장 검증(ajv)이 모두 이 스키마 하나에 매달린다.
+ * 스키마를 못 받으면 폼을 렌더링하지 않는다 — 추측으로 필드를 그리면 스키마와
+ * 어긋난 UI 가 만들어진다.
  */
 export function useProfileSchema() {
-  const [schema, setSchema] = useState<Record<string, unknown> | null>(cached);
-  const [loading, setLoading] = useState<boolean>(cached === null);
+  const [schema, setSchema] = useState<JsonSchema | null>(cached);
+  const [isLoading, setIsLoading] = useState<boolean>(cached === null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (cached !== null) return;
-    const token = getAccessToken();
-    fetch(`${BFF_URL}/bff/profiles/schema`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return (await res.json()) as SchemaResponse;
+    let isActive = true;
+
+    fetchProfileSchema()
+      .then((result) => {
+        cached = result;
+        if (isActive) setSchema(result);
       })
-      .then((res) => {
-        cached = res.schema;
-        setSchema(cached);
+      .catch((err: unknown) => {
+        if (isActive) {
+          setError(err instanceof Error ? err.message : '스키마를 불러오지 못했습니다');
+        }
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (isActive) setIsLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
-  return { schema, loading, error };
+  return { schema, isLoading, error };
 }
