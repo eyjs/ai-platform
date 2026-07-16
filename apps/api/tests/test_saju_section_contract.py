@@ -5,24 +5,62 @@
 불릿("- advice:")을 그대로 베껴 'advice:' 같은 키를 냈고, 검증이 없어 조용히 통과했다.
 """
 
-from src.tools.internal.saju_prompts import (
+import re
+
+import pytest
+
+from src.tools.internal.saju_section_contract import (
     SECTION_OPTIONAL_KEYS,
     SECTION_REQUIRED_KEYS,
+    coerce_section,
     missing_section_keys,
     normalize_section_keys,
 )
 
 
-# --- 계약 상수 ---
+# --- 계약 상수 ↔ 프롬프트 규칙 드리프트 ---
+#
+# 규칙 텍스트는 프롬프트 모듈 3곳에 복제돼 있고 검증은 saju_section_contract 한 곳에 있다.
+# 둘이 어긋나면 검증이 거짓말을 한다 — 아래 테스트가 그 드리프트를 잡는 유일한 방어선이다.
+
+_PROMPT_MODULES = [
+    "src.tools.internal.saju_prompts",
+    "src.tools.internal.saju_career_prompts",
+    "src.tools.internal.saju_wealth_prompts",
+]
 
 
-def test_contract_matches_common_rules():
-    """규칙 6~9(summary·advice·conclusion 필수, characteristics 선택)와 일치해야 한다.
+def _rules_text(module_path: str) -> str:
+    import importlib
 
-    프롬프트 텍스트가 유일한 계약 문서다 — 상수가 그것과 어긋나면 검증이 거짓말을 한다.
-    """
-    assert SECTION_REQUIRED_KEYS == ("summary", "advice", "conclusion")
-    assert SECTION_OPTIONAL_KEYS == ("characteristics",)
+    mod = importlib.import_module(module_path)
+    # 각 모듈의 공통 규칙 상수(이름이 다를 수 있어 전체 소스에서 찾는다)
+    return "\n".join(
+        v for v in vars(mod).values()
+        if isinstance(v, str) and "(필수)" in v
+    )
+
+
+@pytest.mark.parametrize("module_path", _PROMPT_MODULES)
+def test_prompt_rules_declare_the_same_required_keys(module_path):
+    """프롬프트가 '필수'라고 선언한 키 = SECTION_REQUIRED_KEYS 여야 한다."""
+    text = _rules_text(module_path)
+    assert text, f"{module_path}에서 규칙 텍스트를 못 찾음 — 테스트가 무력화됐다"
+    declared = set(re.findall(r"(\w+) \(필수\)", text))
+    assert declared == set(SECTION_REQUIRED_KEYS), (
+        f"{module_path}의 필수 키 선언({sorted(declared)})이 "
+        f"계약({sorted(SECTION_REQUIRED_KEYS)})과 다르다"
+    )
+
+
+@pytest.mark.parametrize("module_path", _PROMPT_MODULES)
+def test_prompt_rules_declare_the_same_optional_keys(module_path):
+    text = _rules_text(module_path)
+    declared = set(re.findall(r"(\w+) \(선택\)", text))
+    assert declared == set(SECTION_OPTIONAL_KEYS), (
+        f"{module_path}의 선택 키 선언({sorted(declared)})이 "
+        f"계약({sorted(SECTION_OPTIONAL_KEYS)})과 다르다"
+    )
 
 
 # --- 정규화 ---

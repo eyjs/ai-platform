@@ -17,13 +17,8 @@ from src.observability.logging import get_logger
 from src.tools.base import ToolResult
 from src.tools.internal.hanja_normalizer import normalize_llm_text
 from src.tools.internal.saju_context_formatter import format_single_person_context
-from src.tools.internal.saju_prompts import (
-    PAPER_V2_SECTION_KEYS,
-    SECTION_REQUIRED_KEYS,
-    get_paper_section_prompt,
-    missing_section_keys,
-    normalize_section_keys,
-)
+from src.tools.internal.saju_prompts import PAPER_V2_SECTION_KEYS, get_paper_section_prompt
+from src.tools.internal.saju_section_contract import SECTION_REQUIRED_KEYS, coerce_section
 
 logger = get_logger(__name__)
 
@@ -119,19 +114,7 @@ class SajuReportPaperTool:
                     system=system_prompt,
                 )
 
-                raw_keys = set(parsed)
-                parsed = normalize_section_keys(parsed)
-                repaired = sorted(raw_keys - set(parsed))
-                if repaired:
-                    # 정규화는 값을 살리지만, 소리 없이 고치면 "모델이 프롬프트를 잘못
-                    # 읽고 있다"는 신호가 영원히 묻힌다(실측: 마크다운 불릿 '- advice:'를
-                    # 키로 베낌). 수리했다는 사실 자체를 남겨 프롬프트를 고칠 근거로 둔다.
-                    logger.warning(
-                        "saju_paper_section_keys_repaired",
-                        section=section_key,
-                        raw_keys=repaired,
-                    )
-                missing = missing_section_keys(parsed)
+                parsed, missing = coerce_section(parsed, report="paper", section=section_key)
                 if len(missing) == len(SECTION_REQUIRED_KEYS):
                     # 필수 키가 하나도 없다 = 섹션 형태가 아니다. 살릴 게 없으니 실패 처리.
                     raise ValueError(f"섹션 계약 위반 — 필수 키 전무: {sorted(parsed)[:5]}")

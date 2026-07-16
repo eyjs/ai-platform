@@ -30,16 +30,21 @@ SAMPLE_SAJU_DATA = {
 }
 
 
-def _fake_llm(responses: list[str] | None = None) -> MagicMock:
-    """섹션별 JSON 응답을 순서대로 반환하는 Fake LLMProvider."""
+def _fake_llm(responses: list[dict] | None = None) -> MagicMock:
+    """섹션별 dict 응답을 순서대로 반환하는 Fake LLMProvider.
+
+    툴이 generate_json(제약 디코딩)을 쓰므로 dict를 반환한다 — 문자열을 주면 툴이 아니라
+    목이 깨져, 통과해도 아무것도 검증하지 못한다.
+    """
     llm = MagicMock()
     if responses is None:
+        # 섹션 키 계약 충족 — 안 그러면 degraded로 잡힌다
         responses = [
-            json.dumps({"summary": f"{key} 분석", "advice": f"{key} 조언", "conclusion": f"{key} 판정"})
+            {"summary": f"{key} 분석", "advice": f"{key} 조언", "conclusion": f"{key} 판정"}
             for key in WEALTH_V2_SECTION_KEYS
         ]
     resp_iter = iter(responses)
-    llm.generate = AsyncMock(side_effect=lambda **kwargs: next(resp_iter))
+    llm.generate_json = AsyncMock(side_effect=lambda **kwargs: next(resp_iter))
     return llm
 
 
@@ -169,8 +174,8 @@ class TestSajuReportWealthToolExecute:
 
         llm = MagicMock()
         # 첫 번째 섹션만 실패, 나머지는 성공
-        ok_response = json.dumps({"summary": "ok", "advice": "good", "conclusion": "판정"})
-        llm.generate = AsyncMock(
+        ok_response = {"summary": "ok", "advice": "good", "conclusion": "판정"}
+        llm.generate_json = AsyncMock(
             side_effect=[RuntimeError("LLM error")] + [ok_response] * 4
         )
         tool = SajuReportWealthTool(llm_provider=llm)
@@ -188,7 +193,7 @@ class TestSajuReportWealthToolExecute:
         from src.tools.internal.saju_report_wealth import SajuReportWealthTool
 
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+        llm.generate_json = AsyncMock(side_effect=RuntimeError("LLM down"))
         tool = SajuReportWealthTool(llm_provider=llm)
 
         result = await tool.execute(params={"saju_data": SAMPLE_SAJU_DATA}, context=context)
@@ -205,10 +210,10 @@ class TestSajuReportWealthToolExecute:
 
         async def capture_generate(**kwargs):
             captured_prompts.append(kwargs.get("prompt", ""))
-            return json.dumps({"summary": "ok", "advice": "good", "conclusion": "판정"})
+            return {"summary": "ok", "advice": "good", "conclusion": "판정"}
 
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=capture_generate)
+        llm.generate_json = AsyncMock(side_effect=capture_generate)
         tool = SajuReportWealthTool(llm_provider=llm)
 
         saju_with_chat = {**SAMPLE_SAJU_DATA, "_chatContext": "돈이 너무 없어서 걱정돼"}
@@ -230,10 +235,10 @@ class TestWealthPriorSummaryInjection:
 
         async def capture_generate(**kwargs):
             captured_prompts.append(kwargs.get("prompt", ""))
-            return json.dumps({"summary": "요약 내용", "advice": "조언", "conclusion": "판정"})
+            return {"summary": "요약 내용", "advice": "조언", "conclusion": "판정"}
 
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=capture_generate)
+        llm.generate_json = AsyncMock(side_effect=capture_generate)
         tool = SajuReportWealthTool(llm_provider=llm)
 
         await tool.execute(params={"saju_data": SAMPLE_SAJU_DATA}, context=context)
@@ -254,10 +259,10 @@ class TestWealthPriorSummaryInjection:
 
         async def capture_generate(**kwargs):
             captured_prompts.append(kwargs.get("prompt", ""))
-            return json.dumps({"summary": "요약", "advice": "조언", "conclusion": "판정"})
+            return {"summary": "요약", "advice": "조언", "conclusion": "판정"}
 
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=capture_generate)
+        llm.generate_json = AsyncMock(side_effect=capture_generate)
         tool = SajuReportWealthTool(llm_provider=llm)
 
         await tool.execute(params={"saju_data": SAMPLE_SAJU_DATA}, context=context)

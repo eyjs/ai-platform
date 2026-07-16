@@ -41,17 +41,21 @@ SAMPLE_SAJU_DATA = {
 }
 
 
-def _make_fake_llm(responses: list[str] | None = None) -> MagicMock:
-    """고정 JSON을 순서대로 반환하는 Fake LLMProvider."""
+def _make_fake_llm(responses: list[dict] | None = None) -> MagicMock:
+    """섹션별 dict 응답을 순서대로 반환하는 Fake LLMProvider.
+
+    툴이 generate_json(제약 디코딩)을 쓰므로 dict를 반환한다 — 문자열을 주면 툴이 아니라
+    목이 깨져, 통과해도 아무것도 검증하지 못한다.
+    """
     llm = MagicMock()
     if responses is None:
-        # 기본: 모든 섹션 성공
+        # 기본: 모든 섹션 성공 (섹션 키 계약 충족 — 안 그러면 degraded로 잡힌다)
         responses = [
-            json.dumps({"summary": f"{key} 분석", "advice": f"{key} 조언", "conclusion": f"{key} 판정"})
+            {"summary": f"{key} 분석", "advice": f"{key} 조언", "conclusion": f"{key} 판정"}
             for key in CAREER_V2_SECTION_KEYS
         ]
     response_iter = iter(responses)
-    llm.generate = AsyncMock(side_effect=lambda **kwargs: next(response_iter))
+    llm.generate_json = AsyncMock(side_effect=lambda **kwargs: next(response_iter))
     return llm
 
 
@@ -128,7 +132,7 @@ class TestSajuReportCareerToolBasic:
         assert result.metadata["sections_completed"] == 5
         assert result.metadata["sections_total"] == 5
         # LLM은 5섹션 × 1호출
-        assert llm.generate.call_count == 5
+        assert llm.generate_json.call_count == 5
 
     async def test_all_section_keys_present_in_data(self):
         """data에 5개 섹션키가 모두 포함되어야 한다."""
@@ -160,7 +164,7 @@ class TestSajuReportCareerToolPartialFailure:
     async def test_llm_failure_does_not_block_other_sections(self):
         """LLM 전체 실패 시에도 failed_sections로 비차단 완료해야 한다."""
         llm = MagicMock()
-        llm.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+        llm.generate_json = AsyncMock(side_effect=RuntimeError("LLM down"))
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 
@@ -174,7 +178,7 @@ class TestSajuReportCareerToolPartialFailure:
     async def test_partial_failure_records_failed_section(self):
         """첫 섹션만 실패 시 나머지 4섹션은 성공해야 한다."""
         llm = MagicMock()
-        good_response = json.dumps({"summary": "ok", "advice": "go", "conclusion": "yes"})
+        good_response = {"summary": "ok", "advice": "go", "conclusion": "yes"}
         call_count = 0
 
         async def _side_effect(**kwargs):
@@ -184,7 +188,7 @@ class TestSajuReportCareerToolPartialFailure:
                 raise RuntimeError("첫 섹션 실패")
             return good_response
 
-        llm.generate = AsyncMock(side_effect=_side_effect)
+        llm.generate_json = AsyncMock(side_effect=_side_effect)
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 
@@ -206,11 +210,11 @@ class TestCareerStrategyPriorSummary:
         llm = MagicMock()
         captured_prompts: list[str] = []
 
-        async def _capture_generate(*, prompt: str, system: str, **kwargs) -> str:
+        async def _capture_generate(*, prompt: str, system: str, **kwargs) -> dict:
             captured_prompts.append(prompt)
-            return json.dumps({"summary": "종합ok", "advice": "go", "conclusion": "yes"})
+            return {"summary": "종합ok", "advice": "go", "conclusion": "yes"}
 
-        llm.generate = AsyncMock(side_effect=_capture_generate)
+        llm.generate_json = AsyncMock(side_effect=_capture_generate)
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 
@@ -232,14 +236,14 @@ class TestCareerStrategyPriorSummary:
         llm = MagicMock()
         call_count = 0
 
-        async def _fail_first_four_then_succeed(**kwargs) -> str:
+        async def _fail_first_four_then_succeed(**kwargs) -> dict:
             nonlocal call_count
             call_count += 1
             if call_count < 5:
                 raise RuntimeError("앞 섹션 실패")
-            return json.dumps({"summary": "전략ok", "advice": "go", "conclusion": "yes"})
+            return {"summary": "전략ok", "advice": "go", "conclusion": "yes"}
 
-        llm.generate = AsyncMock(side_effect=_fail_first_four_then_succeed)
+        llm.generate_json = AsyncMock(side_effect=_fail_first_four_then_succeed)
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 
@@ -262,11 +266,11 @@ class TestCareerChatContextInjection:
         llm = MagicMock()
         captured_prompts: list[str] = []
 
-        async def _capture(**kwargs) -> str:
+        async def _capture(**kwargs) -> dict:
             captured_prompts.append(kwargs.get("prompt", ""))
-            return json.dumps({"summary": "ok", "advice": "go", "conclusion": "yes"})
+            return {"summary": "ok", "advice": "go", "conclusion": "yes"}
 
-        llm.generate = AsyncMock(side_effect=_capture)
+        llm.generate_json = AsyncMock(side_effect=_capture)
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 
@@ -286,11 +290,11 @@ class TestCareerChatContextInjection:
         llm = MagicMock()
         captured_prompts: list[str] = []
 
-        async def _capture(**kwargs) -> str:
+        async def _capture(**kwargs) -> dict:
             captured_prompts.append(kwargs.get("prompt", ""))
-            return json.dumps({"summary": "ok", "advice": "go", "conclusion": "yes"})
+            return {"summary": "ok", "advice": "go", "conclusion": "yes"}
 
-        llm.generate = AsyncMock(side_effect=_capture)
+        llm.generate_json = AsyncMock(side_effect=_capture)
         tool = SajuReportCareerTool(llm_provider=llm)
         ctx = _make_context()
 

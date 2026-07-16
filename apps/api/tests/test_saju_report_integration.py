@@ -42,19 +42,20 @@ def _make_pool() -> MagicMock:
 def _make_llm_provider(section_keys: list[str]) -> MagicMock:
     """각 섹션별 LLM 응답을 반환하는 mock LLMProvider.
 
-    generate와 generate_json 양쪽을 채운다 — paper 툴은 제약 디코딩(generate_json,
-    dict 반환)을, compat/career/wealth 툴은 generate(문자열 반환 + 자체 파싱)를 쓴다.
-    호출 카운트가 서로 오염되지 않도록 이터레이터를 분리한다.
+    네 리포트 툴 모두 generate_json(제약 디코딩, dict 반환)을 쓴다.
+    응답은 섹션 키 계약(summary·advice·conclusion 필수)을 만족시킨다 — 안 그러면
+    degraded로 잡혀 테스트가 계약 위반을 검증하는 게 아니라 우연히 통과한다.
     """
     llm = MagicMock()
-
-    def _payload(key: str) -> dict:
-        return {"summary": f"{key} 분석 결과", "advice": f"{key} 조언"}
-
-    text_responses = iter(json.dumps(_payload(key)) for key in section_keys)
-    json_responses = iter(_payload(key) for key in section_keys)
-    llm.generate = AsyncMock(side_effect=lambda **kwargs: next(text_responses))
-    llm.generate_json = AsyncMock(side_effect=lambda **kwargs: next(json_responses))
+    responses = iter(
+        {
+            "summary": f"{key} 분석 결과",
+            "advice": f"{key} 조언",
+            "conclusion": f"{key} 판정",
+        }
+        for key in section_keys
+    )
+    llm.generate_json = AsyncMock(side_effect=lambda **kwargs: next(responses))
     return llm
 
 
@@ -168,7 +169,7 @@ class TestSajuReportServiceCompatibility:
         }
 
         await service.process_report_job(payload)
-        assert llm.generate.call_count == 6
+        assert llm.generate_json.call_count == 6
 
 
 class TestSajuReportServiceStatusResult:
@@ -322,14 +323,14 @@ class TestSajuReportPaperSectionContract:
         assert llm_text["advice"] == "조언"
         assert llm_text["conclusion"] == "결론"
         assert "advice:" not in llm_text
-        assert any("saju_paper_section_keys_repaired" in r.getMessage() for r in caplog.records)
+        assert any("saju_section_keys_repaired" in r.getMessage() for r in caplog.records)
 
     async def test_clean_keys_do_not_log_repair(self, caplog):
         """계약대로 낸 섹션은 무소음 — 수리 로그가 신호로 남으려면 가짜 양성이 없어야 한다."""
         with caplog.at_level("WARNING"):
             await self._run({"summary": "요약", "advice": "조언", "conclusion": "결론"})
         assert not [
-            r for r in caplog.records if "saju_paper_section_keys_repaired" in r.getMessage()
+            r for r in caplog.records if "saju_section_keys_repaired" in r.getMessage()
         ]
 
     async def test_missing_required_key_is_degraded_not_dropped(self):
@@ -427,7 +428,7 @@ class TestSajuReportServiceCareer:
         }
 
         await service.process_report_job(payload)
-        assert llm.generate.call_count == 5
+        assert llm.generate_json.call_count == 5
 
 
 class TestSajuReportServiceWealth:
@@ -494,7 +495,7 @@ class TestSajuReportServiceWealth:
         }
 
         await service.process_report_job(payload)
-        assert llm.generate.call_count == 5
+        assert llm.generate_json.call_count == 5
 
 
 class TestSajuReportCompatToolDirect:
@@ -512,8 +513,8 @@ class TestSajuReportCompatToolDirect:
         from src.tools.internal.saju_report_compatibility import SajuReportCompatibilityTool
 
         llm = MagicMock()
-        llm.generate = AsyncMock(
-            return_value='{"summary": "ok", "advice": "good"}'
+        llm.generate_json = AsyncMock(
+            return_value={"summary": "ok", "advice": "good", "conclusion": "결국 좋다"}
         )
         tool = SajuReportCompatibilityTool(llm_provider=llm)
         context = AgentContext(user_id="u1", session_id="s1")

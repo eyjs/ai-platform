@@ -4,12 +4,16 @@ saju_report_paper.py 패턴을 복제해 천직 5섹션(careerVessel, careerTale
 careerDirection, careerTiming, careerStrategy) 리포트를 순차 생성한다.
 
 도메인 분리 원칙(feedback-aiplatform-layering-domain-leak)에 따라
-_extract_json·_collect_prior_summaries를 이 파일에 복제한다(공유 util 승격 금지).
+_collect_prior_summaries를 이 파일에 복제한다(플랫폼 공용 util로 승격 금지).
+
+예외 — 섹션 키 계약(saju_section_contract): 네 리포트가 같은 계약을 쓰는데 검증까지
+복제하면 계약이 코드4+프롬프트3 = 7곳에 흩어져, 한 곳만 고쳐도 검증이 거짓말을 한다.
+그 모듈은 saju 도메인 안에서만 공유되며 플랫폼으로 올라가지 않으므로 원칙과 어긋나지
+않는다(2026-07-16 사용자 확정). _extract_json은 generate_json 전환으로 사라졌다.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.domain.agent_context import AgentContext
@@ -22,32 +26,13 @@ from src.tools.internal.saju_career_prompts import (
     get_career_section_prompt,
 )
 from src.tools.internal.saju_context_formatter import format_single_person_context
+from src.tools.internal.saju_section_contract import SECTION_REQUIRED_KEYS, coerce_section
 
 logger = get_logger(__name__)
 
 _CAREER_REQUIRED_SECTIONS = frozenset(CAREER_V2_SECTION_KEYS)
 
 
-def _extract_json(raw: str) -> dict:
-    """LLM 응답에서 JSON 객체를 추출한다.
-
-    마크다운 코드블록 제거 + 중괄호 범위 추출.
-    """
-    clean = raw.strip()
-    if clean.startswith("```json"):
-        clean = clean[7:]
-    elif clean.startswith("```"):
-        clean = clean[3:]
-    if clean.endswith("```"):
-        clean = clean[:-3]
-    clean = clean.strip()
-
-    start = clean.find("{")
-    end = clean.rfind("}")
-    if start != -1 and end != -1:
-        clean = clean[start : end + 1]
-
-    return json.loads(clean)
 
 
 class SajuReportCareerTool:
@@ -104,6 +89,8 @@ class SajuReportCareerTool:
 
         report_json: dict[str, Any] = {"$schema": "report.v2/career"}
         failed_sections: list[str] = []
+        # 생성은 됐지만 계약상 필수 키가 일부 빠진 섹션 — 내용은 살리되 조용히 넘기지 않는다.
+        degraded_sections: list[str] = []
         completed_count = 0
 
         for section_key in CAREER_V2_SECTION_KEYS:
@@ -127,16 +114,35 @@ class SajuReportCareerTool:
 
                 user_prompt = user_template.replace("{context_str}", effective_context)
 
-                raw_response = await self._llm.generate(
+                # generate_json = 제약 디코딩(ollama format:"json") — 문법상 유효한 JSON을
+                # 보장한다. generate()+_extract_json은 모델이 "순수 JSON만" 규칙을 어기면
+                # 그대로 깨졌다(paper 실측: 7섹션 중 1~2개가 매번 실패).
+                # 단, 제약 디코딩도 키 이름은 보장하지 않으므로 coerce_section으로 검증한다.
+                parsed = await self._llm.generate_json(
                     prompt=user_prompt,
                     system=system_prompt,
                 )
 
-                llm_text = normalize_llm_text(_extract_json(raw_response))
+                parsed, missing = coerce_section(parsed, report="career", section=section_key)
+                if len(missing) == len(SECTION_REQUIRED_KEYS):
+                    # 필수 키가 하나도 없다 = 섹션 형태가 아니다. 살릴 게 없으니 실패 처리.
+                    raise ValueError(f"섹션 계약 위반 — 필수 키 전무: {sorted(parsed)[:5]}")
+
+                llm_text = normalize_llm_text(parsed)
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 
-                logger.info("saju_career_section_done", section=section_key)
+                if missing:
+                    # 일부만 빠졌으면 있는 내용은 살린다 — 통째로 버리면 멀쩡한 summary·
+                    # advice까지 잃는다. 대신 조용히 넘기지 않고 남긴다.
+                    degraded_sections.append(section_key)
+                    logger.warning(
+                        "saju_career_section_degraded",
+                        section=section_key,
+                        missing_keys=missing,
+                    )
+                else:
+                    logger.info("saju_career_section_done", section=section_key)
 
             except Exception as e:
                 logger.error(
@@ -163,6 +169,7 @@ class SajuReportCareerTool:
             sections_completed=completed_count,
             sections_total=total,
             failed_sections=failed_sections,
+            degraded_sections=degraded_sections,
         )
 
 

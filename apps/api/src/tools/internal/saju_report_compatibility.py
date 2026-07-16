@@ -9,7 +9,6 @@ fortuneV4, verdictV4) 순차 ���성.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.domain.agent_context import AgentContext
@@ -24,29 +23,11 @@ from src.tools.internal.saju_prompts import (
     COMPAT_V4_SECTION_KEYS,
     get_compat_section_prompt,
 )
+from src.tools.internal.saju_section_contract import SECTION_REQUIRED_KEYS, coerce_section
 
 logger = get_logger(__name__)
 
 _COMPAT_REQUIRED_SECTIONS = frozenset(COMPAT_V4_SECTION_KEYS)
-
-
-def _extract_json(raw: str) -> dict:
-    """LLM 응답에서 JSON 객체를 추출한다."""
-    clean = raw.strip()
-    if clean.startswith("```json"):
-        clean = clean[7:]
-    elif clean.startswith("```"):
-        clean = clean[3:]
-    if clean.endswith("```"):
-        clean = clean[:-3]
-    clean = clean.strip()
-
-    start = clean.find("{")
-    end = clean.rfind("}")
-    if start != -1 and end != -1:
-        clean = clean[start : end + 1]
-
-    return json.loads(clean)
 
 
 class SajuReportCompatibilityTool:
@@ -93,6 +74,8 @@ class SajuReportCompatibilityTool:
 
         report_json: dict[str, Any] = {"$schema": "report.v2/compatibility"}
         failed_sections: list[str] = []
+        # 생성은 됐지만 계약상 필수 키가 일부 빠진 섹션 — 내용은 살리되 조용히 넘기지 않는다.
+        degraded_sections: list[str] = []
         completed_count = 0
 
         for section_key in COMPAT_V4_SECTION_KEYS:
@@ -120,16 +103,37 @@ class SajuReportCompatibilityTool:
                     "{context_str}", effective_context,
                 )
 
-                raw_response = await self._llm.generate(
+                # generate_json = 제약 디코딩(ollama format:"json") — 문법상 유효한 JSON을
+                # 보장한다. generate()+_extract_json은 모델이 "순수 JSON만" 규칙을 어기면
+                # 그대로 깨졌다(paper 실측: 7섹션 중 1~2개가 매번 실패).
+                # 단, 제약 디코딩도 키 이름은 보장하지 않으므로 coerce_section으로 검증한다.
+                parsed = await self._llm.generate_json(
                     prompt=user_prompt,
                     system=system_prompt,
                 )
 
-                llm_text = normalize_llm_text(_extract_json(raw_response))
+                parsed, missing = coerce_section(
+                    parsed, report="compatibility", section=section_key,
+                )
+                if len(missing) == len(SECTION_REQUIRED_KEYS):
+                    # 필수 키가 하나도 없다 = 섹션 형태가 아니다. 살릴 게 없으니 실패 처리.
+                    raise ValueError(f"섹션 계약 위반 — 필수 키 전무: {sorted(parsed)[:5]}")
+
+                llm_text = normalize_llm_text(parsed)
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 
-                logger.info("saju_compat_section_done", section=section_key)
+                if missing:
+                    # 일부만 빠졌으면 있는 내용은 살린다 — 통째로 버리면 멀쩡한 summary·
+                    # advice까지 잃는다. 대신 조용히 넘기지 않고 남긴다.
+                    degraded_sections.append(section_key)
+                    logger.warning(
+                        "saju_compat_section_degraded",
+                        section=section_key,
+                        missing_keys=missing,
+                    )
+                else:
+                    logger.info("saju_compat_section_done", section=section_key)
 
             except Exception as e:
                 logger.error(
@@ -156,6 +160,7 @@ class SajuReportCompatibilityTool:
             sections_completed=completed_count,
             sections_total=total,
             failed_sections=failed_sections,
+            degraded_sections=degraded_sections,
         )
 
 

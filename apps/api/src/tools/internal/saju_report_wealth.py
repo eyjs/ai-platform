@@ -1,14 +1,18 @@
 """사주 재물(Wealth) 리포트 생성 Tool.
 
 saju_report_paper.py 패턴을 복제 후 재물 5섹션으로 교체.
-_extract_json·_collect_prior_summaries는 import 결합 회피를 위해 이 파일에 복제.
+_collect_prior_summaries는 import 결합 회피를 위해 이 파일에 복제.
+
+섹션 키 계약(saju_section_contract)은 예외로 공유한다: 네 리포트가 같은 계약을 쓰는데
+검증까지 복제하면 계약이 코드4+프롬프트3 = 7곳에 흩어져, 한 곳만 고쳐도 검증이 거짓말을
+한다. saju 도메인 안에서만 공유되며 플랫폼으로 올라가지 않는다(2026-07-16 사용자 확정).
+_extract_json은 generate_json(제약 디코딩) 전환으로 사라졌다.
 
 5섹션(wealthVessel, wealthType, wealthTiming, wealthSpending, wealthStrategy) 순차 생성.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.domain.agent_context import AgentContext
@@ -17,34 +21,13 @@ from src.observability.logging import get_logger
 from src.tools.base import ToolResult
 from src.tools.internal.hanja_normalizer import normalize_llm_text
 from src.tools.internal.saju_context_formatter import format_single_person_context
+from src.tools.internal.saju_section_contract import SECTION_REQUIRED_KEYS, coerce_section
 from src.tools.internal.saju_wealth_prompts import WEALTH_V2_SECTION_KEYS, get_wealth_section_prompt
 
 logger = get_logger(__name__)
 
 # wealthStrategy는 마지막 종합 섹션 — 앞 4섹션 summary를 주입해 개인화 강도를 높인다.
 _WEALTH_STRATEGY_KEY = "wealthStrategy"
-
-
-def _extract_json(raw: str) -> dict:
-    """LLM 응답에서 JSON 객체를 추출한다.
-
-    마크다운 코드블록 제거 + 중괄호 범위 추출.
-    """
-    clean = raw.strip()
-    if clean.startswith("```json"):
-        clean = clean[7:]
-    elif clean.startswith("```"):
-        clean = clean[3:]
-    if clean.endswith("```"):
-        clean = clean[:-3]
-    clean = clean.strip()
-
-    start = clean.find("{")
-    end = clean.rfind("}")
-    if start != -1 and end != -1:
-        clean = clean[start : end + 1]
-
-    return json.loads(clean)
 
 
 def _collect_prior_summaries(
@@ -117,6 +100,8 @@ class SajuReportWealthTool:
 
         report_json: dict[str, Any] = {"$schema": "report.v2/wealth"}
         failed_sections: list[str] = []
+        # 생성은 됐지만 계약상 필수 키가 일부 빠진 섹션 — 내용은 살리되 조용히 넘기지 않는다.
+        degraded_sections: list[str] = []
         completed_count = 0
 
         for section_key in WEALTH_V2_SECTION_KEYS:
@@ -140,16 +125,35 @@ class SajuReportWealthTool:
 
                 user_prompt = user_template.replace("{context_str}", effective_context)
 
-                raw_response = await self._llm.generate(
+                # generate_json = 제약 디코딩(ollama format:"json") — 문법상 유효한 JSON을
+                # 보장한다. generate()+_extract_json은 모델이 "순수 JSON만" 규칙을 어기면
+                # 그대로 깨졌다(paper 실측: 7섹션 중 1~2개가 매번 실패).
+                # 단, 제약 디코딩도 키 이름은 보장하지 않으므로 coerce_section으로 검증한다.
+                parsed = await self._llm.generate_json(
                     prompt=user_prompt,
                     system=system_prompt,
                 )
 
-                llm_text = normalize_llm_text(_extract_json(raw_response))
+                parsed, missing = coerce_section(parsed, report="wealth", section=section_key)
+                if len(missing) == len(SECTION_REQUIRED_KEYS):
+                    # 필수 키가 하나도 없다 = 섹션 형태가 아니다. 살릴 게 없으니 실패 처리.
+                    raise ValueError(f"섹션 계약 위반 — 필수 키 전무: {sorted(parsed)[:5]}")
+
+                llm_text = normalize_llm_text(parsed)
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 
-                logger.info("saju_wealth_section_done", section=section_key)
+                if missing:
+                    # 일부만 빠졌으면 있는 내용은 살린다 — 통째로 버리면 멀쩡한 summary·
+                    # advice까지 잃는다. 대신 조용히 넘기지 않고 남긴다.
+                    degraded_sections.append(section_key)
+                    logger.warning(
+                        "saju_wealth_section_degraded",
+                        section=section_key,
+                        missing_keys=missing,
+                    )
+                else:
+                    logger.info("saju_wealth_section_done", section=section_key)
 
             except Exception as e:
                 logger.error(
@@ -177,4 +181,5 @@ class SajuReportWealthTool:
             sections_completed=completed_count,
             sections_total=total,
             failed_sections=failed_sections,
+            degraded_sections=degraded_sections,
         )
