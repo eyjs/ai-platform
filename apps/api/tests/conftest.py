@@ -53,17 +53,14 @@ def _strip_commercial_llm_env():
         if key in os.environ:
             saved[key] = os.environ[key]
             del os.environ[key]
-    # 상용 Provider 는 stub 만 동작하도록 강제
-    saved_mode = os.environ.pop("AIP_PROVIDER_MODE", None)
-    os.environ["AIP_PROVIDER_MODE"] = "development"
+    # AIP_PROVIDER_MODE 강제는 없앴다 — 상용 퇴역(2026-07-16)으로 그 설정 자체가 사라졌다.
+    # 벤더 키를 지우고 egress 를 막는 것만으로 충분하며, 그게 이 픽스처의 본래 목적이다.
 
     yield
 
     # 복원
     for key, val in saved.items():
         os.environ[key] = val
-    if saved_mode is not None:
-        os.environ["AIP_PROVIDER_MODE"] = saved_mode
     else:
         os.environ.pop("AIP_PROVIDER_MODE", None)
 

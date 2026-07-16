@@ -504,7 +504,9 @@ KMS (NestJS)                    ai-platform (FastAPI)
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `AIP_PROVIDER_MODE` | development | development / openai / production |
+| `AIP_DGX_LLM_URL` | - | **DGX Spark(ollama). 설정 시 전 LLM 역할의 primary** |
+| `AIP_DGX_MAIN_MODEL` | qwen3.6:35b-a3b | DGX 기본 모델 |
+| `AIP_DGX_LOCAL_FALLBACK` | true | DGX 단절 시 로컬 MLX 폴백 여부 |
 | `AIP_DATABASE_URL` | localhost:5434 | PostgreSQL 연결 |
 | `AIP_EMBEDDING_SERVER_URL` | - | MLX 임베딩 서버 |
 | `AIP_RERANKER_SERVER_URL` | - | MLX 리랭커 서버 |

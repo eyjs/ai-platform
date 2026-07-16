@@ -107,9 +107,9 @@ npm run typecheck        # 모든 워크스페이스 typecheck (--if-present)
 
 | 앱 | 예시 환경변수 |
 |---|---|
-| apps/api | `AIP_DATABASE_URL`, `AIP_LLM_PROVIDER`, `AIP_EMBEDDING_PROVIDER`, `AIP_JWT_SECRET` |
+| apps/api | `AIP_DATABASE_URL`, `AIP_DGX_LLM_URL`, `AIP_DGX_MAIN_MODEL`, `AIP_EMBEDDING_SERVER_URL`, `AIP_JWT_SECRET` |
 | apps/bff | `AIP_DATABASE_URL`, `AIP_JWT_SECRET` (api와 공유), `PORT`, `CORS_ORIGIN` |
-| apps/frontend | `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_BFF_URL` (Next.js는 `NEXT_PUBLIC_` prefix 필수) |
+| apps/frontend | `NEXT_PUBLIC_FASTAPI_URL`, `NEXT_PUBLIC_BFF_URL` (Next.js는 `NEXT_PUBLIC_` prefix 필수) |
 
 > `AIP_JWT_SECRET`은 api와 bff가 **공유**한다. bff가 발급한 JWT로 api 인증이 통과해야 한다.
 

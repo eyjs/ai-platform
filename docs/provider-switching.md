@@ -1,4 +1,17 @@
-# Provider Switching Guide
+# Provider Switching Guide — 폐기됨 (2026-07-16)
+
+> ⚠️ **이 문서는 더 이상 유효하지 않다.** 상용(Anthropic/OpenAI) 벤더 경로가 2026-07-16 에
+> 코드에서 제거되면서 여기 나오는 `AIP_PROVIDER_MODE` 스위치 자체가 사라졌다.
+>
+> 현재 배선: **DGX Spark(ollama over Tailscale)가 유일한 primary, 로컬 MLX 가 폴백.**
+> 폴백 백엔드는 고르는 게 아니라 배선에서 파생된다 — `AIP_MAIN_LLM_SERVER_URL` 이 있으면
+> MLX, 없으면 ollama. 현재 서빙 상태는 `GET /api/health` 의 `llm_primary`/`llm_fallback`,
+> 모델 목록·생존은 `GET /api/health/llm-engines` 로 본다.
+>
+> 아래 내용은 이력 참고용으로만 남긴다.
+
+---
+
 
 이 문서는 AI Platform 의 Provider 패턴 확장 결과(S1) 에 대한 운영 가이드다.
 
