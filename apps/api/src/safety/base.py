@@ -15,6 +15,11 @@ class GuardrailContext:
 
     question: str = ""
     source_documents: list = field(default_factory=list)
+    # 프롬프트에 [1]..[N]으로 번호를 달아 **모델이 실제로 본** 청크 목록(순서=번호).
+    # source_documents(전체 검색 결과)와 다르다 — 프롬프트는 상위 N개만 싣는다.
+    # 인용 검증은 반드시 이쪽을 봐야 한다: 모델이 [3]이라 썼을 때 그 3번이 무엇인지는
+    # 프롬프트가 정하지 전체 검색 결과가 정하지 않는다.
+    prompt_documents: list = field(default_factory=list)
     fact_chains: list = field(default_factory=list)
     profile_id: str = ""
     response_policy: str = "balanced"

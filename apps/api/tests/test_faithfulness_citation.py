@@ -1,23 +1,24 @@
-"""인용 검증 가드 — 오탐 제거 + 조작 인용 탐지 (2026-07-16 실측 회귀).
+"""인용 계약 = 번호([n]) — 검증과 렌더링 (2026-07-16 재설계).
 
-라이브 RAG 요청에서 발견: 답변이 소스에 **있는** 문서를 인용했는데 가드가
-"참고 문서에 없습니다"로 신고했다. 원인은 완전일치 비교 —
-인용 추출 정규식(`[\\w가-힣]+\\.pdf`)이 공백을 못 품어 파일명 꼬리만 잡는데
-(`무배당 ... 상품요약서.pdf` → `상품요약서.pdf`), 그걸 전체 파일명과 완전일치로 봤다.
-이 코퍼스는 전 파일명이 공백을 포함해 **정확히 인용해도 100% 실패**했다.
+배경: 예전 계약은 "모델이 파일명을 텍스트로 쓴다"였고(ko.yaml), 가드는 그 문자열을
+file_name과 대조했다. 인용 추출 정규식이 공백을 못 품어 파일명 꼬리만 잡히는데
+그걸 전체 파일명과 완전일치로 비교한 탓에 **정확히 인용해도 100% 실패**했다
+(이 코퍼스는 전 파일명이 공백 포함). 올바른 인용을 늘 환각으로 신고하면서 정작
+조작 인용은 구별하지 못했다.
 
-그 결과 이 가드는 올바른 인용을 늘 신고하면서 조작 인용은 구별 못 했고,
-잘못된 faithfulness 점수(0.5)를 request_log에 남겼다.
+이제 프롬프트가 붙인 번호로 인용하고([1]), 가드는 범위만 본다(완전일치·오탐 불가).
+사람에게 보일 때 build_response가 [n]→파일명으로 치환한다 — 모델이 긴 한글 파일명을
+재현할 필요가 없어지는 게 요점이다.
 """
 
 import pytest
 
+from src.agent.nodes import render_citations
 from src.safety.faithfulness import FaithfulnessGuard
 
 
-# 실제 코퍼스 파일명 (insurance-qa) — 전부 공백을 포함한다
-_SOURCES = [
-    {"file_name": "무배당 프로미라이프 New간편암건강보험2601 사업방법서.pdf"},
+# 프롬프트에 [1]..[3]으로 실린 청크 (순서 = 번호)
+_PROMPT_DOCS = [
     {"file_name": "무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf"},
     {"file_name": "무배당 프로미라이프 New간편암건강보험2601 보험약관.pdf"},
     {"file_name": "무배당 프로미라이프 간편실손의료비보험(유병력자용)2604 보험약관.pdf"},
@@ -29,70 +30,83 @@ def guard():
     return FaithfulnessGuard(router_llm=None)
 
 
-# --- 오탐 (실측 재현) ---
+# --- 가드: 번호 범위 검증 ---
 
 
-def test_full_filename_citation_passes(guard):
-    """답변이 전체 파일명을 정확히 인용하면 통과해야 한다 — 이게 실패하던 버그."""
-    answer = "자세한 내용은 무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf 를 참고하세요."
-    assert guard._check_citations(answer, _SOURCES) is None
+def test_valid_index_passes(guard):
+    assert guard._check_citations("최초 1회 지급합니다 [1]", _PROMPT_DOCS) is None
 
 
-def test_tail_only_citation_passes(guard):
-    """정규식이 꼬리만 잡아도(공백 때문) 소스에 포함되면 통과."""
-    answer = "보장 내용은 상품요약서.pdf 에 있습니다."
-    assert guard._check_citations(answer, _SOURCES) is None
+def test_multiple_valid_indices_pass(guard):
+    assert guard._check_citations("보장은 다릅니다 [1][3]", _PROMPT_DOCS) is None
 
 
-def test_multiple_valid_citations_pass(guard):
-    answer = "상품요약서.pdf 와 보험약관.pdf 를 함께 확인하세요."
-    assert guard._check_citations(answer, _SOURCES) is None
+def test_boundary_index_passes(guard):
+    assert guard._check_citations("마지막 문서 [3]", _PROMPT_DOCS) is None
 
 
-def test_abbreviated_citation_is_not_judged(guard):
-    """확장자 없는 약칭("[출처: 상품요약서 섹션 ...]")은 검증 대상이 아니다.
-
-    검증할 수 없는 것을 판정하지 않는다 — LLM의 정상 인용 습관이다.
-    """
-    answer = "암 진단비는 최초 1회 지급됩니다. [출처: 상품요약서 섹션 '(1) 보장의 종류']"
-    assert guard._check_citations(answer, _SOURCES) is None
-
-
-# --- 진짜 조작 인용 (반드시 잡는다) ---
-
-
-def test_fabricated_document_is_flagged(guard):
-    """소스에 없는 파일을 지어내면 잡아야 한다 — 이 검사의 존재 이유."""
-    answer = "근거는 보험업법시행령.pdf 제3조입니다."
-    result = guard._check_citations(answer, _SOURCES)
+def test_out_of_range_index_is_flagged(guard):
+    """프롬프트에 3개만 실었는데 [7]을 쓰면 지어낸 것이다."""
+    result = guard._check_citations("근거는 [7] 입니다", _PROMPT_DOCS)
     assert result is not None
     assert result.action == "warn"
     assert result.score == 0.5
 
 
-def test_fabricated_among_valid_is_flagged(guard):
-    """유효 인용에 섞인 조작도 잡는다."""
-    answer = "상품요약서.pdf 와 금융감독원고시.pdf 를 보세요."
-    assert guard._check_citations(answer, _SOURCES) is not None
-
-
-# --- 경계 ---
+def test_zero_index_is_flagged(guard):
+    assert guard._check_citations("[0] 참고", _PROMPT_DOCS) is not None
 
 
 def test_no_citation_returns_none(guard):
-    assert guard._check_citations("암 진단비는 1회 지급됩니다.", _SOURCES) is None
+    assert guard._check_citations("암 진단비는 1회 지급됩니다.", _PROMPT_DOCS) is None
 
 
-def test_case_insensitive_match(guard):
-    assert guard._check_citations("상품요약서.PDF 참고", _SOURCES) is None
+def test_filename_text_is_no_longer_judged(guard):
+    """파일명을 텍스트로 써도 이제 판정 대상이 아니다 — 계약이 번호이기 때문.
+
+    예전 구현이 여기서 오탐을 냈다(꼬리 vs 전체 파일명 완전일치 실패).
+    """
+    answer = "자세한 내용은 무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf 참고"
+    assert guard._check_citations(answer, _PROMPT_DOCS) is None
 
 
-def test_empty_file_names_do_not_crash(guard):
-    """file_name이 비거나 없는 소스가 섞여도 죽지 않는다."""
-    docs = [{"file_name": ""}, {}, *_SOURCES]
-    assert guard._check_citations("상품요약서.pdf 참고", docs) is None
+# --- 렌더링: [n] → 파일명 ---
 
 
-def test_no_sources_flags_any_citation(guard):
-    """소스가 없는데 파일을 인용하면 그건 지어낸 것이다."""
-    assert guard._check_citations("상품요약서.pdf 참고", []) is not None
+def test_render_replaces_index_with_filename():
+    out = render_citations("최초 1회 지급합니다 [1]", _PROMPT_DOCS)
+    assert "[출처: 무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf]" in out
+    assert "[1]" not in out
+
+
+def test_render_handles_multiple():
+    out = render_citations("보장이 다릅니다 [1][3]", _PROMPT_DOCS)
+    assert "상품요약서.pdf" in out
+    assert "간편실손의료비보험(유병력자용)2604 보험약관.pdf" in out
+
+
+def test_render_leaves_fabricated_index_untouched():
+    """범위 밖 번호를 그럴듯한 파일명으로 바꿔주면 환각을 감춰주는 꼴이다.
+
+    원문 그대로 두고 가드가 신고하게 한다.
+    """
+    out = render_citations("근거는 [7] 입니다", _PROMPT_DOCS)
+    assert "[7]" in out
+
+
+def test_render_without_docs_is_noop():
+    assert render_citations("답변 [1]", []) == "답변 [1]"
+
+
+def test_render_empty_answer():
+    assert render_citations("", _PROMPT_DOCS) == ""
+
+
+def test_render_falls_back_to_title():
+    docs = [{"title": "제목만 있는 문서"}]
+    assert "[출처: 제목만 있는 문서]" in render_citations("근거 [1]", docs)
+
+
+def test_render_keeps_token_when_no_name():
+    """이름이 없으면 번호를 그대로 둔다 — 빈 '[출처: ]'를 만들지 않는다."""
+    assert render_citations("근거 [1]", [{}]) == "근거 [1]"

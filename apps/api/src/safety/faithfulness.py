@@ -28,8 +28,9 @@ class FaithfulnessGuard:
 
     def __init__(self, router_llm: Optional[LLMProvider] = None):
         self._llm = router_llm
-        exts = "|".join(get_locale().citation_extensions)
-        self._citation_re = re.compile(rf'[\w가-힣]+\.(?:{exts})', re.IGNORECASE)
+        # 인용 계약 = 프롬프트가 붙인 번호([1], [2]...). 파일명 문자열이 아니다 —
+        # 그 이유는 _check_citations 참조. [1][3]처럼 연달아 써도 각각 잡힌다.
+        self._citation_index_re = re.compile(r'\[(\d{1,2})\]')
 
     async def check(self, answer: str, context: GuardrailContext) -> GuardrailResult:
         # 무한 재생성 방지는 nodes.py(_regen_count < 1, 요청당 재생성 1회)가 담당한다.
@@ -74,9 +75,14 @@ class FaithfulnessGuard:
             return distortion
 
         # --- Quick-check 3: 인용 검증 ---
-        citation_result = self._check_citations(answer, context.source_documents)
-        if citation_result:
-            return citation_result
+        # ★prompt_documents를 넘긴다 — [3]이 무엇인지는 프롬프트에 실린 번호가 정한다.
+        # source_documents(전체 검색 결과)를 넘기면 모델이 본 적 없는 번호까지 유효로
+        # 통과시킨다(프롬프트는 상위 N개만 싣는다). 미배선 환경은 검사를 건너뛴다 —
+        # 근거 없이 판정하느니 안 하는 게 낫다.
+        if context.prompt_documents:
+            citation_result = self._check_citations(answer, context.prompt_documents)
+            if citation_result:
+                return citation_result
 
         # --- Deep eval (STRICT only) ---
         if context.response_policy == "strict" and self._llm:
@@ -154,36 +160,34 @@ class FaithfulnessGuard:
         return None
 
     def _check_citations(self, answer: str, docs: list[dict]) -> Optional[GuardrailResult]:
-        """답변이 언급한 파일이 실제 소스에 있는지 검증 — 지어낸 출처를 잡는다.
+        """답변의 [n] 인용이 프롬프트에 실제로 있던 번호인지 검증 — 지어낸 출처를 잡는다.
 
-        ★완전일치가 아니라 **포함 비교**다. 인용 추출 정규식(`[\\w가-힣]+\\.pdf`)은 공백을
-        품지 못해, 파일명이 "무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf"처럼
-        공백을 포함하면 언제나 꼬리("상품요약서.pdf")만 잡힌다. 그 꼬리를 전체 파일명과
-        완전일치로 비교하던 탓에 **답변이 파일명을 정확히 써도 100% 실패**했다
-        (실측 2026-07-16, 이 코퍼스는 전 파일명이 공백을 포함).
-        결과적으로 이 검사는 올바른 인용을 늘 환각으로 신고하면서 정작 조작 인용은
-        구별하지 못했고, 잘못된 faithfulness 점수(0.5)를 request_log에 남기고 있었다.
+        **문자열이 아니라 번호를 대조한다.** 프롬프트는 청크에 [1]..[N] 번호를 달아 싣고
+        (nodes.build_prompt), ko.yaml이 "번호만 쓰라"고 지시한다. 그래서 여기선 범위 검사만
+        하면 된다 — 완전일치이고 오탐이 구조적으로 불가능하다.
 
-        꼬리가 **어느 소스 파일명에도 들어있지 않을 때만** 조작으로 본다. 보수적이라
-        "약관.pdf"처럼 짧은 조각은 통과하지만, 이 검사의 목적("없는 문서를 지어냈는가")에는
-        충분하다 — 오탐이 나면 점수가 오염되고 경고 전체가 무시된다.
+        예전엔 모델에게 "파일명을 텍스트로 쓰라"고 시켜놓고 그 문자열을 file_name과
+        대조했다. 인용 추출 정규식이 공백을 못 품어(`[\\w가-힣]+\\.pdf`) 파일명 꼬리만
+        잡히는데 그걸 전체 파일명과 완전일치로 비교한 탓에, **정확히 인용해도 100% 실패**
+        했다(실측 2026-07-16 — 이 코퍼스는 전 파일명이 공백 포함). 올바른 인용을 늘
+        환각으로 신고하면서 정작 조작 인용은 구별하지 못했다. 포함 비교로 완화해봤자
+        같은 층의 응급처치일 뿐이라, 계약 자체를 번호로 바꿨다.
 
-        확장자 없는 약칭 인용("[출처: 상품요약서 섹션 ...]")은 정규식이 잡지 않는다.
-        검증할 수 없는 건 판정하지 않는다.
+        docs: 프롬프트에 실린 번호 순서 그대로의 청크 목록(GuardrailContext.prompt_documents).
+        전체 검색 결과가 아니다 — [3]이 무엇인지는 프롬프트가 정한다.
         """
-        cited = self._citation_re.findall(answer)
+        cited = self._citation_index_re.findall(answer)
         if not cited:
             return None
 
-        source_files = [
-            (doc.get("file_name") or "").lower() for doc in docs
-        ]
-        source_files = [f for f in source_files if f]
-        for cite in cited:
-            needle = cite.lower()
-            if not any(needle in f for f in source_files):
-                warning = get_locale().message("citation_missing", cite=cite)
-                logger.warning("faithfulness_citation", detail=warning)
+        valid = range(1, len(docs) + 1)
+        for raw in cited:
+            n = int(raw)
+            if n not in valid:
+                warning = get_locale().message("citation_missing", cite=f"[{n}]")
+                logger.warning(
+                    "faithfulness_citation", detail=warning, cited=n, available=len(docs),
+                )
                 return GuardrailResult.warn(warning, None, score=0.5)
         return None
 

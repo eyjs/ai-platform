@@ -7,7 +7,9 @@ graph_executor.py 분할 산출물. GraphExecutor MRO 상속 경로:
 import time
 from typing import AsyncIterator, Optional
 
-from src.agent.nodes import build_prompt, build_source_dicts, run_guardrail_chain
+from src.agent.nodes import (
+    build_citation_map, build_prompt, build_source_dicts, run_guardrail_chain,
+)
 from src.agent.state import create_initial_state
 from src.agent.executors._helpers import (
     _extract_faithfulness_score, _collect_guardrail_warnings,
@@ -307,6 +309,9 @@ class DeterministicExecutorMixin:
             guardrail_ctx = GuardrailContext(
                 question=question,
                 source_documents=search_results,
+                # 프롬프트에 [1]..[N]으로 실린 청크 — 인용 검증의 정본.
+                # search_results(전체)를 넘기면 모델이 본 적 없는 번호도 통과한다.
+                prompt_documents=prompt_results,
                 profile_id=session_id,
                 response_policy=plan.response_policy,
             )
@@ -383,6 +388,10 @@ class DeterministicExecutorMixin:
         done_data: dict = {
             "tools_called": tools_called,
             "sources": sources,
+            # 인용 번호 → 문서 매핑. 모델은 [n]으로만 인용하므로(ko.yaml) 스트리밍
+            # 텍스트에는 [n]이 그대로 남는다 — 소비자가 이 표로 이름·문서를 붙인다.
+            # sources는 문서 단위로 중복 제거돼 있어 번호와 1:1이 아니다. 이게 정본.
+            "citations": build_citation_map(prompt_results),
         }
         if faithfulness_score is not None:
             done_data["faithfulness_score"] = faithfulness_score

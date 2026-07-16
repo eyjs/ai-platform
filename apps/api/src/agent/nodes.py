@@ -4,6 +4,7 @@ ai-worker 패턴: 팩토리 함수가 의존성을 클로저로 캡처 -> 순수
 """
 
 import asyncio
+import re
 import time
 from typing import Callable
 
@@ -462,7 +463,9 @@ def create_generate_with_context(llm: LLMProvider) -> Callable:
             trace_node.finish(answer_len=len(answer), chunks=len(prompt_results))
 
         logger.info("llm_generate", answer_len=len(answer), context_chunks=len(prompt_results))
-        return {"answer": answer}
+        # 프롬프트에 실린 번호 목록을 남긴다 — 인용 검증([n] 범위)과 [n]→파일명 치환의
+        # 정본. 모델이 본 것과 검증하는 것이 다르면 검증이 거짓말을 한다.
+        return {"answer": answer, "prompt_documents": prompt_results}
 
     return generate_with_context
 
@@ -505,6 +508,7 @@ def create_run_guardrails(guardrails: dict[str, Guardrail]) -> Callable:
         context = GuardrailContext(
             question=state["question"],
             source_documents=state["search_results"],
+            prompt_documents=state.get("prompt_documents") or [],
             profile_id=state["session_id"],
             response_policy=plan.response_policy,
         )
@@ -543,9 +547,59 @@ def create_build_response() -> Callable:
             return {}
 
         sources = build_source_dicts(state["search_results"])
-        return {"sources": sources}
+        answer = render_citations(state.get("answer") or "", state.get("prompt_documents") or [])
+        return {"sources": sources, "answer": answer}
 
     return build_response
+
+
+# 모델이 쓰는 인용 토큰. ko.yaml이 "번호만 쓰라"고 지시한다.
+_CITATION_TOKEN_RE = re.compile(r'\[(\d{1,2})\]')
+
+
+def build_citation_map(prompt_documents: list[dict]) -> list[dict]:
+    """인용 번호 → 문서 매핑. 스트리밍 소비자가 [n]을 렌더링할 표.
+
+    스트리밍은 토큰이 이미 나간 뒤라 서버가 [n]을 치환할 수 없다(비스트리밍은
+    build_response가 치환한다). 대신 이 표를 done에 실어 소비자가 붙이게 한다 —
+    번호를 살려두면 인용을 클릭 가능한 칩으로 렌더링할 수도 있다.
+
+    sources(build_source_dicts)는 **문서 단위로 중복 제거**돼 번호와 1:1이 아니다.
+    [3]을 sources[2]로 매핑하면 엉뚱한 문서를 가리킨다 — 그래서 이 표가 따로 있다.
+    """
+    return [
+        {
+            "n": i,
+            "document_id": doc.get("document_id"),
+            "file_name": doc.get("file_name") or doc.get("title") or "",
+        }
+        for i, doc in enumerate(prompt_documents, 1)
+    ]
+
+
+def render_citations(answer: str, prompt_documents: list[dict]) -> str:
+    """답변의 [n]을 사람이 읽을 파일명으로 치환한다.
+
+    모델에게는 번호로만 인용시키고(ko.yaml), 사람에게 보일 때 이름을 붙인다.
+    이 분리가 요점이다 — 모델이 긴 한글 파일명을 재현하게 하면 철자가 흔들리고,
+    그걸 문자열로 검증하려다 오탐 지옥에 빠진다(2026-07-16 실사고).
+    번호는 프롬프트가 붙였으므로 매핑은 완전일치다. LIKE 검색이 필요 없다.
+
+    범위를 벗어난 번호는 **건드리지 않는다** — 지어낸 인용을 그럴듯한 파일명으로
+    바꿔주면 환각을 감춰주는 꼴이다. 그건 faithfulness 가드가 잡아 남긴다.
+    """
+    if not answer or not prompt_documents:
+        return answer
+
+    def _label(m: re.Match) -> str:
+        n = int(m.group(1))
+        if not 1 <= n <= len(prompt_documents):
+            return m.group(0)  # 조작 인용 — 원문 그대로 두고 가드가 신고한다
+        doc = prompt_documents[n - 1]
+        name = doc.get("file_name") or doc.get("title") or ""
+        return f"[출처: {name}]" if name else m.group(0)
+
+    return _CITATION_TOKEN_RE.sub(_label, answer)
 
 
 # --- 공용 헬퍼 (노드 + GraphExecutor 양쪽에서 사용) ---

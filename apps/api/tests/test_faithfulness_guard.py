@@ -8,9 +8,12 @@ from src.safety.faithfulness import FaithfulnessGuard
 
 
 def _ctx(answer_docs: list[dict], policy: str = "balanced") -> GuardrailContext:
+    # prompt_documents = 프롬프트에 [1]..[N]으로 실린 청크(순서=번호).
+    # 인용 검사는 이걸 본다 — 여기선 소스 전체가 그대로 프롬프트에 실렸다고 본다.
     return GuardrailContext(
         question="보험금 청구",
         source_documents=answer_docs,
+        prompt_documents=answer_docs,
         response_policy=policy,
     )
 
@@ -75,18 +78,22 @@ async def test_citation_exists_in_source_passes():
 
 
 @pytest.mark.asyncio
-async def test_citation_not_in_source_warns():
-    """응답이 언급한 문서명이 소스에 없으면 warn."""
+async def test_citation_out_of_range_warns():
+    """프롬프트에 없던 번호를 인용하면 warn — 지어낸 출처.
+
+    인용 계약이 파일명 문자열에서 번호로 바뀌었다(2026-07-16). 문자열 대조는
+    파일명에 공백이 있으면 정확히 인용해도 실패해 오탐만 냈다.
+    """
     guard = FaithfulnessGuard()
     docs = [_chunk("내용입니다.", file_name="상해등급표.pdf")]
-    result = await guard.check("지급금표.pdf에 따르면 해당됩니다.", _ctx(docs))
+    result = await guard.check("[5]에 따르면 해당됩니다.", _ctx(docs))
     assert result.action == "warn"
     assert "인용" in (result.reason or "")
 
 
 @pytest.mark.asyncio
 async def test_no_citation_in_answer_passes():
-    """응답에 .pdf/.csv/.md 패턴이 없으면 인용 체크 스킵."""
+    """응답에 [n] 인용 토큰이 없으면 인용 체크 스킵."""
     guard = FaithfulnessGuard()
     docs = [_chunk("내용입니다.", file_name="상해등급표.pdf")]
     result = await guard.check("해당 사항이 없습니다.", _ctx(docs))

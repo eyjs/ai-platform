@@ -25,6 +25,10 @@ class AgentState(TypedDict):
 
     # Tool 실행 결과
     search_results: list[dict]
+    # 프롬프트에 [1]..[N]으로 실제 실린 청크(순서=번호). search_results의 상위 N개다.
+    # 인용 검증([n] 범위)과 [n]→파일명 치환이 이걸 정본으로 본다 — 모델이 본 것과
+    # 검증하는 것이 다르면 검증이 거짓말을 한다.
+    prompt_documents: list[dict]
     tools_called: list[str]
     tool_latencies: list[dict]
 
@@ -69,6 +73,7 @@ def create_initial_state(
         session_id=session_id,
         mode=plan.mode,
         search_results=[],
+        prompt_documents=[],
         tools_called=[],
         tool_latencies=[],
         answer="",
