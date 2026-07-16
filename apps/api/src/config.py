@@ -186,6 +186,14 @@ class Settings(BaseSettings):
     # Supervisor 엔트리 감지 키(task-002). chatbot_id가 이 값과 일치하면
     # gateway/routes/chat.py가 일반 그래프 실행을 건너뛰고 state.supervisor.supervise()로 분기한다.
     supervisor_profile_id: str = "supervisor"
+    # decompose가 빈 계획/파싱 실패로 아무것도 못 냈을 때 보낼 안전 프로필(진단 V2).
+    # 예전엔 candidate_profiles[0]로 맹목 위임했는데 0번은 **로딩 순서일 뿐**이라,
+    # 8B가 JSON을 한 번 깨뜨리면 "보험 보상 절차"가 조용히 사주로 갔다
+    # (과거 "보험→사주" 실사고의 구조적 서식지).
+    # 코드가 프로필을 하드코딩하지 않도록 설정으로 둔다(절대규칙: Router는 Profile을
+    # 읽을 뿐 하드코딩하지 않는다). 후보/인가 목록에 없으면 폴백하지 않는다 —
+    # 아무 데나 보내느니 안 보내는 게 낫다.
+    supervisor_fallback_profile_id: str = "general-chat"
     # P1-1 adaptive replan: 위임 라운드 완료 후 메인이 부족한 도메인을 재위임할지 판단.
     # 턴당 orchestration LLM 호출 1회가 추가되고 과위임(오라우팅) 위험이 있어 opt-in.
     supervisor_adaptive_replan: bool = False

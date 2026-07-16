@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from src.config import settings
 from src.infrastructure.providers.base import LLMProvider
 from src.observability.logging import get_logger
 from src.supervisor.models import DelegationPlan, DelegationStep, SubAgentResult
@@ -137,13 +138,48 @@ class SupervisorPlanner:
             delegations = []
 
         if not delegations:
-            logger.info("supervisor_decompose_fallback_single", candidate=candidate_profiles[0].get("id"))
-            fallback_id = candidate_profiles[0].get("id", "")
-            delegations = [
-                DelegationStep(profile=fallback_id, subquery=question, reason="decompose 폴백(단일 위임)")
-            ]
+            delegations = self._safe_fallback(question, candidate_profiles)
 
         return DelegationPlan(delegations=delegations, is_adaptive=False)
+
+    @staticmethod
+    def _safe_fallback(question: str, candidate_profiles: list[dict]) -> list[DelegationStep]:
+        """decompose가 아무것도 못 냈을 때의 안전 폴백 (진단 V2).
+
+        예전엔 `candidate_profiles[0]`에 질문 전체를 맹목 위임했다. **0번은 로딩 순서일
+        뿐**이라 8B가 JSON을 한 번 깨뜨리면 "보험 보상 절차"가 조용히 사주로 갔다
+        (과거 "보험→사주" 실사고의 구조적 서식지 — LLM 일시 결함 1회 = 완전 오도메인 답변).
+
+        이제 설정된 일반 프로필로만 보낸다. 그마저 후보(=인가된 위임 대상)에 없으면
+        **아무 데도 보내지 않는다** — 아무 데나 보내느니 안 보내는 게 낫다. 빈 계획은
+        route_dispatch가 Send 0개로 처리해 finalize로 흐른다.
+
+        프로필 하드코딩 금지(절대규칙)라 id는 설정에서 온다.
+        """
+        wanted = settings.supervisor_fallback_profile_id
+        available = {p.get("id") for p in candidate_profiles}
+        if wanted and wanted in available:
+            logger.warning(
+                "supervisor_decompose_fallback",
+                profile=wanted,
+                candidates=len(candidate_profiles),
+                hint="decompose가 빈 계획 — 일반 프로필로 안전 폴백",
+            )
+            return [
+                DelegationStep(
+                    profile=wanted,
+                    subquery=question,
+                    reason="decompose 실패 — 일반 프로필로 안전 폴백",
+                )
+            ]
+
+        logger.warning(
+            "supervisor_decompose_fallback_unavailable",
+            wanted=wanted,
+            candidates=sorted(x for x in available if x),
+            hint="일반 프로필이 후보에 없어 위임하지 않는다 — 오도메인 위임보다 낫다",
+        )
+        return []
 
     @staticmethod
     def _format_candidates(candidate_profiles: list[dict]) -> str:
