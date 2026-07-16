@@ -135,8 +135,7 @@ describe('ProfilesService', () => {
           tools: [{ name: 'tool1' }, { name: 'tool2' }],
           domain_scopes: ['finance'],
           security_level_max: 'INTERNAL',
-          router_model: 'opus',
-          main_model: 'sonnet',
+          main_model: 'qwen3.6:35b-a3b',
         },
       });
       profileRepo.find.mockResolvedValue([profile]);
@@ -146,8 +145,7 @@ describe('ProfilesService', () => {
       expect(result[0].toolsCount).toBe(2);
       expect(result[0].domainScopes).toEqual(['finance']);
       expect(result[0].securityLevelMax).toBe('INTERNAL');
-      expect(result[0].routerModel).toBe('opus');
-      expect(result[0].mainModel).toBe('sonnet');
+      expect(result[0].mainModel).toBe('qwen3.6:35b-a3b');
     });
   });
 
@@ -461,7 +459,32 @@ describe('ProfilesService', () => {
       const detail = await service.findOne('test-id');
 
       const parsed = yaml.load(detail.yamlContent);
-      expect(parsed).toEqual(config);
+      // id/name/description 은 컬럼이 진실원천이므로 YAML 에 되꽂혀 나온다.
+      expect(parsed).toEqual({ ...config, description: 'desc' });
+    });
+
+    it('config 에 id/name 이 없어도 YAML 에는 컬럼 값이 실린다', async () => {
+      // Arrange — apps/api 의 _profile_to_dict 는 id/name/description 을 빼고 저장한다.
+      // 즉 시드로 심긴 프로필의 config 는 이 셋이 없다. 예전 toDetail 은 config 를
+      // 그대로 dump 해서 id/name 없는 YAML 을 만들었고, 그 YAML 은 스키마 required 에
+      // 걸려 저장이 불가능했다 — 기존 프로필을 편집할 수 없던 원인.
+      const profile = makeProfile({
+        id: 'seeded',
+        name: 'Seeded Profile',
+        description: null as unknown as string,
+        config: { mode: 'agentic', tools: [] },
+      });
+      profileRepo.findOne.mockResolvedValue(profile);
+
+      // Act
+      const detail = await service.findOne('seeded');
+      const parsed = yaml.load(detail.yamlContent) as Record<string, unknown>;
+
+      // Assert
+      expect(parsed.id).toBe('seeded');
+      expect(parsed.name).toBe('Seeded Profile');
+      expect(parsed.mode).toBe('agentic');
+      expect('description' in parsed).toBe(false);
     });
   });
 });

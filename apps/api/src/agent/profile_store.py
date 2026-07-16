@@ -35,25 +35,46 @@ class ProfileStore:
         return len(self._cache)
 
     async def load_seeds(self) -> int:
-        """YAML 시드 파일을 DB에 로딩한다."""
+        """YAML 시드 파일을 DB에 심는다 — 없는 id만. 심은 개수를 반환한다.
+
+        이미 있는 id는 건드리지 않는다. 예전엔 부팅마다 전 시드를 upsert 해서 관리자
+        UI로 고친 프로필이 재시작 한 번에 YAML 내용으로 되돌아갔다(=편집이 불가능).
+        DB가 살아있는 프로필의 진실원천이고, 시드는 부트스트랩 수단일 뿐이다.
+
+        절대규칙 1("YAML 추가만으로 새 챗봇이 동작")은 그대로다 — 없는 id는 INSERT 된다.
+        운영 중인 프로필의 YAML을 고쳐 반영하려면 파일 워처(_reload_single_profile)가
+        여전히 upsert 한다. 그건 파일을 실제로 건드린 명시적 행위라 덮어써도 된다.
+        """
         if not self._seed_dir.exists():
             logger.warning("seed_directory_not_found", seed_dir=str(self._seed_dir))
             return 0
 
-        count = 0
-        for path in self._seed_dir.glob("*.yaml"):
+        seeded = 0
+        for path in sorted(self._seed_dir.glob("*.yaml")):
             try:
                 with open(path) as f:
                     data = yaml.safe_load(f)
                 profile = self._parse_profile(data)
-                await self._upsert(profile)
-                self._cache[profile.id] = profile
-                count += 1
-                logger.info("profile_loaded", profile_id=profile.id, name=profile.name)
+                if await self._insert_if_absent(profile):
+                    self._cache[profile.id] = profile
+                    seeded += 1
+                    logger.info("profile_seeded", profile_id=profile.id, name=profile.name)
+                else:
+                    # DB 값이 이긴다. 캐시에는 시드가 아니라 DB 버전을 올린다(get 이 DB에서
+                    # 읽어 캐싱한다). 시드를 올리면 런타임이 DB 대신 YAML 로 동작해 INSERT 를
+                    # 건너뛴 의미가 사라지고, 아무것도 안 올리면 profile_count(=/health 의
+                    # profiles_loaded)가 0으로 보여 프로필이 없는 것처럼 읽힌다.
+                    await self.get(profile.id)
+                    logger.info(
+                        "profile_seed_skipped_db_wins",
+                        profile_id=profile.id,
+                        path=path.name,
+                    )
             except Exception as e:
                 logger.error("seed_load_failed", path=path.name, error=str(e))
 
-        return count
+        logger.info("seed_scan_done", seeded=seeded, available=len(self._cache))
+        return len(self._cache)
 
     async def get(self, profile_id: str) -> Optional[AgentProfile]:
         """프로필 조회 (캐시 → DB)."""
@@ -139,6 +160,20 @@ class ProfileStore:
             self._cache.pop(profile_id, None)
         else:
             self._cache.clear()
+
+    async def _insert_if_absent(self, profile: AgentProfile) -> bool:
+        """없을 때만 INSERT. 이미 있으면 아무것도 하지 않고 False 를 반환한다."""
+        config_json = json.dumps(self._profile_to_dict(profile), ensure_ascii=False)
+        result = await self._pool.execute(
+            """
+            INSERT INTO agent_profiles (id, name, description, config)
+            VALUES ($1, $2, $3, $4::jsonb)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            profile.id, profile.name, profile.description, config_json,
+        )
+        # asyncpg 는 "INSERT 0 1" / "INSERT 0 0" 을 돌려준다.
+        return int(result.split()[-1]) > 0
 
     async def _upsert(self, profile: AgentProfile) -> None:
         config = self._profile_to_dict(profile)
@@ -226,8 +261,7 @@ class ProfileStore:
             system_prompt=data.get("system_prompt", ""),
             response_policy=data.get("response_policy", "balanced"),
             guardrails=data.get("guardrails", []),
-            router_model=data.get("router_model", "haiku"),
-            main_model=data.get("main_model", "sonnet"),
+            main_model=data.get("main_model", ""),
             max_output_tokens=data.get("max_output_tokens"),
             memory_type=data.get("memory_type", "short"),
             memory_ttl_seconds=data.get("memory_ttl_seconds", 3600),
@@ -265,7 +299,6 @@ class ProfileStore:
             "system_prompt": profile.system_prompt,
             "response_policy": profile.response_policy,
             "guardrails": profile.guardrails,
-            "router_model": profile.router_model,
             "main_model": profile.main_model,
             "max_output_tokens": profile.max_output_tokens,
             "memory_type": profile.memory_type,

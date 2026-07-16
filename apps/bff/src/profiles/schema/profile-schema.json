@@ -2,10 +2,10 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://ai-platform.local/schemas/profile.schema.json",
   "title": "AgentProfile",
-  "description": "Profile YAML schema for ai-platform. Single source of truth; copied to apps/api/src/agent/schema/ and apps/bff/src/profiles/schema/.",
+  "description": "Profile YAML schema. 진실원천은 apps/api/src/domain/agent_profile.py 의 AgentProfile 데이터클래스이며 이 파일은 그 계약을 옮긴 것이다. 파싱 기준은 apps/api/src/agent/profile_store.py::_parse_profile. 데이터클래스가 바뀌면 이 파일도 함께 바꾼다.",
   "type": "object",
   "required": ["id", "name", "mode"],
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",
@@ -15,103 +15,253 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 255
+      "maxLength": 255,
+      "description": "사람이 읽는 프로필 이름."
     },
-    "description": { "type": "string", "maxLength": 1000 },
-    "mode": {
+    "description": {
       "type": "string",
-      "enum": ["deterministic", "agentic", "workflow"]
+      "maxLength": 1000,
+      "description": "프로필 설명."
     },
-    "router": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "intent_classifier": { "type": "string" },
-        "context_resolver": { "type": "string" }
-      }
-    },
-    "tools": {
+
+    "domain_scopes": {
       "type": "array",
       "items": { "type": "string" },
       "uniqueItems": true,
-      "default": []
+      "default": [],
+      "description": "RAG 검색 도메인 범위. 비우면 전체 도메인."
     },
-    "providers": {
-      "type": "object",
-      "description": "Provider 선택 정책. S6 라우팅.",
-      "required": ["candidates"],
-      "additionalProperties": false,
-      "properties": {
-        "candidates": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["provider_id"],
-            "additionalProperties": false,
-            "properties": {
-              "provider_id": { "type": "string", "minLength": 1 },
-              "priority": { "type": "integer", "minimum": 1, "default": 100 },
-              "require_tool_use": { "type": "boolean", "default": false },
-              "require_streaming": { "type": "boolean", "default": false },
-              "max_cost_per_1k": { "type": "number", "minimum": 0 }
-            }
-          }
-        },
-        "fallback_on": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["timeout", "5xx", "unavailable", "rate_limit"]
-          },
-          "default": ["timeout", "5xx", "unavailable"]
-        },
-        "max_fallback_depth": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 2,
-          "default": 2
+    "category_scopes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "NOT WIRED — SearchScope.category_ids 에 실리지만 질의에 쓰이지 않는다. 설정해도 검색 결과는 달라지지 않는다."
+    },
+    "security_level_max": {
+      "type": "string",
+      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "SECRET"],
+      "default": "PUBLIC",
+      "description": "이 프로필이 접근 가능한 최대 보안 등급."
+    },
+    "include_common": {
+      "type": "boolean",
+      "default": true,
+      "description": "플랫폼 공통 지식(_common) 포함 여부."
+    },
+
+    "mode": {
+      "type": "string",
+      "enum": ["deterministic", "agentic", "workflow", "hybrid"],
+      "default": "agentic",
+      "description": "오케스트레이션 모드."
+    },
+    "workflow_id": {
+      "type": ["string", "null"],
+      "description": "mode=workflow 일 때 실행할 워크플로우 ID."
+    },
+    "hybrid_triggers": {
+      "type": "array",
+      "default": [],
+      "description": "mode=hybrid 에서 워크플로우로 분기시키는 트리거 목록.",
+      "items": {
+        "type": "object",
+        "required": ["keyword_patterns", "intent_types", "workflow_id"],
+        "additionalProperties": false,
+        "properties": {
+          "keyword_patterns": { "type": "array", "items": { "type": "string" } },
+          "intent_types": { "type": "array", "items": { "type": "string" } },
+          "workflow_id": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "default": "" }
         }
       }
     },
+
+    "tools": {
+      "type": "array",
+      "default": [],
+      "description": "사용할 도구 목록. 각 항목은 {name, config} 객체다 — 문자열 배열이 아니다 (profile_store 가 t[\"name\"] 으로 읽는다).",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "config": { "type": "object", "default": {} }
+        }
+      }
+    },
+    "rag_min_rerank_score": {
+      "type": ["number", "null"],
+      "description": "리랭커 점수 하한. 미지정 시 전역 기본값."
+    },
+
+    "system_prompt": {
+      "type": "string",
+      "description": "시스템 프롬프트. 비우면 기본 프롬프트가 쓰인다."
+    },
+    "response_policy": {
+      "type": "string",
+      "enum": ["strict", "balanced"],
+      "default": "balanced",
+      "description": "응답 정책."
+    },
+    "guardrails": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["faithfulness", "response_policy", "pii_filter"]
+      },
+      "uniqueItems": true,
+      "default": [],
+      "description": "적용할 가드레일 이름 목록. bootstrap 의 가드레일 레지스트리 키와 일치해야 한다."
+    },
+
+    "main_model": {
+      "type": "string",
+      "default": "",
+      "description": "이 프로필이 쓸 DGX 모델 태그 (예: qwen3.6:35b-a3b). 빈 값이면 서버 기본 모델(dgx_main_model)을 쓴다. DGX 카탈로그(/api/tags)에 없는 이름은 런타임이 조용히 기본 모델로 되돌린다 — 목록은 GET /bff/profiles/models 에서 온다."
+    },
+    "max_output_tokens": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "생성 토큰 하드 캡. 미지정 시 프로바이더 기본값."
+    },
+
+    "memory_type": {
+      "type": "string",
+      "enum": ["short", "session", "long"],
+      "default": "short",
+      "description": "대화 메모리 타입."
+    },
+    "memory_ttl_seconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 86400,
+      "default": 3600,
+      "description": "메모리 TTL(초)."
+    },
+    "memory_scopes": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["local", "user", "project"] },
+      "uniqueItems": true,
+      "default": ["local"],
+      "description": "메모리 범위. local=세션 턴, user=tenant_memory 테이블, project=project_memory 테이블 (scoped_memory.py 기준). project 를 포함하면 memory_project_id 가 필수다."
+    },
+    "memory_project_id": {
+      "type": ["string", "null"],
+      "description": "memory_scopes 에 project 가 있을 때 필수. 없으면 런타임이 프로필 생성 시 예외를 던진다."
+    },
+    "memory_max_turns": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 10,
+      "description": "메모리에 유지할 최대 턴 수."
+    },
+    "memory_retention_days": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "메모리 보존 기간(일). 미지정 시 무기한."
+    },
+
+    "max_tool_calls": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5,
+      "description": "요청당 최대 도구 호출 횟수."
+    },
+    "agent_timeout_seconds": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 300,
+      "default": 30,
+      "description": "에이전트 실행 타임아웃(초)."
+    },
+    "planning_disabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "true 면 이 프로필에서 Planner 를 끈다."
+    },
+
+    "workflow_action_endpoint": {
+      "type": ["string", "null"],
+      "description": "워크플로우 action 스텝의 기본 endpoint."
+    },
+    "workflow_action_headers": {
+      "type": "object",
+      "default": {},
+      "description": "워크플로우 action 스텝의 기본 헤더."
+    },
+    "context_adapter": {
+      "type": ["string", "null"],
+      "description": "dynamic 스텝 enrichment 어댑터 이름 (예: saju)."
+    },
+
+    "cache_padding_text": {
+      "type": "string",
+      "default": "",
+      "description": "프롬프트 캐시 패딩 텍스트."
+    },
+    "empty_response_fallback": {
+      "type": ["string", "null"],
+      "description": "빈 응답일 때 대체 문구."
+    },
     "cache": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
+      "description": "캐시 설정. YAML 작성 시의 키이며 profile_store 가 cache_config 로 읽는다 (cache 가 cache_config 보다 우선).",
       "properties": {
         "enabled": { "type": "boolean", "default": true },
         "ttl_seconds": { "type": "integer", "minimum": 1, "maximum": 604800, "default": 3600 },
         "agentic_enabled": { "type": "boolean", "default": false }
       }
     },
-    "guardrails": {
+    "cache_config": {
       "type": "object",
       "additionalProperties": true,
-      "properties": {
-        "faithfulness_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
-        "pii_masking": { "type": "boolean", "default": true }
-      }
+      "description": "cache 의 저장 형태. DB 왕복 후 이 키로 직렬화된다."
     },
-    "prompt": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "system": { "type": "string" },
-        "style": { "type": "string" }
+
+    "intent_hints": {
+      "type": "array",
+      "default": [],
+      "description": "커스텀 Intent 힌트.",
+      "items": {
+        "type": "object",
+        "required": ["name", "patterns"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "patterns": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": "string", "default": "" }
+        }
       }
-    },
-    "security_level_required": {
-      "type": "string",
-      "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL"],
-      "default": "PUBLIC"
     }
   },
-  "errorMessages": {
-    "ko": {
-      "required.id": "프로필 id 는 필수입니다.",
-      "required.name": "프로필 name 은 필수입니다.",
-      "required.mode": "mode 는 필수입니다 (deterministic | agentic | workflow).",
-      "pattern.id": "id 형식이 올바르지 않습니다. (소문자/숫자/-/_ 만 허용)",
-      "enum.mode": "mode 값은 deterministic/agentic/workflow 중 하나여야 합니다."
+
+  "allOf": [
+    {
+      "if": {
+        "required": ["mode"],
+        "properties": { "mode": { "const": "workflow" } }
+      },
+      "then": {
+        "required": ["workflow_id"],
+        "properties": { "workflow_id": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": {
+        "required": ["memory_scopes"],
+        "properties": {
+          "memory_scopes": { "type": "array", "contains": { "const": "project" } }
+        }
+      },
+      "then": {
+        "required": ["memory_project_id"],
+        "properties": { "memory_project_id": { "type": "string", "minLength": 1 } }
+      }
     }
-  }
+  ]
 }

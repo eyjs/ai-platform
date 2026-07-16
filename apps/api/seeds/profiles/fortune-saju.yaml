@@ -206,12 +206,11 @@ system_prompt: |
   - (상단 '출력 규칙' 재확인) 마크다운·별표(**) 금지, 평범한 대화체로만.
   - 답변은 짧게: 가벼운 건 2~3문장, 깊은 고민도 5~6문장 안. 장황함은 금물, 정곡만.
 
-response_policy: "creative"
+response_policy: "balanced"
 guardrails:
   - "faithfulness"
 
-router_model: "haiku"
-main_model: "sonnet"
+main_model: "qwen3.6:35b-a3b"
 
 memory_type: "session"
 memory_ttl_seconds: 600

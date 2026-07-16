@@ -17,8 +17,37 @@ import {
 import { ProfileSchemaValidator } from './profile-schema.validator';
 import { computeDiff, DiffResult } from './profile-diff.util';
 
+/**
+ * id/name/description 는 agent_profiles 의 실제 컬럼이고 config JSONB 는 이 셋을 담지 않는다.
+ * apps/api 의 profile_store 가 그 계약의 주인이다: 읽을 때 컬럼을 config 에 되꽂아
+ * 파싱하고(_load 계열), 쓸 때 _profile_to_dict 가 셋을 빼고 직렬화한다.
+ * BFF 도 같은 계약을 지켜야 한다 — 안 그러면 API 가 심은 프로필의 YAML 에 id/name 이
+ * 없어 스키마 검증(required)에서 막히고, 편집 자체가 불가능해진다.
+ */
+const PROMOTED_KEYS = ['id', 'name', 'description'] as const;
+
 @Injectable()
 export class ProfilesService {
+  /** 컬럼 → config 재주입. profile_store 의 읽기 경로와 같은 모양의 YAML 문서를 만든다. */
+  private static toDocument(p: AgentProfile): Record<string, unknown> {
+    const config = (p.config || {}) as Record<string, unknown>;
+    return {
+      id: p.id,
+      name: p.name,
+      ...(p.description ? { description: p.description } : {}),
+      ...config,
+    };
+  }
+
+  /** config 로 저장하기 전 승격 키 제거. _profile_to_dict 의 쓰기 경로와 대응한다. */
+  private static stripPromoted(
+    parsed: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const config = { ...parsed };
+    for (const key of PROMOTED_KEYS) delete config[key];
+    return config;
+  }
+
   constructor(
     @InjectRepository(AgentProfile)
     private readonly profileRepo: Repository<AgentProfile>,
@@ -111,7 +140,7 @@ export class ProfilesService {
       id: parsed.id as string,
       name: parsed.name as string,
       description: (parsed.description as string) || null,
-      config: parsed,
+      config: ProfilesService.stripPromoted(parsed),
       isActive: true,
     });
 
@@ -138,17 +167,6 @@ export class ProfilesService {
     const profile = await this.profileRepo.findOne({ where: { id } });
     if (!profile) throw new NotFoundException(`Profile ${id} not found`);
 
-    // 이전 상태를 히스토리에 저장
-    const previousYaml = yaml.dump(profile.config);
-    await this.historyRepo.save(
-      this.historyRepo.create({
-        profileId: id,
-        yamlContent: previousYaml,
-        changedBy,
-        comment: '수정 전 백업',
-      }),
-    );
-
     const parsed = this.parseYaml(yamlContent);
 
     const schemaResult = this.schemaValidator.validate(parsed);
@@ -159,9 +177,26 @@ export class ProfilesService {
       });
     }
 
+    // 백업은 검증을 통과한 뒤에 남긴다 — 앞에 두면 거부된 수정도 '수정 전 백업' 행을
+    // 남겨 히스토리가 실제로 일어나지 않은 변경으로 오염된다.
+    const previousYaml = yaml.dump(ProfilesService.toDocument(profile), {
+      lineWidth: -1,
+    });
+    await this.historyRepo.save(
+      this.historyRepo.create({
+        profileId: id,
+        yamlContent: previousYaml,
+        changedBy,
+        comment: '수정 전 백업',
+      }),
+    );
+
     profile.name = (parsed.name as string) || profile.name;
-    profile.description = (parsed.description as string) || profile.description;
-    profile.config = parsed;
+    // description 은 빈 문자열도 유효한 값이다. || 로 폴백하면 지울 수가 없다.
+    if (typeof parsed.description === 'string') {
+      profile.description = parsed.description || null;
+    }
+    profile.config = ProfilesService.stripPromoted(parsed);
 
     await this.profileRepo.save(profile);
     await this.notifyProfileUpdated(profile.id);
@@ -236,17 +271,6 @@ export class ProfilesService {
     const profile = await this.profileRepo.findOne({ where: { id } });
     if (!profile) throw new NotFoundException(`Profile ${id} not found`);
 
-    // Save current state before restore
-    const currentYaml = yaml.dump(profile.config);
-    await this.historyRepo.save(
-      this.historyRepo.create({
-        profileId: id,
-        yamlContent: currentYaml,
-        changedBy,
-        comment: `restore from version ${version}`,
-      }),
-    );
-
     const parsed = this.parseYaml(historyItem.yamlContent);
     const schemaResult = this.schemaValidator.validate(parsed);
     if (!schemaResult.ok) {
@@ -256,9 +280,24 @@ export class ProfilesService {
       });
     }
 
+    // 복원 대상이 검증을 통과한 뒤에 현재 상태를 백업한다 (update 와 같은 이유).
+    const currentYaml = yaml.dump(ProfilesService.toDocument(profile), {
+      lineWidth: -1,
+    });
+    await this.historyRepo.save(
+      this.historyRepo.create({
+        profileId: id,
+        yamlContent: currentYaml,
+        changedBy,
+        comment: `restore from version ${version}`,
+      }),
+    );
+
     profile.name = (parsed.name as string) || profile.name;
-    profile.description = (parsed.description as string) || profile.description;
-    profile.config = parsed;
+    if (typeof parsed.description === 'string') {
+      profile.description = parsed.description || null;
+    }
+    profile.config = ProfilesService.stripPromoted(parsed);
 
     await this.profileRepo.save(profile);
     await this.notifyProfileUpdated(profile.id);
@@ -299,8 +338,9 @@ export class ProfilesService {
       securityLevelMax: (config.security_level_max as string) || 'PUBLIC',
       isActive: p.isActive,
       toolsCount: tools.length,
-      routerModel: (config.router_model as string) || 'sonnet',
-      mainModel: (config.main_model as string) || 'sonnet',
+      // 빈 문자열 = 서버 기본 DGX 모델. 여기서 특정 모델명을 기본값으로 끼워넣으면
+      // 목록이 실제 서빙과 어긋난다 — 모델 이름의 출처는 DGX(/api/tags) 하나뿐이다.
+      mainModel: (config.main_model as string) || '',
     };
   }
 
@@ -308,7 +348,7 @@ export class ProfilesService {
     const listItem = this.toListItem(p);
     return {
       ...listItem,
-      yamlContent: yaml.dump(p.config, { lineWidth: -1 }),
+      yamlContent: yaml.dump(ProfilesService.toDocument(p), { lineWidth: -1 }),
       config: (p.config || {}) as Record<string, unknown>,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),

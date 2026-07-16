@@ -40,8 +40,7 @@ response_policy: "balanced"
 guardrails:
   - "faithfulness"
 
-router_model: "haiku"
-main_model: "sonnet"
+main_model: "qwen3.6:35b-a3b"
 
 memory_type: "short"
 memory_ttl_seconds: 3600
