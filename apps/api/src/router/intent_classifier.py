@@ -41,42 +41,48 @@ class IntentClassifier:
     ) -> tuple[QuestionType, Optional[str]]:
         """질문 유형, 커스텀 인텐트명을 반환한다.
 
+        구조 유형은 **키워드가 아니라 LLM이 정한다**. 키워드는 단축(고신뢰 명시 신호)일
+        뿐이고, 애매하면 판단을 LLM에 맡긴다 — 문자열 규칙으로는 "실손보험과 암보험 중에
+        뭐가 나아?" 같은 질문을 영영 못 잡는다(마커가 없다). 예전 구조는 정반대였다:
+        LLM이 6단계 중 5번째 폴백이었고 `history`가 있어야만 돌아서, **첫 턴엔 LLM이
+        아예 안 돌고**(진단 V7) 키워드가 하나라도 걸리면 그걸로 확정됐다.
+
         Returns:
             (question_type, custom_intent_name)
         """
-        # 1. 커스텀 Intent 체크 (도메인 라벨 — 구조 유형과 직교)
+        # 도메인 라벨 — 구조 유형과 **직교**한다. 라벨이 붙었다고 구조가 정해지지 않으므로
+        # 여기서 return하지 않는다(예전엔 `if custom: return STANDALONE`으로 단축해,
+        # "보험료 얼마야?"가 후속질문이어도 STANDALONE으로 확정됐다).
         custom = self._check_custom_intents(query, profile.intent_hints)
 
-        # 2. 비교/통합 신호 — 이력 불필요("A랑 B 차이 비교"는 첫 질문으로도 온다).
-        #    커스텀 인텐트보다 먼저 확정해야 STANDALONE 강제를 피한다
+        # ① 명시적 비교 마커 — 이력 불필요("A랑 B 차이 비교"는 첫 질문으로도 온다).
+        #    LLM보다 빠르고 결정적이라 단축한다. 마커가 없는 비교는 ④가 잡는다.
         #    (실사고: 두 상품 비교가 INSURANCE_INQUIRY→STANDALONE으로 강등 →
         #    검색 청크 5개가 한 상품에 쏠려 "문서에 없음" 오답).
         comparison_type = self._detect_comparison(query)
         if comparison_type:
             return comparison_type, custom
 
-        if custom:
-            return QuestionType.STANDALONE, custom
-
-        # 3. 패턴 기반 분류
+        # ② 인사·시스템 메타 — 도메인 질문 자체가 아니라 라벨도 버린다.
         pattern_type = self._pattern_classify(query, profile.domain_scopes)
         if pattern_type:
             return pattern_type, None
 
-        # 4. 대화 이력 기반 후속 질문 판단
+        # ③ 이력 기반 고신뢰 후속 신호(대명사 등).
         if history:
             followup_type = self._detect_followup(query)
             if followup_type:
-                return followup_type, None
+                return followup_type, custom
 
-        # 5. LLM 폴백 (설정된 경우 + 대화 이력 있을 때)
-        if self._llm and history:
+        # ④ 나머지는 전부 LLM이 판단한다 — 이력이 없어도 돈다(V7 해소).
+        #    첫 턴이라 후속 유형이 불가능한 경우는 프롬프트가 후보에서 제외한다.
+        if self._llm:
             llm_type = await self._classify_with_llm(query, history)
             if llm_type:
-                return llm_type, None
+                return llm_type, custom
 
-        # 6. 최종 기본: STANDALONE
-        return QuestionType.STANDALONE, None
+        # ⑤ LLM 미배선/실패 시에만 기본값. 안전 폴백이지 판단이 아니다.
+        return QuestionType.STANDALONE, custom
 
     @staticmethod
     def _detect_comparison(query: str) -> Optional[QuestionType]:
@@ -131,10 +137,16 @@ class IntentClassifier:
         query: str,
         history: List[dict],
     ) -> Optional[QuestionType]:
-        """LLM 기반 의도 분류 (패턴 매칭 실패 시 폴백).
+        """LLM 기반 구조 유형 분류 — 애매한 질문의 **주 판단자**.
 
-        Router LLM에게 질문 + 최근 대화 이력을 전달하여
-        QuestionType을 분류한다. 타임아웃 또는 실패 시 None 반환.
+        키워드 단축(비교 마커·대명사 패턴)이 안 걸린 질문은 전부 여기로 온다.
+        이력이 없어도 호출된다(V7) — 첫 턴 비교 질문("실손보험과 암보험 중에 뭐가
+        나아?")은 마커가 없어 문자열 규칙으로는 영영 못 잡기 때문이다.
+
+        **첫 턴엔 후속 유형을 후보에서 뺀다**: 이력이 없으면 SAME_DOC_FOLLOWUP·
+        ANSWER_BASED_FOLLOWUP은 정의상 불가능한데, 후보로 주면 LLM이 그리로 환각한다.
+
+        타임아웃·실패 시 None → 호출부가 STANDALONE으로 안전 폴백.
         """
         # 최근 2턴만 전달 (토큰 절약)
         recent_history = history[-2:] if len(history) > 2 else history
@@ -143,15 +155,29 @@ class IntentClassifier:
             for t in recent_history
         )
 
+        if history_text:
+            context_block = f"최근 대화:\n{history_text}\n\n"
+            type_lines = (
+                "- STANDALONE: 독립적인 새 질문 (이전 대화와 무관)\n"
+                "- SAME_DOC_FOLLOWUP: 같은 문서에 대한 후속 질문 (이전 답변의 문서를 더 탐색)\n"
+                "- ANSWER_BASED_FOLLOWUP: 이전 답변을 기반으로 한 추가 질문\n"
+                "- CROSS_DOC_INTEGRATION: 여러 문서를 비교/통합하는 질문\n"
+            )
+        else:
+            # 첫 질문 — 후속 유형은 후보에서 제외한다(불가능한 선택지를 주지 않는다).
+            context_block = "이전 대화 없음 (첫 질문).\n\n"
+            type_lines = (
+                "- STANDALONE: 하나의 대상에 대한 단일 질문\n"
+                "- CROSS_DOC_INTEGRATION: 둘 이상의 대상을 비교·통합해야 답할 수 있는 질문\n"
+                "  (예: 'A와 B 중에 뭐가 나아?', 'A랑 B 어떻게 달라?')\n"
+            )
+
         prompt = (
             "다음 질문의 유형을 분류하세요.\n\n"
-            f"최근 대화:\n{history_text}\n\n"
+            f"{context_block}"
             f"현재 질문: {query}\n\n"
             "유형 목록:\n"
-            "- STANDALONE: 독립적인 새 질문 (이전 대화와 무관)\n"
-            "- SAME_DOC_FOLLOWUP: 같은 문서에 대한 후속 질문 (이전 답변의 문서를 더 탐색)\n"
-            "- ANSWER_BASED_FOLLOWUP: 이전 답변을 기반으로 한 추가 질문\n"
-            "- CROSS_DOC_INTEGRATION: 여러 문서를 비교/통합하는 질문\n\n"
+            f"{type_lines}\n"
             'JSON 형식으로만 답변: {"type": "QUESTION_TYPE"}'
         )
 

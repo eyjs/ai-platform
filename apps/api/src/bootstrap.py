@@ -352,9 +352,13 @@ async def create_app_state(settings: Settings) -> AppState:
     except Exception as e:
         logger.warning("reranker_unavailable", error=str(e))
 
-    # 콜드스타트 워밍업: 임베더/리랭커 모델을 기동 시 1회 예열해 첫 질의 지연(~20s)을 제거한다.
+    # 콜드스타트 워밍업: 임베더/리랭커/라우터 모델을 기동 시 1회 예열해 첫 질의 지연을 제거한다.
     # 모델 서버가 첫 추론에서 모델을 lazy-load 하므로, 실제 사용자 질의 전에 미리 로드시킨다.
     # 실패해도 기동을 막지 않는다(모델 서버 미가동 시 첫 질의에서 자연 로드로 폴백).
+    #
+    # 라우터 LLM도 예열한다(2026-07-16): 의도 분류가 더 이상 폴백이 아니라 애매한 질문의
+    # 주 판단자라 매 턴 크리티컬 패스에 있다. 실측 — 정상 0.7s인데 **첫 호출만 6.3s**라
+    # planner_timeout(5s)에 걸려 첫 질문이 조용히 STANDALONE으로 폴백했다.
     try:
         _warm_t = time.time()
         await embedding_provider.embed_batch(["워밍업"])
@@ -363,6 +367,21 @@ async def create_app_state(settings: Settings) -> AppState:
         logger.info("model_warmup_complete", ms=round((time.time() - _warm_t) * 1000, 1))
     except Exception as e:
         logger.warning("model_warmup_failed", error=str(e))
+
+    # ★generate가 아니라 generate_json으로 예열한다: 분류기가 부르는 게 그쪽이고,
+    # 비용의 정체가 ollama 제약 디코딩(format:"json")의 그래머 준비이기 때문이다.
+    # 실측 워밍 커브 6.4s → 2.2s → 1.0s → 0.5s. generate()로 예열했더니 모델은 올라왔지만
+    # (6082ms 소요) 첫 분류는 여전히 planner_timeout(5s)에 걸렸다 —
+    # **예열은 실제 경로와 같은 호출이어야 한다**.
+    try:
+        _warm_t = time.time()
+        await asyncio.wait_for(
+            router_llm.generate_json('JSON으로만 답하라: {"type": "STANDALONE"}'),
+            timeout=60.0,
+        )
+        logger.info("router_llm_warmup_complete", ms=round((time.time() - _warm_t) * 1000, 1))
+    except Exception as e:  # noqa: BLE001 - 예열 실패가 기동을 막으면 안 된다
+        logger.warning("router_llm_warmup_failed", error=str(e))
 
     # 5. Profile Store
     profile_store = ProfileStore(pool, seed_dir="seeds/profiles")

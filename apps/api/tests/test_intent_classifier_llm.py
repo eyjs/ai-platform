@@ -188,22 +188,51 @@ class TestLLMFallbackSkipConditions:
         )
         assert qtype == QuestionType.STANDALONE
 
-    async def test_empty_history_skips_llm(self):
-        """히스토리가 비어있으면 LLM 호출하지 않고 STANDALONE 반환."""
+    async def test_first_turn_still_calls_llm(self):
+        """★V7 해소: 이력이 없어도 LLM이 돈다.
+
+        예전엔 `if self._llm and history:`라 첫 턴엔 LLM이 통째로 죽었고, 키워드가
+        안 걸리면 무조건 STANDALONE이었다. 그러면 마커 없는 첫 턴 비교 질문
+        ("실손보험과 암보험 중에 뭐가 나아?")을 영영 못 잡는다.
+        """
         mock_llm = AsyncMock()
         mock_llm.generate_json = AsyncMock(
-            return_value={"type": "SAME_DOC_FOLLOWUP"},
+            return_value={"type": "CROSS_DOC_INTEGRATION"},
         )
 
         classifier = IntentClassifier(llm=mock_llm)
-        profile = _make_profile()
-
-        qtype, custom = await classifier.classify(
-            "보험금 청구 방법", [], profile,
+        qtype, _ = await classifier.classify(
+            "실손보험과 암보험 중에 뭐가 나아?", [], _make_profile(),
         )
-        assert qtype == QuestionType.STANDALONE
-        # LLM이 호출되지 않아야 한다
-        mock_llm.generate_json.assert_not_called()
+
+        mock_llm.generate_json.assert_called_once()
+        assert qtype == QuestionType.CROSS_DOC_INTEGRATION
+
+
+    async def test_first_turn_prompt_excludes_followup_types(self):
+        """첫 턴엔 후속 유형이 정의상 불가능하다 — 후보로 주면 LLM이 환각한다."""
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "STANDALONE"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        await classifier.classify("보험금 청구 방법", [], _make_profile())
+
+        prompt = mock_llm.generate_json.call_args.args[0]
+        assert "FOLLOWUP" not in prompt
+        assert "첫 질문" in prompt
+
+
+    async def test_history_turn_prompt_includes_followup_types(self):
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "STANDALONE"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        # 대명사("그건")를 피한다 — 그건 고신뢰 단축(_detect_followup)이 먼저 잡아
+        # LLM까지 오지 않는다(설계대로). 여기선 애매한 입력이어야 LLM 경로를 탄다.
+        await classifier.classify("얼마야", _make_history(), _make_profile())
+
+        prompt = mock_llm.generate_json.call_args.args[0]
+        assert "SAME_DOC_FOLLOWUP" in prompt
 
     async def test_pattern_match_greeting_skips_llm(self):
         """패턴 매칭으로 GREETING 분류 시 LLM 호출하지 않는다."""
@@ -222,13 +251,18 @@ class TestLLMFallbackSkipConditions:
         assert qtype == QuestionType.GREETING
         mock_llm.generate_json.assert_not_called()
 
-    async def test_custom_intent_skips_llm(self):
-        """커스텀 인텐트 매칭 시 LLM 호출하지 않는다."""
+    async def test_custom_intent_does_not_decide_structure(self):
+        """★도메인 라벨과 구조 유형은 직교 — 라벨이 붙어도 구조는 LLM이 정한다.
+
+        예전엔 `if custom: return STANDALONE, custom`으로 단축해, "보험료 얼마야?"가
+        직전 답변에 이어지는 후속질문이어도 STANDALONE으로 확정됐다. 라벨은 "무엇에
+        대한 질문인가"이고 구조는 "어떻게 검색할 질문인가"라 서로 다른 축이다.
+        """
         from src.domain.agent_profile import AgentProfile, IntentHint
 
         mock_llm = AsyncMock()
         mock_llm.generate_json = AsyncMock(
-            return_value={"type": "CROSS_DOC_INTEGRATION"},
+            return_value={"type": "SAME_DOC_FOLLOWUP"},
         )
 
         profile = AgentProfile(
@@ -244,14 +278,14 @@ class TestLLMFallbackSkipConditions:
             ],
         )
         classifier = IntentClassifier(llm=mock_llm)
-        history = _make_history()
 
         qtype, custom = await classifier.classify(
-            "보험료 얼마야?", history, profile,
+            "보험료 얼마야?", _make_history(), profile,
         )
-        assert qtype == QuestionType.STANDALONE
-        assert custom == "INSURANCE_INQUIRY"
-        mock_llm.generate_json.assert_not_called()
+
+        mock_llm.generate_json.assert_called_once()
+        assert qtype == QuestionType.SAME_DOC_FOLLOWUP  # 구조는 LLM 판단
+        assert custom == "INSURANCE_INQUIRY"            # 라벨은 보존
 
 
 class TestComparisonDetection:
