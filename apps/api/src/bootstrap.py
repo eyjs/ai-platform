@@ -150,6 +150,88 @@ async def _check_scope_tagging_alignment(pool, profiles) -> None:
         )
 
 
+def _check_llm_wiring_alignment(settings) -> None:
+    """설정값과 실제 LLM 배선의 정합성을 검사한다 (WARN 전용).
+
+    DGX 위임(2026-07-16) 이후, 값은 env에 남아 있는데 아무도 읽지 않는 설정이 생겼다.
+    설정이 살아 보이면 그걸 믿고 바꾼 사람이 "왜 아무 일도 안 일어나지"에서 시간을 태운다 —
+    아키텍처 진단(2026-07-15)이 "죽은 설정"이라 부르며 재발 방지를 요구한 부류다.
+    새 배선을 깔면서 같은 부류를 다시 만들었으므로, 부팅 때 스스로 실토하게 한다.
+
+    거짓 경고를 내지 않는 게 중요하다 — 안 죽은 걸 죽었다고 하면 경고 전체가 무시된다.
+    """
+    dgx_url = settings.dgx_llm_url
+
+    if not dgx_url:
+        # DGX 없이 DGX 설정만 남은 경우 (예: URL만 지우고 나머지를 방치)
+        orphans = [
+            name for name, value in (
+                ("AIP_DGX_REPORT_MODEL", settings.dgx_report_model),
+                ("AIP_DGX_ROUTER_MODEL", settings.dgx_router_model),
+                ("AIP_DGX_ORCHESTRATOR_MODEL", settings.dgx_orchestrator_model),
+                ("AIP_DGX_FORTUNE_MODEL", settings.dgx_fortune_model),
+            ) if value
+        ]
+        if orphans:
+            logger.warning(
+                "dgx_settings_without_dgx_url",
+                fields=orphans,
+                hint="AIP_DGX_LLM_URL 미설정 — 이 값들은 읽히지 않는다",
+            )
+        return
+
+    fallback_on = settings.dgx_local_fallback
+
+    # main_llm_backend는 폴백 base를 만들 때만 전달된다 → primary(DGX)를 못 바꾼다.
+    if settings.main_llm_backend:
+        logger.warning(
+            "llm_setting_shadowed_by_dgx",
+            field="AIP_MAIN_LLM_BACKEND",
+            value=settings.main_llm_backend,
+            hint=(
+                "primary(DGX)는 이 값으로 못 바꾼다 — 로컬 폴백 base에만 전달된다"
+                if fallback_on else
+                "완전히 죽은 값 — DGX 단독(폴백 off)이라 폴백 base 자체가 생성되지 않는다"
+            ),
+        )
+
+    # provider_mode는 더 이상 primary LLM을 결정하지 않는다(폴백·임베딩·리랭커·파싱에만 유효).
+    if settings.provider_mode != ProviderMode.DEVELOPMENT:
+        logger.warning(
+            "provider_mode_no_longer_decides_main_llm",
+            provider_mode=settings.provider_mode.value,
+            hint="primary는 DGX — provider_mode는 폴백 LLM·임베딩·리랭커·파싱에만 영향한다",
+        )
+
+    local_llm_urls = (
+        ("AIP_MAIN_LLM_SERVER_URL", settings.main_llm_server_url),
+        ("AIP_ROUTER_LLM_SERVER_URL", settings.router_llm_server_url),
+        ("AIP_REPORT_LLM_SERVER_URL", settings.report_llm_server_url),
+        ("AIP_FORTUNE_LLM_SERVER_URL", settings.fortune_llm_server_url),
+        ("AIP_ORCHESTRATOR_SERVER_URL", settings.orchestrator_server_url),
+    )
+
+    if not fallback_on:
+        unused = [name for name, url in local_llm_urls if url]
+        if unused:
+            logger.warning(
+                "local_llm_urls_unused",
+                fields=unused,
+                hint="AIP_DGX_LOCAL_FALLBACK=false — 이 서버들은 폴백으로도 호출되지 않는다",
+            )
+        return
+
+    # 폴백을 켰는데 로컬 URL이 없으면 폴백이 ollama_host(기본 localhost:11434)로 흘러,
+    # 있지도 않은 서버를 부르며 "폴백이 있다"고 착각하게 된다 — 8104가 명목뿐이던 그 부류.
+    if not settings.main_llm_server_url:
+        logger.warning(
+            "fallback_enabled_without_local_url",
+            field="AIP_MAIN_LLM_SERVER_URL",
+            ollama_host=settings.ollama_host,
+            hint="폴백이 켜졌는데 로컬 MLX URL이 없다 — 폴백이 ollama_host로 흘러 명목뿐이 된다",
+        )
+
+
 def _check_profile_pattern_overlap(profiles):
     """프로필 간 intent_hints 패턴 중복을 검사하고 경고한다."""
     pattern_to_profiles: dict[str, list[str]] = {}
@@ -224,6 +306,10 @@ async def create_app_state(settings: Settings) -> AppState:
     cache = PgCache(pool, default_ttl_seconds=300)
 
     # 4. Provider Factory
+    # 배선 직전에 설정 정합성부터 실토시킨다 — 아래 get_*_llm 로그와 나란히 찍혀야
+    # "설정은 이런데 실제 배선은 저렇다"가 한눈에 대조된다.
+    _check_llm_wiring_alignment(settings)
+
     provider_factory = ProviderFactory(settings)
     embedding_provider = provider_factory.get_embedding_provider()
     router_llm = provider_factory.get_router_llm()               # 분류/라우팅(1.7B 등)

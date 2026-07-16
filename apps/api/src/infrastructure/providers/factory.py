@@ -79,11 +79,14 @@ class ProviderFactory:
             model=self._settings.prod_embedding_model,
         )
 
-    # === LLM 백엔드 단일 선택 규칙 (provider_mode = 마스터 스위치) ===
-    # 모든 LLM 소비자(결정론 LLMProvider / 에이전틱 ChatModel / 오케스트레이터)가
-    # 이 한 메서드로 백엔드를 결정한다. provider_mode를 바꾸면 전부 따라간다.
+    # === LLM 백엔드 선택 규칙 (provider_mode) ===
+    # ★DGX 위임(2026-07-16) 이후 이 메서드는 더 이상 마스터 스위치가 아니다.
+    # dgx_llm_url이 설정되면 primary는 DGX로 고정되고, 이 메서드는 **로컬 폴백 base를
+    # 만들 때만** 호출된다(_wrap_with_dgx 참조). 즉 provider_mode를 anthropic으로 바꿔도
+    # 최종 답변은 여전히 DGX가 낸다 — 폴백이 Claude가 될 뿐이다.
+    # 그 오해를 부팅 때 잡으려고 _check_llm_wiring_alignment(bootstrap)가 WARN을 띄운다.
     def _llm_backend(self, server_url: str) -> str:
-        """provider_mode 기준 LLM 백엔드를 고른다.
+        """provider_mode 기준 LLM 백엔드를 고른다 (DGX 미설정 시 primary, 설정 시 폴백).
 
         - anthropic: 항상 Claude (server_url 무시 — 모드가 최우선)
         - development: MLX(server_url) 있으면 http, 없으면 ollama
