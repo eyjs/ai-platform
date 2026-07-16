@@ -7,7 +7,6 @@ export class ProfileListItemDto {
   securityLevelMax: string;
   isActive: boolean;
   toolsCount: number;
-  routerModel: string;
   mainModel: string;
 }
 

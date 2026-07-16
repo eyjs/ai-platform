@@ -47,8 +47,8 @@ class ProfileCreateRequest(BaseModel):
     tools: list[dict] = []
     response_policy: ResponsePolicyType = "balanced"
     guardrails: list[str] = []
-    router_model: str = "haiku"
-    main_model: str = "sonnet"
+    # DGX 모델 태그. 빈 값 = dgx_main_model. (router_model 은 2026-07-16 제거 — 배선된 적 없음)
+    main_model: str = ""
     memory_type: MemoryType = "short"
     memory_ttl_seconds: int = Field(3600, ge=60, le=86400)
     max_tool_calls: int = Field(5, ge=1, le=20)
@@ -72,7 +72,6 @@ class ProfileUpdateRequest(BaseModel):
     tools: list[dict] | None = None
     response_policy: ResponsePolicyType | None = None
     guardrails: list[str] | None = None
-    router_model: str | None = None
     main_model: str | None = None
     memory_type: MemoryType | None = None
     memory_ttl_seconds: int | None = Field(None, ge=60, le=86400)
@@ -618,7 +617,6 @@ def _profile_to_response(profile: Any) -> dict:
         "system_prompt": profile.system_prompt,
         "response_policy": profile.response_policy,
         "guardrails": profile.guardrails,
-        "router_model": profile.router_model,
         "main_model": profile.main_model,
         "memory_type": profile.memory_type,
         "memory_ttl_seconds": profile.memory_ttl_seconds,

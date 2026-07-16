@@ -180,10 +180,9 @@ class StrategyBuilder:
             agent_timeout_seconds=profile.agent_timeout_seconds,
             external_context=external_context,
             needs_planning=needs_planning,
-            # P0-2/3: Profile 모델 별칭을 plan에 전달 (raw alias; 해석은 executor에서).
-            # strategy_builder 는 alias를 전달만 함 — resolver/factory import 금지.
+            # Profile 모델을 plan에 전달 (raw; 해석은 executor에서).
+            # strategy_builder 는 전달만 함 — resolver/factory import 금지.
             main_model=profile.main_model,
-            router_model=profile.router_model,
             max_output_tokens=profile.max_output_tokens,
         )
 

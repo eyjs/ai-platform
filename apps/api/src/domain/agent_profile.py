@@ -84,8 +84,17 @@ class AgentProfile:
     guardrails: list[str] = field(default_factory=list)
 
     # LLM 설정
-    router_model: str = "haiku"
-    main_model: str = "sonnet"
+    # 이 프로필이 쓸 DGX 모델 태그(예: "qwen3.6:35b-a3b"). 빈 값이면 dgx_main_model 을 쓴다.
+    # ProviderFactory._split_model_request 가 DGX 카탈로그(/api/tags)에 있는 이름만 주 경로에
+    # 태운다 — 없는 이름은 기본 모델로 조용히 되돌린다.
+    #
+    # router_model 은 없다(2026-07-16 제거). 있었지만 L0~L2 라우터가 부트스트랩에 바인딩된
+    # router_llm 을 써서 읽지 않는 KNOWN GAP 이었고, 배선하지 않고 지우는 쪽을 택했다:
+    # DGX 는 ollama 동시 상주 제한(기본 3) 때문에 역할별로 모델을 쪼개면 evict↔reload 가
+    # 돌고(실측 콜드로드 143초), qwen3.6 은 MoE 라 활성 파라미터가 3B 뿐이라 분류 같은
+    # 가벼운 일에 작은 모델을 붙여봐야 이득이 없다(실측 0.66s vs 0.59s). 즉 배선해도 쓸
+    # 이유가 없는 필드였다 — 살려두면 "설정이 거짓말하는" 부류가 하나 더 생긴다.
+    main_model: str = ""
     # 최종 답변 생성 토큰 하드 캡. None이면 프로바이더 기본값 사용.
     # 프롬프트 지시(1차)가 실패해도 생성 시간 폭주를 막는 안전망(2차).
     max_output_tokens: int | None = None

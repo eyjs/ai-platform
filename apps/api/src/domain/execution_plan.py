@@ -72,10 +72,10 @@ class ExecutionPlan:
     # volatile_system_prompt: 날짜/per-turn 등 캐시 경계 밖 지시.
     # system_prompt 는 cacheable(persona+grounding) 로 취급, volatile_system_prompt 는 캐시 밖.
     volatile_system_prompt: str = ""
-    # 모델 별칭 필드 (P0-2/3). Profile 에서 흘러온 논리 alias("haiku"/"sonnet" 등) 또는 구체 ID.
-    # Router 는 raw alias 를 전달만 하고, 해석(resolve)은 Agent(C3) executor 에서 수행한다.
-    # router_model KNOWN GAP: plan 에 실려 있지만 L0-L2 라우팅 LLM 교체는 미구현 — model_aliases.py 참조.
+    # Profile.main_model 에서 흘러온 DGX 모델 태그. 빈 값 = dgx_main_model.
+    # Router 는 값을 전달만 하고 해석은 Agent(C3) executor 가 한다.
+    # router_model 은 없다 — plan 까지 흘러왔지만 L0~L2 라우터가 읽지 않는 KNOWN GAP 이었고,
+    # DGX 단일 모델 원칙(역할별 분리 시 ollama evict↔reload) 때문에 배선 대신 제거했다.
     main_model: str = ""
-    router_model: str = ""
     # 최종 답변 생성 토큰 하드 캡 (Profile.max_output_tokens). None = 프로바이더 기본값.
     max_output_tokens: int | None = None
