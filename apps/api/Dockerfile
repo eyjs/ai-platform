@@ -7,7 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir ".[openai,anthropic]"
+# 상용 extra(openai/anthropic)는 2026-07-16 퇴역. langchain-openai 는 core 로 옮겼다 —
+# DGX ollama /v1 shim 과 MLX 를 치는 클라이언트라 서빙에 반드시 필요하다.
+RUN pip install --no-cache-dir "."
 
 COPY . .
 

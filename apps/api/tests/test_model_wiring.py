@@ -17,166 +17,75 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1. resolve_model_alias 단위 테스트
+# 1. resolve_model_alias 단위 테스트 — 상용 퇴역 후 "은퇴 가드"
 # ---------------------------------------------------------------------------
+#
+# 백엔드별(anthropic/dev-ollama/dev-http/openai) 매핑 테이블 테스트 4개 클래스는
+# 2026-07-16 상용 퇴역과 함께 지웠다. 매핑할 백엔드가 하나(DGX)뿐이라 테이블 자체가
+# 사라졌기 때문이다. 남은 계약은 두 줄이다: 은퇴 alias는 ""로 죽이고, 구체 ID는 통과.
 
 
-class TestResolveModelAliasAnthropic:
-    """anthropic provider_mode 에서의 alias 해석."""
+class TestRetiredAliasGuard:
+    """상용 티어 이름("haiku"/"sonnet"/"opus")은 ""로 죽어야 한다.
 
-    def _settings(self):
-        """anthropic 모드 Settings 인스턴스."""
-        from src.config import Settings
-        return Settings(
-            provider_mode="anthropic",
-            anthropic_api_key="sk-test",
-            anthropic_main_model="claude-haiku-4-5",
-            anthropic_router_model="claude-haiku-4-5",
+    ★""가 왜 중요한가: 그대로 통과시키면 DGX 카탈로그(/api/tags)에 없는 이름이라
+    _split_model_request가 폴백으로 밀어내고, 폴백이 답을 주니 겉보기엔 멀쩡한 채
+    DGX가 통째로 우회된다(실측 사고). ""는 호출부가 오버라이드를 아예 안 만들게 해서
+    부트스트랩 기본 모델(=DGX)을 쓰게 한다.
+    """
+
+    def test_haiku_is_retired(self):
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert resolve_model_alias("haiku", None) == ""
+
+    def test_sonnet_is_retired(self):
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert resolve_model_alias("sonnet", None) == ""
+
+    def test_opus_is_retired(self):
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert resolve_model_alias("opus", None) == ""
+
+    def test_retired_alias_is_case_insensitive(self):
+        """DB/시드에 남은 값의 대소문자까지 믿을 이유는 없다."""
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert resolve_model_alias("Haiku", None) == ""
+
+    def test_retired_alias_warns_loudly(self, caplog):
+        """조용히 지나가면 안 된다 — 프로필 데이터 정리가 안 끝났다는 신호다."""
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        with caplog.at_level("WARNING"):
+            resolve_model_alias("haiku", None)
+        assert any("retired_model_alias_ignored" in r.getMessage() for r in caplog.records)
+
+
+class TestConcreteModelPassthrough:
+    """DGX 태그 등 구체 모델 ID는 손대지 않고 통과시킨다."""
+
+    def test_dgx_tag_passes_through(self):
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert resolve_model_alias("qwen3.6:35b-a3b", None) == "qwen3.6:35b-a3b"
+
+    def test_mlx_model_name_passes_through(self):
+        from src.infrastructure.providers.model_aliases import resolve_model_alias
+        assert (
+            resolve_model_alias("mlx-community/Qwen3.5-9B-4bit", None)
+            == "mlx-community/Qwen3.5-9B-4bit"
         )
 
-    def test_haiku_resolves_to_haiku_id(self):
+    def test_whitespace_is_stripped(self):
         from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("haiku", s) == "claude-haiku-4-5"
-
-    def test_sonnet_resolves_to_sonnet_id(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("sonnet", s) == "claude-sonnet-4-5"
-
-    def test_opus_resolves_to_opus_id(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("opus", s) == "claude-opus-4-5"
-
-    def test_concrete_claude_id_passes_through(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("claude-opus-4-5", s) == "claude-opus-4-5"
-
-    def test_unknown_alias_returns_empty(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("gpt-4o", s) == ""
-
-    def test_empty_alias_returns_empty(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("", s) == ""
-
-
-class TestResolveModelAliasDevelopmentOllama:
-    """development 모드 + no server_url (ollama) 에서의 alias 해석."""
-
-    def _settings(self):
-        from src.config import Settings
-        return Settings(
-            provider_mode="development",
-            main_llm_server_url="",
-            router_model="qwen3.5:9b",
-            main_model="qwen3.5:27b",
-        )
-
-    def test_haiku_resolves_to_router_model(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("haiku", s) == "qwen3.5:9b"
-
-    def test_sonnet_resolves_to_main_model(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("sonnet", s) == "qwen3.5:27b"
-
-    def test_opus_resolves_to_main_model(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("opus", s) == "qwen3.5:27b"
-
-    def test_concrete_id_passes_through(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("qwen3.5:27b", s) == "qwen3.5:27b"
-
-    def test_unknown_alias_returns_empty(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        # "ultra"는 _KNOWN_ALIASES에 없으므로 구체 ID로 통과
-        result = resolve_model_alias("ultra", s)
-        assert result == "ultra"  # 구체 ID로 취급
+        assert resolve_model_alias("  qwen3.6:35b-a3b  ", None) == "qwen3.6:35b-a3b"
 
     def test_empty_returns_empty(self):
         from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("", s) == ""
+        assert resolve_model_alias("", None) == ""
 
-
-class TestResolveModelAliasDevelopmentHttp:
-    """development 모드 + server_url 있음 (http) 에서의 alias 해석."""
-
-    def _settings(self):
+    def test_settings_is_optional(self):
+        """settings는 더 이상 해석에 쓰이지 않는다 — 넘겨도 결과가 같아야 한다."""
         from src.config import Settings
-        return Settings(
-            provider_mode="development",
-            main_llm_server_url="http://localhost:8104",
-            router_model="mlx-community/Qwen3.5-9B-4bit",
-            main_model="mlx-community/Qwen3.5-27B-4bit",
-        )
-
-    def test_haiku_resolves_to_router_model(self):
         from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("haiku", s) == "mlx-community/Qwen3.5-9B-4bit"
-
-    def test_sonnet_resolves_to_main_model(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("sonnet", s) == "mlx-community/Qwen3.5-27B-4bit"
-
-    def test_concrete_id_passes_through(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("mlx-community/Qwen3.5-27B-4bit", s) == "mlx-community/Qwen3.5-27B-4bit"
-
-
-class TestResolveModelAliasOpenAI:
-    """openai provider_mode 에서의 alias 해석."""
-
-    def _settings(self):
-        from src.config import Settings
-        return Settings(
-            provider_mode="openai",
-            openai_api_key="sk-test",
-            prod_llm_model="gpt-4o-mini",
-        )
-
-    def test_haiku_resolves_to_gpt4o_mini(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("haiku", s) == "gpt-4o-mini"
-
-    def test_sonnet_resolves_to_prod_model(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("sonnet", s) == "gpt-4o-mini"
-
-    def test_opus_resolves_to_gpt4o(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("opus", s) == "gpt-4o"
-
-    def test_concrete_gpt_id_passes_through(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("gpt-4o", s) == "gpt-4o"
-
-    def test_unknown_alias_returns_empty(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        s = self._settings()
-        assert resolve_model_alias("unknown-xyz", s) == ""
-
-    def test_none_settings_returns_empty(self):
-        from src.infrastructure.providers.model_aliases import resolve_model_alias
-        assert resolve_model_alias("haiku", None) == ""
+        assert resolve_model_alias("qwen3.6:35b-a3b", Settings()) == "qwen3.6:35b-a3b"
 
 
 # ---------------------------------------------------------------------------

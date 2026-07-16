@@ -85,9 +85,9 @@ Layer 3: Strategy Builder  — ExecutionPlan 생성 (scope, tools, prompt, guard
 | DB | PostgreSQL 16 + pgvector + pg_trgm |
 | 마이그레이션 | alembic |
 | 워크플로우 | LangGraph |
-| 임베딩 | sentence-transformers (dev) / OpenAI (prod) |
-| LLM | Ollama (dev) / OpenAI (prod) |
-| 리랭커 | CrossEncoder (dev) / HTTP (prod) |
+| 임베딩 | MLX 임베딩 서버(HTTP) / sentence-transformers (URL 미설정 시 로컬 CPU) |
+| LLM | **DGX Spark(ollama over Tailscale) 단일 primary** / 로컬 MLX·ollama 폴백 |
+| 리랭커 | MLX 리랭커 서버(HTTP) / CrossEncoder (URL 미설정 시 로컬 CPU) |
 | 스트리밍 | SSE (sse-starlette) |
 | 테스트 | pytest (asyncio_mode=auto) |
 
@@ -163,8 +163,9 @@ uvicorn src.main:app --reload --port 8000
 ```bash
 # 의존성 설치 (dev 포함)
 pip install -e ".[dev,local]"           # 로컬 개발 (sentence-transformers 포함)
-pip install -e ".[dev,ollama]"          # Ollama LLM
-pip install -e ".[dev,openai]"          # OpenAI LLM
+pip install -e ".[dev,ollama]"          # ollama 폴백(ChatOllama) 사용 시
+# openai / anthropic extra 는 2026-07-16 상용 퇴역과 함께 제거됐다.
+# langchain-openai 는 core 라 별도 extra 가 필요 없다 (DGX /v1 · MLX 클라이언트).
 
 # DB 마이그레이션
 alembic upgrade head
@@ -202,10 +203,21 @@ pytest tests/ --cov=src --cov-report=term-missing
 | 변수 | 예시 | 설명 |
 |---|---|---|
 | `AIP_DATABASE_URL` | `postgresql+asyncpg://user:pass@localhost:5432/aip` | DB 접속 |
-| `AIP_LLM_PROVIDER` | `ollama` / `openai` | LLM 프로바이더 |
-| `AIP_EMBEDDING_PROVIDER` | `local` / `openai` | 임베딩 프로바이더 |
-| `AIP_LLM_API_KEY` | `sk-...` | OpenAI 사용 시 |
+| `AIP_DGX_LLM_URL` | `http://100.102.16.62:11434` | **DGX Spark(ollama). 설정 시 전 LLM 역할의 primary** |
+| `AIP_DGX_MAIN_MODEL` | `qwen3.6:35b-a3b` | DGX 기본 모델(전 역할 공유가 권장) |
+| `AIP_DGX_LOCAL_FALLBACK` | `true` (기본) | DGX 단절 시 로컬 폴백 여부. `false`면 DGX 단독 |
+| `AIP_MAIN_LLM_SERVER_URL` | `http://host.docker.internal:8106` | 로컬 MLX 폴백. 없으면 `AIP_OLLAMA_HOST`로 흐른다 |
+| `AIP_EMBEDDING_SERVER_URL` | `http://host.docker.internal:8103` | MLX 임베딩 서버. 없으면 로컬 sentence-transformers |
 | `AIP_JWT_SECRET` | (공유) | bff와 동일 값 |
+
+> **LLM 서빙 = DGX Spark 하나가 primary, 로컬 MLX/ollama 가 폴백.**
+> 상용(Anthropic/OpenAI) 경로는 2026-07-16 에 코드에서 제거됐다 — 서빙 경로에 벤더 SDK 는 없다.
+> 그래서 프로바이더를 고르는 스위치(`AIP_PROVIDER_MODE`)도 없다. **폴백 백엔드는 고르는 게
+> 아니라 배선에서 파생된다**: `AIP_MAIN_LLM_SERVER_URL` 이 있으면 MLX, 없으면 ollama.
+> 현재 무엇으로 서빙 중인지는 `GET /api/health` 의 `llm_primary`/`llm_fallback` 이 알려준다.
+>
+> `langchain-openai`(`ChatOpenAI`)는 core 의존성으로 남아 있지만 OpenAI 벤더와 무관하다 —
+> DGX ollama 의 OpenAI 호환 `/v1` shim 과 MLX 서버를 치는 클라이언트다. 지우면 서빙이 죽는다.
 
 ## 코딩 컨벤션
 

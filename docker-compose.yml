@@ -29,18 +29,14 @@ services:
     command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
-      # ── 폴백 LLM 스위치 ── (메인 LLM 스위치가 아니다)
+      # ── LLM 서빙 ──
       # 메인은 DGX Spark다. AIP_DGX_LLM_URL 이 설정되면 ProviderFactory._wrap_with_dgx 가
-      # 모든 역할(main/router/report/orchestration/fortune)을 DGX 우선으로 감싼다 —
-      # AIP_PROVIDER_MODE 와 무관하게. 즉 이 값은 "DGX 가 끊겼을 때 무엇으로 떨어질지"만 고른다.
-      #   development = 로컬 MLX 로 폴백 (기본. 상용 호출 0)
-      #   anthropic   = Claude 로 폴백 (테스트 전용 — 상용 키 과금됨)
-      # 예전엔 여기가 anthropic 하드코딩이라 "상용을 걷어냈다"는 인식과 배선이 어긋나 있었다.
-      AIP_PROVIDER_MODE: ${AIP_PROVIDER_MODE:-development}
-      AIP_ANTHROPIC_API_KEY: ${AIP_ANTHROPIC_API_KEY:-}
-      AIP_ANTHROPIC_MAIN_MODEL: claude-haiku-4-5
-      AIP_ANTHROPIC_ROUTER_MODEL: claude-haiku-4-5
-      # 임베딩/리랭커는 모드와 무관하게 항상 MLX (Anthropic 임베딩 없음 + 기존 코퍼스 동일 모델)
+      # 모든 역할(main/router/report/orchestration/fortune)을 DGX 우선으로 감싼다.
+      # 폴백은 로컬 MLX/ollama 뿐이다 — 상용(Anthropic/OpenAI) 경로는 2026-07-16 에 코드에서
+      # 제거됐다. 그래서 AIP_PROVIDER_MODE / AIP_ANTHROPIC_* 도 여기서 지웠다: 읽는 코드가
+      # 없는 값을 남겨두면 "고를 수 있다"는 착시만 남는다(죽은 설정).
+      # 폴백 백엔드는 이제 배선에서 파생된다 — AIP_MAIN_LLM_SERVER_URL 이 있으면 MLX, 없으면 ollama.
+      # 임베딩/리랭커는 LLM 이 아니라 항상 MLX (기존 코퍼스와 동일 모델 유지).
       # DGX Spark(원격 GPU, Tailscale) — 설정 시 모든 LLM 역할이 DGX 우선, 단절 시 로컬 자동 폴백.
       # 값은 루트 .env에서 주입 (미설정이면 기능 비활성 = 현행 로컬 그대로).
       AIP_DGX_LLM_URL: ${AIP_DGX_LLM_URL:-}
@@ -59,10 +55,10 @@ services:
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       # 하이브리드: 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). get_local_llm 전용 변수.
-      # ★main_llm_server_url과 분리 — 챗 모델 자동감지(bootstrap)가 8106 모델명을 Anthropic에
-      # 넘겨 오염시키던 버그 방지. main_llm은 anthropic 모드라 Haiku 유지.
+      # ★main_llm_server_url과 분리 — 챗 모델 자동감지(bootstrap)가 8106 모델명을 주 경로로
+      # 넘겨 오염시키던 버그 방지.
       AIP_FORTUNE_LLM_SERVER_URL: http://host.docker.internal:8106
-      # ── development(MLX) 복귀 시: PROVIDER_MODE=development + 아래 주석 해제 ──
+      # ── 로컬 MLX 폴백을 실제로 붙일 때 주석 해제 ──
       # AIP_ROUTER_LLM_SERVER_URL: http://host.docker.internal:8105
       # AIP_ORCHESTRATOR_MODEL: mlx-community/Qwen3-8B-4bit
       # AIP_ORCHESTRATOR_SERVER_URL: http://host.docker.internal:8105

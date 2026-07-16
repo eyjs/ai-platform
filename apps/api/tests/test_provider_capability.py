@@ -1,4 +1,9 @@
-"""Provider Capability / Registry / AnthropicStub 테스트."""
+"""Provider Capability / Registry 테스트.
+
+AnthropicStub 테스트는 2026-07-16 상용 퇴역과 함께 지웠다 — 그 스텁은 상용 벤더를
+레지스트리에서 흉내 내려고 존재했고, 흉내 낼 벤더가 없어졌다. stub 제외 규칙 자체는
+아래 TestProviderRegistry(DummyProvider stub=True)가 벤더와 무관하게 검증한다.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +12,7 @@ import pytest
 from src.infrastructure.providers.base import (
     LLMProvider,
     ProviderCapability,
-    ProviderUnavailableError,
 )
-from src.infrastructure.providers.llm.anthropic import AnthropicStubProvider
 from src.infrastructure.providers.registry import ProviderRegistry
 
 
@@ -43,29 +46,6 @@ class TestProviderCapability:
         assert cap.supports_tool_use is True
         assert cap.max_context == 4096
         assert cap.stub is False
-
-
-class TestAnthropicStub:
-    def test_stub_flag_true(self):
-        cap = AnthropicStubProvider().capability
-        assert cap.stub is True
-        assert cap.provider_id == "anthropic_claude"
-        assert cap.supports_tool_use is True
-        assert cap.max_context == 200000
-
-    @pytest.mark.asyncio
-    async def test_generate_raises_without_echo_mode(self, monkeypatch):
-        monkeypatch.delenv("AIP_PROVIDER_ANTHROPIC_STUB_MODE", raising=False)
-        p = AnthropicStubProvider()
-        with pytest.raises(ProviderUnavailableError):
-            await p.generate("hi")
-
-    @pytest.mark.asyncio
-    async def test_generate_echo_mode(self, monkeypatch):
-        monkeypatch.setenv("AIP_PROVIDER_ANTHROPIC_STUB_MODE", "echo")
-        p = AnthropicStubProvider()
-        out = await p.generate("hello world")
-        assert "hello world" in out
 
 
 class TestProviderRegistry:

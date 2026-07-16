@@ -16,7 +16,6 @@ from src.infrastructure.providers.base import (
     ProviderUnavailableError,
 )
 from src.infrastructure.providers.registry import ProviderRegistry
-from src.infrastructure.providers.llm.anthropic import AnthropicStubProvider
 from src.router.provider_policy import parse_policy, select_primary, select_fallback_chain
 from src.router.provider_router import ProviderRouter
 from src.services.response_cache_models import (
@@ -53,27 +52,22 @@ class _Dummy(LLMProvider):
         return {}
 
 
-# ---------------- S1: Provider 전환 ----------------
+# ---------------- S1: Provider 등록/가용성 ----------------
+#
+# 원래는 AnthropicStubProvider(상용 스텁)로 "stub 은 등록되지만 available 에선 빠진다"를
+# 검증했다. 상용 퇴역(2026-07-16)으로 그 스텁이 사라져 _Dummy(stub=True)로 바꿨다 —
+# 검증 대상은 원래도 벤더가 아니라 **레지스트리의 stub 제외 규칙**이었다.
 
-class TestS1ProviderSwitch:
-    def test_env_default_development(self):
-        assert os.environ.get("AIP_PROVIDER_MODE") == "development"
-
-    def test_anthropic_stub_listed_but_not_in_available(self):
+class TestS1ProviderRegistration:
+    def test_stub_listed_but_not_in_available(self):
         reg = ProviderRegistry()
         reg.register_inplace(_Dummy("ollama"))
-        reg.register_inplace(AnthropicStubProvider())
+        reg.register_inplace(_Dummy("some_stub", stub=True))
         avail = [c.provider_id for c in reg.list_available()]
         all_ids = [c.provider_id for c in reg.list_all()]
-        assert "anthropic_claude" in all_ids
-        assert "anthropic_claude" not in avail  # stub 은 제외
+        assert "some_stub" in all_ids
+        assert "some_stub" not in avail  # stub 은 제외
         assert "ollama" in avail
-
-    def test_capability_metadata_populated(self):
-        stub = AnthropicStubProvider()
-        assert stub.capability.supports_tool_use is True
-        assert stub.capability.max_context == 200000
-        assert stub.capability.cost_per_1k_tokens > 0
 
 
 # ---------------- S2: API Key 관리 ----------------

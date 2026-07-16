@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.bootstrap import create_app_state, seed_dev_api_keys, shutdown, start_cleanup_task
 from src.common.exceptions import INFRA, PIPELINE, AppError
-from src.config import settings
+from src.config import fallback_backend_label, settings
 from src.gateway.admin_router import admin_router
 from src.gateway.crawl_router import crawl_router
 from src.gateway.fortune_router import fortune_router
@@ -38,7 +38,9 @@ async def lifespan(app: FastAPI):
     """앱 생명주기: 초기화 -> 실행 -> 정리."""
     logger.info(
         "startup",
-        mode=settings.provider_mode.value,
+        # primary 는 DGX 하나뿐이라 "모드"가 없다 — 로그가 말할 값은 "끊기면 뭘로 받는가"다.
+        llm_primary="dgx" if settings.dgx_llm_url else "local",
+        llm_fallback=fallback_backend_label(settings),
         database=settings.database_url.split("@")[-1],
         log_format="json" if _json_logs else "human",
         log_level=_log_level,

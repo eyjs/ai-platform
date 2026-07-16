@@ -37,8 +37,6 @@ _TAGS_BODY = {
 
 def _settings(**kw):
     s = MagicMock()
-    s.provider_mode = MagicMock()
-    s.provider_mode.value = kw.get("provider_mode", "development")
     s.dgx_llm_url = kw.get("dgx_url", DGX_URL)
     s.dgx_main_model = kw.get("dgx_main_model", "qwen3.6:35b-a3b")
     s.dgx_local_fallback = kw.get("fallback", True)
@@ -185,10 +183,24 @@ async def test_non_llm_links_do_not_leak(call):
 async def test_fallback_wiring_is_reported(call):
     r = await call()
     assert r["fallbackEnabled"] is True
-    assert r["providerMode"] == "development"
+    # providerMode 키는 레거시(프론트 대시보드 계약)지만 값은 이제 폴백 백엔드다 —
+    # provider_mode 설정은 2026-07-16 상용 퇴역과 함께 사라졌다. MLX URL 이 배선돼 있으므로 "mlx".
+    assert r["providerMode"] == "mlx"
     assert r["dgx"]["roleOverrides"] == {
         "report": "", "router": "", "orchestration": "", "fortune": "",
     }
+
+
+async def test_provider_mode_reports_fallback_backend_not_a_dead_switch(call):
+    """폴백을 끄면 "떨어질 곳이 없다"고 말해야 한다 — 고정 문자열이면 거짓말이 된다."""
+    r = await call(settings=_settings(fallback=False))
+    assert r["providerMode"] == "none"
+
+
+async def test_provider_mode_is_ollama_without_mlx_url(call):
+    """MLX URL 이 없으면 폴백은 ollama_host 로 흐른다."""
+    r = await call(settings=_settings(main_url=""))
+    assert r["providerMode"] == "ollama"
 
 
 async def test_role_override_is_surfaced_when_set(call):
