@@ -72,11 +72,14 @@ async def lifespan(app: FastAPI):
 
     await seed_dev_api_keys(state.vector_store.pool)
 
-    # 내부 링크(KMS·DocForge) 상시 연결 감시 — 부팅 1회 + 주기 점검 (운영 원칙:
-    # KMS ↔ ai-platform ↔ DocForge 는 항상 연결. 끊김은 즉시 관측돼야 한다)
-    from src.services.link_monitor import LinkMonitor, build_link_targets
+    # 의존 대상 생존 감시 — 부팅 1회 + 주기 점검.
+    # 내부 링크(KMS·DocForge): 항상 연결이 운영 원칙, 끊김은 즉시 관측돼야 한다.
+    # LLM 서빙(DGX + 로컬 MLX 폴백): 폴백은 평소 안 불려 조용히 썩으므로 실제 생성으로 찌른다.
+    from src.services.link_monitor import (
+        LinkMonitor, build_link_targets, build_llm_probe_targets,
+    )
     link_monitor = LinkMonitor(
-        build_link_targets(settings),
+        {**build_link_targets(settings), **build_llm_probe_targets(settings)},
         interval_seconds=settings.link_check_interval,
     )
     await link_monitor.start()
