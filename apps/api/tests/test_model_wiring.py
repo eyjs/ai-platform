@@ -2,7 +2,7 @@
 
 커버:
   1. resolve_model_alias 단위 테스트 — 백엔드별(anthropic/dev-ollama/dev-http/openai)
-  2. 통합: ProfileStore.parse_profile → StrategyBuilder.build → plan.main_model/router_model
+  2. 통합: ProfileStore.parse_profile → StrategyBuilder.build → plan.main_model
   3. GraphExecutor 오버라이드: stub ProviderFactory 주입, get_chat_model 호출 검증
   4. 회귀: main_model="" / settings=None / provider_factory=None → 기존 경로
 
@@ -180,14 +180,14 @@ class TestResolveModelAliasOpenAI:
 
 
 # ---------------------------------------------------------------------------
-# 2. 통합: ProfileStore.parse_profile → StrategyBuilder.build → plan.main_model/router_model
+# 2. 통합: ProfileStore.parse_profile → StrategyBuilder.build → plan.main_model
 # ---------------------------------------------------------------------------
 
 
 class TestModelWiringIntegration:
-    """Profile → Plan 경로에서 main_model/router_model 이 올바르게 흐르는지 검증."""
+    """Profile → Plan 경로에서 main_model 이 올바르게 흐르는지 검증."""
 
-    def _make_profile(self, main_model: str = "sonnet", router_model: str = "haiku"):
+    def _make_profile(self, main_model: str = "qwen3.6:35b-a3b"):
         from src.agent.profile_store import ProfileStore
         # _parse_profile is a staticmethod — call it directly to avoid needing a DB pool.
         return ProfileStore._parse_profile({
@@ -196,16 +196,11 @@ class TestModelWiringIntegration:
             "domain_scopes": ["test"],
             "system_prompt": "You are a test assistant.",
             "main_model": main_model,
-            "router_model": router_model,
         })
 
     def test_profile_carries_main_model(self):
         profile = self._make_profile(main_model="opus")
         assert profile.main_model == "opus"
-
-    def test_profile_carries_router_model(self):
-        profile = self._make_profile(router_model="sonnet")
-        assert profile.router_model == "sonnet"
 
     def test_plan_main_model_from_strategy_builder(self):
         """StrategyBuilder.build 가 profile.main_model 을 plan 에 전달한다."""
@@ -213,7 +208,7 @@ class TestModelWiringIntegration:
         from src.domain.execution_plan import QuestionType
         from src.domain.models import AgentMode
 
-        profile = self._make_profile(main_model="opus", router_model="sonnet")
+        profile = self._make_profile(main_model="opus")
         builder = StrategyBuilder()
         strategy = builder.get_strategy(QuestionType.STANDALONE)
         plan = builder.build(
@@ -225,25 +220,6 @@ class TestModelWiringIntegration:
             query="테스트 질문",
         )
         assert plan.main_model == "opus"
-
-    def test_plan_router_model_from_strategy_builder(self):
-        """StrategyBuilder.build 가 profile.router_model 을 plan 에 전달한다."""
-        from src.router.strategy_builder import StrategyBuilder
-        from src.domain.execution_plan import QuestionType
-        from src.domain.models import AgentMode
-
-        profile = self._make_profile(main_model="sonnet", router_model="haiku")
-        builder = StrategyBuilder()
-        strategy = builder.get_strategy(QuestionType.STANDALONE)
-        plan = builder.build(
-            profile=profile,
-            question_type=QuestionType.STANDALONE,
-            strategy=strategy,
-            mode=AgentMode.AGENTIC,
-            tools=[],
-            query="테스트 질문",
-        )
-        assert plan.router_model == "haiku"
 
     def test_plan_empty_model_when_profile_unset(self):
         """profile.main_model 이 기본 "sonnet" 일 때 plan 에 "sonnet" 이 들어온다."""
