@@ -154,16 +154,34 @@ class FaithfulnessGuard:
         return None
 
     def _check_citations(self, answer: str, docs: list[dict]) -> Optional[GuardrailResult]:
-        """답변에서 언급한 문서명이 소스에 존재하는지 검증."""
+        """답변이 언급한 파일이 실제 소스에 있는지 검증 — 지어낸 출처를 잡는다.
+
+        ★완전일치가 아니라 **포함 비교**다. 인용 추출 정규식(`[\\w가-힣]+\\.pdf`)은 공백을
+        품지 못해, 파일명이 "무배당 프로미라이프 New간편암건강보험2601 상품요약서.pdf"처럼
+        공백을 포함하면 언제나 꼬리("상품요약서.pdf")만 잡힌다. 그 꼬리를 전체 파일명과
+        완전일치로 비교하던 탓에 **답변이 파일명을 정확히 써도 100% 실패**했다
+        (실측 2026-07-16, 이 코퍼스는 전 파일명이 공백을 포함).
+        결과적으로 이 검사는 올바른 인용을 늘 환각으로 신고하면서 정작 조작 인용은
+        구별하지 못했고, 잘못된 faithfulness 점수(0.5)를 request_log에 남기고 있었다.
+
+        꼬리가 **어느 소스 파일명에도 들어있지 않을 때만** 조작으로 본다. 보수적이라
+        "약관.pdf"처럼 짧은 조각은 통과하지만, 이 검사의 목적("없는 문서를 지어냈는가")에는
+        충분하다 — 오탐이 나면 점수가 오염되고 경고 전체가 무시된다.
+
+        확장자 없는 약칭 인용("[출처: 상품요약서 섹션 ...]")은 정규식이 잡지 않는다.
+        검증할 수 없는 건 판정하지 않는다.
+        """
         cited = self._citation_re.findall(answer)
         if not cited:
             return None
 
-        source_files = {
-            doc.get("file_name", "") for doc in docs
-        }
+        source_files = [
+            (doc.get("file_name") or "").lower() for doc in docs
+        ]
+        source_files = [f for f in source_files if f]
         for cite in cited:
-            if cite not in source_files:
+            needle = cite.lower()
+            if not any(needle in f for f in source_files):
                 warning = get_locale().message("citation_missing", cite=cite)
                 logger.warning("faithfulness_citation", detail=warning)
                 return GuardrailResult.warn(warning, None, score=0.5)
