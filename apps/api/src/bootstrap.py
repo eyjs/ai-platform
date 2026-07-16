@@ -348,7 +348,9 @@ async def create_app_state(settings: Settings) -> AppState:
             chat_model_name = settings.anthropic_main_model
         else:
             chat_model_name = settings.main_model
-        if settings.main_llm_server_url:
+        # DGX 사용 시 자동감지 생략 — 감지 대상은 로컬 MLX 모델명이라 DGX엔 없는 이름이다.
+        # (get_chat_model도 DGX 경로에선 model_name을 무시한다.)
+        if settings.main_llm_server_url and not settings.dgx_llm_url:
             try:
                 import httpx
                 async with httpx.AsyncClient(timeout=5.0) as client:

@@ -209,10 +209,25 @@ class Settings(BaseSettings):
     # 자동 라우팅 파리티(레거시는 선택된 프로파일 답변을 그대로 반환) + 지연 절감.
     # 켜면 단일 위임 응답이 "메인 종합 문체"가 아닌 서브 원문으로 나간다.
     supervisor_single_passthrough: bool = False
-    # DGX Spark(원격 GPU, Tailscale) ollama 서빙 — 설정 시 main 생성을 DGX가
-    # 우선 담당하고, 연결 단절 시 현행 로컬 구조로 자동 폴백(FailoverLLMProvider).
+    # DGX Spark(원격 GPU, Tailscale) ollama 서빙 — 설정 시 모든 LLM 역할(main·리포트·
+    # 라우터·오케스트레이션·무료콘텐츠)을 DGX가 우선 담당하고, 연결 단절 시 현행 로컬
+    # 구조로 자동 폴백(FailoverLLMProvider). 임베딩·리랭커는 대상 아님(LLM 아님).
     dgx_llm_url: str = ""          # 예: http://100.102.16.62:11434
     dgx_main_model: str = "qwen3.6:35b-a3b"
+    # 역할별 DGX 모델 오버라이드. ""이면 전부 dgx_main_model 하나를 공유한다(권장).
+    # 다른 모델을 섞으면 ollama 동시 상주 한계(기본 3)에 걸려 evict↔reload가 돌고,
+    # 매 스왑마다 콜드로드를 문다(실측: gpt-oss:120b 로드 143초 + qwen3.6 evict).
+    # dgx_main_model은 MoE(활성 3B)라 분류에도 7B급과 지연이 같아 쪼갤 실익이 없다.
+    dgx_report_model: str = ""
+    dgx_router_model: str = ""
+    dgx_orchestrator_model: str = ""
+    dgx_fortune_model: str = ""
+    # 로컬 MLX 폴백 사용 여부. False(기본) = DGX 단독 — 로컬 LLM 서버 의존을 걷어낸다.
+    # True면 DGX 단절 시 현행 로컬 구조로 자동 폴백(FailoverLLMProvider).
+    # 끄는 이유: 로컬 MLX가 맥 메모리를 상시 점유하고, 8104(리포트용 14B)는 이미
+    # 죽어 있어(unicode-escape 전건 실패) 폴백이 명목뿐이었다.
+    # 대가: DGX(Tailscale) 단절 = 전 LLM 경로 정지. 되살리려면 이 값을 true로.
+    dgx_local_fallback: bool = False
 
     # 최종 답변(main) LLM만 백엔드 강제 오버라이드. ""=provider_mode 따름.
     # "anthropic"이면 판단 레이어(라우터·플래너)는 로컬 유지, 생성만 상용 —

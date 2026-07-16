@@ -22,11 +22,16 @@ class OllamaProvider(LLMProvider):
         system_prefix: str = "",
         connect_timeout: float = 5.0,
         read_timeout: float | None = 120.0,
+        max_tokens: int | None = None,
     ):
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._num_ctx = num_ctx
         self._system_prefix = system_prefix
+        # 호출부가 max_tokens를 안 주면 쓰는 기본 상한. HttpLLMProvider와 같은 의미 —
+        # 폴백(Http)만 상한이 걸리고 primary(여기)는 무제한이 되는 비대칭을 막는다.
+        # None이면 num_predict 미설정 = 모델 기본값(무제한).
+        self._max_tokens = max_tokens
         # 타임아웃 두 축을 분리한다:
         #  - connect: 짧게. 원격(DGX 등)이 오프라인이면 SYN 무응답으로 connect가
         #    hang → 짧아야 다운 즉시 감지 → FailoverLLMProvider가 초 단위로 폴백.
@@ -65,8 +70,9 @@ class OllamaProvider(LLMProvider):
             self._combine_system(system, cacheable_system, volatile_system)
         )
         options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
-        if max_tokens is not None:
-            options["num_predict"] = max_tokens
+        effective_max = max_tokens if max_tokens is not None else self._max_tokens
+        if effective_max is not None:
+            options["num_predict"] = effective_max
         response = await self._client.post(
             f"{self._base_url}/api/chat",
             json={
