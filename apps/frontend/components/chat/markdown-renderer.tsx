@@ -7,6 +7,8 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import { useCallback, useState } from 'react';
 
+import type { Citation } from '@/types/chat';
+
 // LLM 답변의 인라인 HTML(<br> 등, 특히 표 셀 안 줄바꿈)을 렌더링하되
 // sanitize로 스크립트·이벤트 핸들러류는 차단한다.
 // code의 className은 rehype-highlight 언어 감지에 필요해 허용 목록에 추가.
@@ -15,11 +17,36 @@ const sanitizeSchema = {
   attributes: {
     ...defaultSchema.attributes,
     code: [...(defaultSchema.attributes?.code ?? []), ['className', /^language-/]],
+    // 인용 칩: [n] → <sup data-cite="n">. 값은 우리가 만든 숫자뿐이라 안전하다.
+    sup: [...(defaultSchema.attributes?.sup ?? []), 'dataCite'],
   },
+  tagNames: [...(defaultSchema.tagNames ?? []), 'sup'],
 } as typeof defaultSchema;
+
+/** 본문의 [n] 토큰 — api 의 인용 계약(ko.yaml: "번호만 쓰라")과 같은 모양. */
+const CITATION_TOKEN = /\[(\d{1,2})\]/g;
+
+/**
+ * 답변의 [n] 을 인용 칩 마크업으로 바꾼다.
+ *
+ * 모델은 번호로만 인용하고 이름은 화면에서 붙인다 — 긴 한글 파일명을 모델이 재현하게
+ * 하면 철자가 흔들리고, 서버가 그걸 문자열로 검증하려다 오탐 지옥에 빠졌다(2026-07-16).
+ *
+ * citations 에 없는 번호는 **건드리지 않는다**. 지어낸 인용을 그럴듯한 문서명으로
+ * 바꿔주면 환각을 감춰주는 꼴이라, 원문 그대로 두고 서버 가드가 신고하게 둔다.
+ */
+function withCitationChips(content: string, citations?: Citation[]): string {
+  if (!citations?.length) return content;
+  const byNumber = new Map(citations.map((c) => [c.n, c]));
+  return content.replace(CITATION_TOKEN, (raw, digits: string) =>
+    byNumber.has(Number(digits)) ? `<sup data-cite="${digits}">${digits}</sup>` : raw,
+  );
+}
 
 interface MarkdownRendererProps {
   content: string;
+  /** SSE done 의 citations. 없으면 [n] 을 그대로 보여준다(스트리밍 중). */
+  citations?: Citation[];
 }
 
 function CodeBlock({
@@ -59,8 +86,10 @@ function CodeBlock({
   );
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, citations }: MarkdownRendererProps) {
   if (!content) return null;
+
+  const byNumber = new Map((citations ?? []).map((c) => [c.n, c]));
 
   return (
     <ReactMarkdown
@@ -69,6 +98,19 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       components={{
         pre({ children }) {
           return <>{children}</>;
+        },
+        sup({ children, ...props }) {
+          const n = Number((props as { dataCite?: string }).dataCite);
+          const cite = byNumber.get(n);
+          if (!cite) return <sup>{children}</sup>;
+          return (
+            <sup
+              title={cite.file_name}
+              className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-neutral-200)] px-1 align-super text-[var(--font-size-xs)] font-medium text-[var(--color-neutral-700)] no-underline"
+            >
+              {n}
+            </sup>
+          );
         },
         a({ href, children }) {
           // LLM이 간혹 만드는 가짜 링크(http://문서:... 등)는 클릭하면 404가
@@ -142,7 +184,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
       }}
     >
-      {content}
+      {withCitationChips(content, citations)}
     </ReactMarkdown>
   );
 }

@@ -12,7 +12,7 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { fetchProfiles } from '@/lib/api/chat';
 import { traceToStatus } from '@/lib/trace-status';
 import { submitFeedback } from '@/lib/api/bff-feedback';
-import type { ChatMessage, ChatProfileOption, ChatRequest } from '@/types/chat';
+import type { ChatMessage, ChatProfileOption, ChatRequest, Citation } from '@/types/chat';
 import type { FeedbackScore } from '@/types/feedback';
 
 /** RAG 검증용 채팅 — 어드민 셸(/admin) 안에서 동작하는 풀높이 페이지. */
@@ -93,6 +93,7 @@ export default function AdminChatPage() {
       onDone: (data: {
         answer?: string;
         sources?: Array<{ title: string; document_id?: string; url?: string }>;
+        citations?: Citation[];
         response_id?: string;
       }) => {
         const sid = activeSessionIdRef.current;
@@ -103,6 +104,9 @@ export default function AdminChatPage() {
           statusText: undefined,
           content: data.answer && data.answer.length > 0 ? data.answer : msg.content,
           sources: data.sources,
+          // 본문의 [n] 을 문서명으로 렌더링할 표(서버 인용 계약). sources 와 다른 축이다 —
+          // sources 는 문서 단위로 중복 제거돼 번호와 1:1이 아니다.
+          citations: data.citations,
           responseId: data.response_id ?? msg.responseId,
         }));
       },

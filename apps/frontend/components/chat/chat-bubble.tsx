@@ -78,7 +78,7 @@ export function ChatBubble({ message, className, onFeedback }: ChatBubbleProps) 
               message.isStreaming && 'streaming-cursor',
             )}
           >
-            <MarkdownRenderer content={message.content} />
+            <MarkdownRenderer content={message.content} citations={message.citations} />
           </div>
         )}
         {message.sources && message.sources.length > 0 && (

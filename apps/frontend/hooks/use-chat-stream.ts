@@ -4,6 +4,8 @@ import { useState, useRef, useCallback } from 'react';
 import { streamChat, parseSSEBuffer } from '@/lib/api/chat';
 import type { ChatRequest } from '@/types/chat';
 
+import type { Citation } from '@/types/chat';
+
 interface UseChatStreamCallbacks {
   onToken: (text: string) => void;
   onReplace: (text: string) => void;
@@ -12,6 +14,11 @@ interface UseChatStreamCallbacks {
     /** api 가 생성한 최종 답변 전문. 토큰 누적이 누락돼도 이 값으로 보정. */
     answer?: string;
     sources?: Array<{ title: string; document_id?: string; url?: string }>;
+    /**
+     * 인용 번호 → 문서 매핑. 본문의 [n] 을 문서명으로 렌더링할 표.
+     * 모델은 번호로만 인용하므로(api 인용 계약) 이 표가 없으면 [n] 이 그대로 보인다.
+     */
+    citations?: Citation[];
     /** api 가 생성한 응답 식별자. 피드백 전송 시 사용. */
     response_id?: string;
   }) => void;

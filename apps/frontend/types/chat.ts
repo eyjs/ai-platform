@@ -1,6 +1,13 @@
 /** SSE 이벤트 타입 */
 export type SSEEventType = 'token' | 'replace' | 'trace' | 'done';
 
+/** 인용 번호 한 건 (SSE done 의 citations). n 은 답변 본문의 [n] 과 대응한다. */
+export interface Citation {
+  n: number;
+  document_id?: string;
+  file_name: string;
+}
+
 /** 채팅 메시지 */
 export interface ChatMessage {
   id: string;
@@ -11,6 +18,16 @@ export interface ChatMessage {
   isError: boolean;
   errorMessage?: string;
   sources?: Array<{ title: string; document_id?: string; url?: string }>;
+  /**
+   * 인용 번호 → 문서 매핑 (SSE done). 답변 본문의 [1], [2] 토큰을 렌더링할 표.
+   *
+   * 모델은 번호로만 인용한다(api의 ko.yaml 인용 규칙) — 긴 한글 파일명을 모델이
+   * 재현하게 하면 철자가 흔들리고 검증이 문자열 매칭 지옥이 되기 때문. 이름은 여기서 붙인다.
+   *
+   * ★sources와 다른 표다. sources는 문서 단위로 중복 제거돼 번호와 1:1이 아니다 —
+   * [3]을 sources[2]로 매핑하면 엉뚱한 문서를 가리킨다.
+   */
+  citations?: Citation[];
   traceData?: Record<string, unknown>;
   /** RAG 파이프라인 트레이스 — SSE trace 이벤트를 순서대로 누적(답변별 펼쳐보기용). */
   traceEvents?: Array<Record<string, unknown>>;
