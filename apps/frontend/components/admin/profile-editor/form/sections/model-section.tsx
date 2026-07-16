@@ -1,6 +1,5 @@
 'use client';
 
-import { Badge } from '@/components/ui/badge';
 import { Dropdown, type DropdownOption } from '@/components/ui/dropdown';
 import { Input } from '@/components/ui/input';
 import { hasToolsCapability } from '@/lib/profile/model-rules';

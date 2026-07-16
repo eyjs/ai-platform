@@ -22,7 +22,7 @@
 | 검증 | `class-validator` + `class-transformer` | |
 | 해싱 | `bcrypt` | |
 | YAML | `js-yaml` | |
-| 린트 | ESLint 9 | |
+| 린트 | ESLint 9 (flat config: `eslint.config.mjs`) + `typescript-eslint` | |
 
 패키지명: **`@aip/bff`** (npm workspace 멤버)
 

@@ -20,7 +20,7 @@ AI Platform의 사용자/관리자용 웹 클라이언트.
 | 마크다운 | `react-markdown` + `remark-gfm` + `rehype-highlight` | |
 | 코드 에디터 | `@monaco-editor/react` | 4.7 |
 | 유틸 | `clsx`, `tailwind-merge` | |
-| 린트 | ESLint 9 + `eslint-config-next` | |
+| 린트 | ESLint 9 (flat config: `eslint.config.mjs`) + `eslint-config-next` | |
 
 패키지명: **`@aip/frontend`** (npm workspace 멤버)
 
@@ -65,7 +65,7 @@ npm run typecheck --workspace @aip/frontend
 npx next dev --port 3000
 npx next build
 npx next start
-npx next lint
+npx eslint .                    # next lint 아님 — flat config 는 eslint CLI 로 돈다
 npx tsc --noEmit
 ```
 

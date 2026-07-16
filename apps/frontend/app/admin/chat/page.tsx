@@ -233,7 +233,6 @@ export default function AdminChatPage() {
         await submitFeedback({ response_id: responseId, score });
       } catch (err) {
         updateMessageById(currentSessionId, messageId, (msg) => ({ ...msg, feedback: prev ?? null }));
-        // eslint-disable-next-line no-console
         console.warn('feedback submit failed', err);
       }
     },

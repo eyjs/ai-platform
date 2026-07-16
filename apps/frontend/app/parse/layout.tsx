@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'PDF Parser - AI Platform',
@@ -14,13 +15,13 @@ export default function ParseLayout({
     <div className="flex min-h-screen flex-col bg-[var(--surface-page)]">
       {/* Simple Navigation Header */}
       <header className="flex h-14 shrink-0 items-center border-b border-[var(--color-neutral-200)] bg-[var(--surface-card)] px-[var(--spacing-6)]">
-        <a
+        <Link
           href="/"
           className="text-[var(--font-size-sm)] text-[var(--color-neutral-500)] hover:text-[var(--color-neutral-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-200)] focus-visible:rounded-[var(--radius-sm)]"
           aria-label="홈으로 돌아가기"
         >
           AI Platform
-        </a>
+        </Link>
         <span className="mx-[var(--spacing-2)] text-[var(--color-neutral-300)]">/</span>
         <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-neutral-800)]">
           PDF Parser

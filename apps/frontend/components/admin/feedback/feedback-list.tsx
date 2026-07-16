@@ -92,7 +92,7 @@ export function FeedbackList({ items, isLoading, total }: FeedbackListProps) {
           )}
           {item.comment && (
             <p className="rounded-[var(--radius-sm)] bg-[var(--color-neutral-100)] px-2 py-1 text-[var(--font-size-xs)] text-[var(--color-neutral-700)]">
-              "{item.comment}"
+              &ldquo;{item.comment}&rdquo;
             </p>
           )}
         </article>

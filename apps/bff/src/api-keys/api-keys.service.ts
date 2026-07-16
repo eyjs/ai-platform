@@ -252,7 +252,6 @@ export class ApiKeysService {
       );
     } catch (err) {
       // audit 실패는 로그만 남기고 요청은 계속
-      // eslint-disable-next-line no-console
       console.warn('[api-keys] audit write failed', err);
     }
   }

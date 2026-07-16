@@ -2,11 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CacheEntry } from '../entities/cache-entry.entity';
-import {
-  ProvidersStatusDto,
-  ProviderTypeStatusDto,
-  ProviderMetricsDto,
-} from './dto/provider-status.dto';
+import { ProvidersStatusDto } from './dto/provider-status.dto';
 
 /**
  * Providers 서비스
