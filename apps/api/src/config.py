@@ -4,7 +4,6 @@ PostgreSQL only -- Redis 의존 없음.
 모든 캐시/큐/세션을 PostgreSQL로 통합 관리.
 """
 
-from enum import Enum
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,13 +27,6 @@ def _candidate_env_files() -> tuple[str, ...]:
 _ENV_FILES = _candidate_env_files()
 
 
-class ProviderMode(str, Enum):
-    DEVELOPMENT = "development"  # Ollama + sentence-transformers (로컬)
-    OPENAI = "openai"            # OpenAI API (GPT + text-embedding)
-    PRODUCTION = "production"    # OpenAI (하위 호환)
-    ANTHROPIC = "anthropic"      # Anthropic Claude (메인/라우터 LLM) + 로컬/OpenAI 임베딩
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILES,
@@ -43,8 +35,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # 프로바이더 모드
-    provider_mode: ProviderMode = ProviderMode.DEVELOPMENT
+    # LLM 서빙 구성(2026-07-16 상용 퇴역): primary 는 DGX Spark(dgx_llm_url) 하나뿐이고,
+    # 폴백은 로컬 MLX(*_llm_server_url) 또는 ollama(ollama_host)다. Anthropic/OpenAI 를
+    # 고르던 provider_mode 스위치는 제거됐다 — 고를 벤더가 없으므로 모드도 없다.
+    # 폴백 백엔드는 "설정으로 고르는" 게 아니라 배선에서 파생된다: MLX URL 이 있으면 MLX,
+    # 없으면 ollama. 그 파생 결과는 fallback_backend_label() 하나가 계산한다.
 
     # PostgreSQL (유일한 인프라)
     database_url: str = "postgresql://aip:aip_dev@localhost:5434/ai_platform"
@@ -81,13 +76,6 @@ class Settings(BaseSettings):
     # 등 0.500)만 걸러 미보정 신규 도메인이 과반려되지 않는다. 도메인이 붙으면
     # 각 프로필이 probe_rerank_floor.py로 자체 floor를 정해 오버라이드(예: 보험 0.58).
     rag_min_rerank_score: float = 0.505
-    openai_api_key: str = ""
-    prod_embedding_model: str = "text-embedding-3-small"
-    prod_llm_model: str = "gpt-4o-mini"
-    # Anthropic Claude (provider_mode=anthropic). 기본은 비용 최적 Haiku.
-    anthropic_api_key: str = ""
-    anthropic_main_model: str = "claude-haiku-4-5"
-    anthropic_router_model: str = "claude-haiku-4-5"
 
     # 파서 (Vision Parser)
     parser_provider: str = "text"      # text | llamaparse | engine
@@ -174,7 +162,6 @@ class Settings(BaseSettings):
     # 오케스트레이션 LLM (계획수립·쿼리재작성·supervisor decompose — 라이트사이징 중경량 트랙)
     # 이름의 orchestrator_는 역사적 잔재(레거시 MasterOrchestrator와 공유하던 키). env 호환 유지.
     orchestrator_model: str = "mlx-community/Qwen3.5-9B-4bit"
-    orchestrator_provider: str = "mlx"  # mlx | ollama | openai | anthropic
     orchestrator_server_url: str = ""  # MLX 서버 URL (미설정 시 router_llm_server_url 사용)
 
     # CORS (빈 리스트 = 모든 origin 허용, credentials 비활성)
@@ -257,10 +244,6 @@ class Settings(BaseSettings):
     # False로 두면 DGX 단독 = 단절 시 라우팅·생성·리포트가 동시에 멈춘다.
     dgx_local_fallback: bool = True
 
-    # 최종 답변(main) LLM만 백엔드 강제 오버라이드. ""=provider_mode 따름.
-    # "anthropic"이면 판단 레이어(라우터·플래너)는 로컬 유지, 생성만 상용 —
-    # 로컬 LLM 원칙("상용은 최종 답변 LLM만 스왑") 그대로의 스위치.
-    main_llm_backend: str = ""
     greeting_max_length: int = 30
     pattern_max_query_length: int = 30
 
@@ -280,6 +263,24 @@ class Settings(BaseSettings):
     # 서버
     host: str = "0.0.0.0"
     port: int = 8000
+
+
+def fallback_backend_label(s: "Settings") -> str:
+    """DGX 가 끊겼을 때 실제로 받는 백엔드 이름. 관측/로그용 파생값(설정 아님).
+
+    provider_mode 를 지우면서 /health 와 부팅 로그가 "무엇으로 서빙 중인가"를 말할 근거가
+    사라졌다. 그 자리를 이 파생값이 대신한다 — 스위치가 아니라 배선의 요약이라는 게 요점이다.
+    값을 바꾸고 싶으면 배선(AIP_MAIN_LLM_SERVER_URL / AIP_DGX_LOCAL_FALLBACK)을 바꿔야 하고,
+    그래서 이 값은 구조상 거짓말을 할 수 없다.
+
+    반환:
+      "none"   — DGX 단독(폴백 off). 단절 시 전 LLM 정지.
+      "mlx"    — 로컬 MLX 서버(main_llm_server_url)가 폴백. ProviderFactory._llm_backend 의 "http".
+      "ollama" — MLX URL 이 없어 ollama_host 로 흐른다. _llm_backend 의 "ollama".
+    """
+    if s.dgx_llm_url and not s.dgx_local_fallback:
+        return "none"
+    return "mlx" if s.main_llm_server_url else "ollama"
 
 
 settings = Settings()

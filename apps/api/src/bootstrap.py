@@ -15,7 +15,7 @@ _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 from src.locale.bundle import LocaleBundle, set_locale
 from src.agent.graph_executor import GraphExecutor
 from src.agent.profile_store import ProfileStore
-from src.config import ProviderMode, Settings
+from src.config import Settings, fallback_backend_label
 from src.gateway.access_policy import AccessPolicyStore
 from src.gateway.auth import AuthService
 from src.gateway.concurrency_gate import ConcurrencyGate
@@ -164,6 +164,10 @@ def _check_llm_wiring_alignment(settings) -> None:
     새 배선을 깔면서 같은 부류를 다시 만들었으므로, 부팅 때 스스로 실토하게 한다.
 
     거짓 경고를 내지 않는 게 중요하다 — 안 죽은 걸 죽었다고 하면 경고 전체가 무시된다.
+    그래서 상용 퇴역(2026-07-16)과 함께 두 검사를 **지웠다**: AIP_MAIN_LLM_BACKEND 와
+    AIP_PROVIDER_MODE 는 설정 자체가 사라져서, 계속 검사하면 없는 필드를 읽다 죽거나
+    영영 안 울리는 죽은 검사가 된다. 죽은 설정을 잡는 검사가 죽은 검사가 되는 건 자기모순이다.
+    (그 env 를 아직 compose/.env 에 남겨둔 경우는 pydantic extra="ignore" 가 조용히 무시한다.)
     """
     dgx_url = settings.dgx_llm_url
 
@@ -186,27 +190,6 @@ def _check_llm_wiring_alignment(settings) -> None:
         return
 
     fallback_on = settings.dgx_local_fallback
-
-    # main_llm_backend는 폴백 base를 만들 때만 전달된다 → primary(DGX)를 못 바꾼다.
-    if settings.main_llm_backend:
-        logger.warning(
-            "llm_setting_shadowed_by_dgx",
-            field="AIP_MAIN_LLM_BACKEND",
-            value=settings.main_llm_backend,
-            hint=(
-                "primary(DGX)는 이 값으로 못 바꾼다 — 로컬 폴백 base에만 전달된다"
-                if fallback_on else
-                "완전히 죽은 값 — DGX 단독(폴백 off)이라 폴백 base 자체가 생성되지 않는다"
-            ),
-        )
-
-    # provider_mode는 더 이상 primary LLM을 결정하지 않는다(폴백·임베딩·리랭커·파싱에만 유효).
-    if settings.provider_mode != ProviderMode.DEVELOPMENT:
-        logger.warning(
-            "provider_mode_no_longer_decides_main_llm",
-            provider_mode=settings.provider_mode.value,
-            hint="primary는 DGX — provider_mode는 폴백 LLM·임베딩·리랭커·파싱에만 영향한다",
-        )
 
     local_llm_urls = (
         ("AIP_MAIN_LLM_SERVER_URL", settings.main_llm_server_url),
@@ -465,11 +448,7 @@ async def create_app_state(settings: Settings) -> AppState:
     chat_model = None
     try:
         # MLX 서버 사용 시 모델명을 서버에서 자동 감지
-        # anthropic 모드는 Claude 모델명을 사용 (main_model은 로컬 qwen 기본값)
-        if settings.provider_mode == ProviderMode.ANTHROPIC:
-            chat_model_name = settings.anthropic_main_model
-        else:
-            chat_model_name = settings.main_model
+        chat_model_name = settings.main_model
         # 자동감지는 로컬 MLX 서버에 "지금 뜬 모델명"을 묻는 것이라 로컬 경로를 쓸 때만
         # 의미가 있다. DGX 단독(폴백 off)이면 model_name을 아무도 안 쓰므로 생략하고,
         # 폴백이 켜져 있으면 그 이름이 폴백 chat model로 들어가니 반드시 감지해야 한다.
@@ -692,7 +671,7 @@ async def create_app_state(settings: Settings) -> AppState:
         handler=saju_report_service.process_report_job,
         worker_id=f"saju-report-{getattr(settings, 'server_id', None) or 'default'}",
         poll_interval=2.0,
-        max_concurrent=4,  # 유료 리포트 동시 처리 — Haiku 클라우드 스케일(레이트리밋은 SDK 백오프)
+        max_concurrent=4,  # 유료 리포트 동시 처리 — DGX 단일 서빙이 감당할 상한(상용 클라우드 아님)
     )
 
     logger.info(

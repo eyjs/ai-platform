@@ -10,6 +10,10 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "langgraph>=0.3.0",
     "langchain-core>=0.3.0",
+    # ChatOpenAI 는 OpenAI 벤더용이 아니다 — DGX ollama 의 OpenAI 호환 /v1 shim 과 로컬 MLX
+    # 서버를 치는 클라이언트다(api_key="not-needed"). 상용 퇴역(2026-07-16) 후 서빙 경로의
+    # 필수 의존이라 optional extra 가 아니라 core 다. 지우면 agentic 채팅이 통째로 죽는다.
+    "langchain-openai>=0.3.0",
     # LangGraph Postgres 체크포인터 (psycopg v3 기반, asyncpg와 별도 드라이버)
     # <3.1.0 상한 필수: 3.1.0은 langgraph-checkpoint>=4.1.0 요구, 설치된 4.0.1과 충돌.
     "langgraph-checkpoint-postgres>=3.0.5,<3.1.0",
@@ -42,14 +46,8 @@ local = [
 ollama = [
     "langchain-ollama>=0.3.0",
 ]
-openai = [
-    "openai>=1.50.0",
-    "langchain-openai>=0.3.0",
-]
-anthropic = [
-    "anthropic>=0.40.0",
-    "langchain-anthropic>=0.3.0",
-]
+# openai / anthropic extra 는 2026-07-16 상용 퇴역과 함께 제거했다.
+# 서빙 경로에 벤더 SDK 는 없다 — primary 는 DGX Spark, 폴백은 로컬 MLX/ollama 뿐이다.
 
 [build-system]
 requires = ["hatchling"]

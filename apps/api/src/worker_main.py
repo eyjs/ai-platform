@@ -13,7 +13,7 @@ import os
 import signal
 from pathlib import Path
 
-from src.config import settings
+from src.config import fallback_backend_label, settings
 from src.domain.models import UNPLACED_DOMAIN
 from src.infrastructure.job_queue import JobQueue, QueueWorker
 from src.infrastructure.providers.factory import ProviderFactory
@@ -33,7 +33,8 @@ async def run_worker() -> None:
     """워커 프로세스 메인 루프."""
     logger.info(
         "worker_startup",
-        mode=settings.provider_mode.value,
+        llm_primary="dgx" if settings.dgx_llm_url else "local",
+        llm_fallback=fallback_backend_label(settings),
         database=settings.database_url.split("@")[-1],
     )
 

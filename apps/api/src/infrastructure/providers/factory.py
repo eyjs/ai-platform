@@ -1,6 +1,7 @@
 """프로바이더 팩토리.
 
-모드에 따라 적절한 구현체를 생성한다.
+LLM primary 는 DGX Spark(ollama) 하나이고, 폴백은 로컬 MLX/ollama 다.
+상용(Anthropic/OpenAI) 경로는 2026-07-16 에 제거됐다 — 서빙 경로에 벤더는 없다.
 HTTP 서버 URL이 설정되면 GPU 서버를 우선 사용.
 """
 
@@ -9,7 +10,7 @@ from typing import Callable, Iterable
 
 import httpx
 
-from src.config import ProviderMode, Settings
+from src.config import Settings
 from src.locale.bundle import get_locale
 
 from .base import (
@@ -28,32 +29,13 @@ _FREE_CONTENT_MAX_TOKENS = 1024
 
 
 class ProviderFactory:
-    """프로바이더 모드에 따라 적절한 구현체를 생성한다."""
+    """배선(설정된 URL)에 따라 적절한 구현체를 생성한다."""
 
     def __init__(self, settings: Settings):
         self._settings = settings
-        self._mode = settings.provider_mode
         # DGX 서빙 모델 태그 집합. None = 모름(조회 실패/미주입) → 프로필 모델을 DGX 에
         # 태우지 않는다. set_dgx_catalog 로 부트스트랩에서 채운다.
         self._dgx_catalog: frozenset[str] | None = None
-
-    @property
-    def _is_local(self) -> bool:
-        return self._mode == ProviderMode.DEVELOPMENT
-
-    @property
-    def _aux_prefers_local(self) -> bool:
-        """임베딩/리랭커 등 보조 모델을 로컬로 둘지.
-
-        Anthropic은 자체 임베딩이 없으므로, anthropic 모드에서 OpenAI 키도
-        임베딩 서버도 없으면 로컬(sentence-transformers/cross-encoder)로 폴백한다.
-        """
-        if self._is_local:
-            return True
-        return (
-            self._mode == ProviderMode.ANTHROPIC
-            and not self._settings.openai_api_key
-        )
 
     def get_embedding_provider(self) -> EmbeddingProvider:
         if self._settings.embedding_server_url:
@@ -67,46 +49,31 @@ class ProviderFactory:
                 connect_timeout=self._settings.embedding_connect_timeout,
             )
 
-        if self._aux_prefers_local:
-            from .embedding.sentence_transformers import SentenceTransformersProvider
+        from .embedding.sentence_transformers import SentenceTransformersProvider
 
-            logger.info("Using local embedding model (CPU)")
-            return SentenceTransformersProvider(
-                model_name=self._settings.dev_embedding_model,
-            )
-
-        from .embedding.openai import OpenAIEmbeddingProvider
-
-        return OpenAIEmbeddingProvider(
-            api_key=self._settings.openai_api_key,
-            model=self._settings.prod_embedding_model,
+        logger.info("Using local embedding model (CPU)")
+        return SentenceTransformersProvider(
+            model_name=self._settings.dev_embedding_model,
         )
 
-    # === LLM 백엔드 선택 규칙 (provider_mode) ===
-    # ★DGX 위임(2026-07-16) 이후 이 메서드는 더 이상 마스터 스위치가 아니다.
-    # dgx_llm_url이 설정되면 primary는 DGX로 고정되고, 이 메서드는 **로컬 폴백 base를
-    # 만들 때만** 호출된다(_wrap_with_dgx 참조). 즉 provider_mode를 anthropic으로 바꿔도
-    # 최종 답변은 여전히 DGX가 낸다 — 폴백이 Claude가 될 뿐이다.
-    # 그 오해를 부팅 때 잡으려고 _check_llm_wiring_alignment(bootstrap)가 WARN을 띄운다.
+    # === LLM 백엔드 선택 규칙 ===
+    # ★DGX 위임(2026-07-16) 이후 이 메서드는 마스터 스위치가 아니다. dgx_llm_url이
+    # 설정되면 primary는 DGX로 고정되고, 이 메서드는 **로컬 폴백 base를 만들 때만**
+    # 호출된다(_wrap_with_dgx 참조).
+    # 상용 퇴역(2026-07-16) 이후 고를 백엔드는 로컬 둘뿐이라 provider_mode 인자가 사라졌다 —
+    # 백엔드는 이제 "MLX URL이 배선돼 있는가" 하나로 결정된다.
     def _llm_backend(self, server_url: str) -> str:
-        """provider_mode 기준 LLM 백엔드를 고른다 (DGX 미설정 시 primary, 설정 시 폴백).
+        """LLM 백엔드를 고른다 (DGX 미설정 시 primary, 설정 시 폴백).
 
-        - anthropic: 항상 Claude (server_url 무시 — 모드가 최우선)
-        - development: MLX(server_url) 있으면 http, 없으면 ollama
-        - openai/production: openai
+        - MLX(server_url) 있으면 http, 없으면 ollama.
         """
-        if self._mode == ProviderMode.ANTHROPIC:
-            return "anthropic"
-        if self._mode == ProviderMode.DEVELOPMENT:
-            return "http" if server_url else "ollama"
-        return "openai"
+        return "http" if server_url else "ollama"
 
     def get_router_llm(self) -> LLMProvider:
         return self._wrap_with_dgx(
             lambda: self._create_llm(
                 server_url=self._settings.router_llm_server_url,
                 local_model=self._settings.router_model,
-                anthropic_model=self._settings.anthropic_router_model,
                 label="router",
             ),
             "router", self._dgx_model_for("router"),
@@ -129,7 +96,6 @@ class ProviderFactory:
             lambda: self._create_llm(
                 server_url=s.orchestrator_server_url or s.router_llm_server_url,
                 local_model=s.orchestrator_model,
-                anthropic_model=s.anthropic_router_model,
                 label="orchestration",
             ),
             "orchestration", self._dgx_model_for("orchestration"),
@@ -150,12 +116,16 @@ class ProviderFactory:
         dgx_main_model 로만 돌았고 선택이 장식이었다.
 
         ★카탈로그에 있는 이름만 태우는 이유(중요):
-        get_chat_model 에 오는 값은 이미 resolve_model_alias 를 거친 결과다. development
-        모드에서 "haiku" 는 settings.router_model 인 "qwen3.5:9b" 로 풀린다 — 생김새가
-        DGX 태그와 똑같지만 DGX 엔 없는 로컬 모델명이다. 접두사/슬래시 휴리스틱으로
-        가르면 이런 값이 DGX 로 새어나가 매 요청 404("model not found") → 폴백이 되고,
-        폴백이 답을 주니 겉보기엔 멀쩡한 채 DGX 가 통째로 우회된다(실측 확인).
-        그래서 "카탈로그에 있는가"만 믿는다.
+        get_chat_model 에 오는 값은 DGX 태그라는 보장이 없다. 예전엔 alias "haiku" 가
+        settings.router_model 인 "qwen3.5:9b" 로 풀려서 들어왔다 — 생김새가 DGX 태그와
+        똑같지만 DGX 엔 없는 로컬 모델명이다. 접두사/슬래시 휴리스틱으로 가르면 이런 값이
+        DGX 로 새어나가 매 요청 404("model not found") → 폴백이 되고, 폴백이 답을 주니
+        겉보기엔 멀쩡한 채 DGX 가 통째로 우회된다(실측 확인).
+
+        그 haiku 경로 자체는 상용 퇴역(2026-07-16)으로 사라졌지만, 같은 모양의 값은 계속
+        들어온다: bootstrap 이 MLX /v1/models 에서 자동감지한 모델명("mlx-community/...",
+        "qwen3.5:9b")이 폴백용으로 이 함수를 통과한다. 즉 원인은 alias 가 아니라 "DGX 태그와
+        구분 안 되는 로컬 모델명"이고, 그건 그대로다. 그래서 "카탈로그에 있는가"만 믿는다.
 
         카탈로그를 모르면(조회 실패·미주입) 무조건 기본 DGX 모델 + 요청값은 폴백으로 —
         이는 이 함수가 생기기 전의 동작과 정확히 같다. 모르면 안전한 쪽으로 판단한다.
@@ -241,15 +211,13 @@ class ProviderFactory:
             lambda: self._create_llm(
                 server_url=self._settings.main_llm_server_url,
                 local_model=self._settings.main_model,
-                anthropic_model=self._settings.anthropic_main_model,
                 label="main",
-                backend_override=self._settings.main_llm_backend,
             ),
             "main", self._dgx_model_for("main"),
         )
 
-    # === 하이브리드 라우팅용 명시 provider (provider_mode 무시) ===
-    # 무료/패턴 콘텐츠($0)는 로컬, 고난도 추론은 상용 — 요청별 선택용.
+    # === 하이브리드 라우팅용 명시 provider ===
+    # 무료/패턴 콘텐츠($0)는 전용 로컬 MLX — 요청별 선택용.
 
     def get_local_llm(self) -> LLMProvider:
         """무료·패턴 콘텐츠용 로컬 MLX LLM($0, GPU 가속). MLX 전용 — ollama 사용 안 함."""
@@ -300,32 +268,10 @@ class ProviderFactory:
             max_tokens=self._settings.llm_max_tokens,
         )
 
-    def get_commercial_llm(self) -> LLMProvider:
-        """고난도 추론용 상용 LLM(Anthropic Haiku). 키 없으면 로컬 폴백. mode 무시."""
-        if not self._settings.anthropic_api_key:
-            logger.warning("anthropic_api_key 미설정 — commercial 요청이 로컬 LLM으로 폴백(품질 저하 가능)")
-            return self.get_local_llm()
-        from .llm.anthropic import AnthropicLLMProvider
-
+    def _create_llm(self, server_url: str, local_model: str, label: str) -> LLMProvider:
+        """결정론 경로용 LLMProvider 생성. 백엔드는 _llm_backend가 단일 결정."""
         system_prefix = get_locale().prompt("llm_system_prefix")
-        logger.info("Using COMMERCIAL Anthropic: %s", self._settings.anthropic_main_model)
-        return AnthropicLLMProvider(
-            api_key=self._settings.anthropic_api_key, model=self._settings.anthropic_main_model,
-            system_prefix=system_prefix, max_tokens=self._settings.llm_max_tokens,
-        )
-
-    def _create_llm(
-        self, server_url: str, local_model: str, label: str,
-        anthropic_model: str = "claude-haiku-4-5",
-        backend_override: str = "",
-    ) -> LLMProvider:
-        """결정론 경로용 LLMProvider 생성. 백엔드는 _llm_backend가 단일 결정.
-
-        backend_override가 지정되면 provider_mode보다 우선한다 —
-        main만 상용으로 스왑하는 선택적 하이브리드용(AIP_MAIN_LLM_BACKEND).
-        """
-        system_prefix = get_locale().prompt("llm_system_prefix")
-        backend = backend_override or self._llm_backend(server_url)
+        backend = self._llm_backend(server_url)
         max_tokens = self._settings.llm_max_tokens
 
         if backend == "http":
@@ -334,41 +280,24 @@ class ProviderFactory:
             logger.info("Using HTTP LLM server (%s): %s", label, server_url)
             return HttpLLMProvider(base_url=server_url, system_prefix=system_prefix, max_tokens=max_tokens)
 
-        if backend == "ollama":
-            from .llm.ollama import OllamaProvider
+        from .llm.ollama import OllamaProvider
 
-            return OllamaProvider(
-                base_url=self._settings.ollama_host, model=local_model,
-                num_ctx=self._settings.ollama_num_ctx, system_prefix=system_prefix,
-            )
-
-        if backend == "anthropic":
-            from .llm.anthropic import AnthropicLLMProvider
-
-            logger.info("Using Anthropic Claude (%s): %s", label, anthropic_model)
-            return AnthropicLLMProvider(
-                api_key=self._settings.anthropic_api_key, model=anthropic_model,
-                system_prefix=system_prefix, max_tokens=max_tokens,
-            )
-
-        from .llm.openai import OpenAILLMProvider
-
-        return OpenAILLMProvider(
-            api_key=self._settings.openai_api_key, model=self._settings.prod_llm_model,
-            system_prefix=system_prefix, max_tokens=max_tokens,
+        return OllamaProvider(
+            base_url=self._settings.ollama_host, model=local_model,
+            num_ctx=self._settings.ollama_num_ctx, system_prefix=system_prefix,
         )
 
     def get_chat_model(self, model_name: str = ""):
         """에이전틱(LangGraph)용 langchain BaseChatModel. 백엔드는 _llm_backend가 단일 결정.
 
-        model_name: MLX 자동감지 모델명 override (없으면 모드별 기본 모델).
+        model_name: MLX 자동감지 모델명 override (없으면 기본 모델).
         ImportError(langchain extra 미설치)는 호출부(bootstrap)에서 흡수 → agentic만 비활성.
 
         DGX 설정 시 ollama의 OpenAI 호환 엔드포인트(/v1)를 ChatOpenAI로 쓴다.
         langchain_ollama(ChatOllama)를 안 쓰는 이유: 이 이미지에 미설치이고, /v1로도
         tool calling이 정상 동작한다(qwen3.6:35b-a3b capabilities에 tools 포함).
         model_name 은 _split_model_request 가 가른다: DGX 태그면 주 경로에 태우고,
-        상용 ID/MLX 경로면 DGX 에 없는 이름이라 폴백에만 넘긴다. 프로필의 main_model 을
+        MLX 로컬 모델명이면 DGX 에 없는 이름이라 폴백에만 넘긴다. 프로필의 main_model 을
         관리자 UI 가 DGX /api/tags 목록에서 고르게 되면서, 고른 값이 실제로 주 경로에
         반영되어야 하기 때문이다.
 
@@ -412,14 +341,16 @@ class ProviderFactory:
         return self._local_chat_model(model_name)
 
     def _local_chat_model(self, model_name: str = ""):
-        """DGX를 뺀 현행(로컬 MLX/ollama/상용) langchain BaseChatModel.
+        """DGX를 뺀 현행(로컬 MLX/ollama) langchain BaseChatModel.
 
         DGX 경로의 폴백으로도 쓰이므로 단독 호출 가능해야 한다.
+
+        ChatOpenAI 를 쓰지만 OpenAI 벤더와 무관하다 — MLX 서버의 OpenAI 호환 /v1 shim 을
+        치는 클라이언트일 뿐이다(api_key="not-needed"). 상용 퇴역과 함께 지우면 안 된다.
         """
         s = self._settings
-        backend = self._llm_backend(s.main_llm_server_url)
 
-        if backend == "http":
+        if self._llm_backend(s.main_llm_server_url) == "http":
             from langchain_openai import ChatOpenAI
 
             # streaming=True: agentic astream_events가 on_chat_model_stream을 토큰 단위로
@@ -431,22 +362,9 @@ class ProviderFactory:
                 streaming=True,
             )
 
-        if backend == "ollama":
-            from langchain_ollama import ChatOllama
+        from langchain_ollama import ChatOllama
 
-            return ChatOllama(model=model_name or s.main_model, base_url=s.ollama_host, streaming=True)
-
-        if backend == "anthropic":
-            from langchain_anthropic import ChatAnthropic
-
-            return ChatAnthropic(
-                model=model_name or s.anthropic_main_model,
-                api_key=s.anthropic_api_key, max_tokens=s.llm_max_tokens,
-            )
-
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(model=model_name or s.prod_llm_model, api_key=s.openai_api_key)
+        return ChatOllama(model=model_name or s.main_model, base_url=s.ollama_host, streaming=True)
 
     def get_parsing_provider(self) -> ParsingProvider:
         parser_type = self._settings.parser_provider.lower()
@@ -488,7 +406,7 @@ class ProviderFactory:
             from .reranking.http_reranker import HttpRerankerProvider
 
             reachable = self._check_server_health(self._settings.reranker_server_url)
-            fallback_model = self._settings.reranker_model if self._aux_prefers_local else None
+            fallback_model = self._settings.reranker_model
             if reachable:
                 logger.info("Using HTTP reranker server: %s", self._settings.reranker_server_url)
             else:
@@ -501,14 +419,13 @@ class ProviderFactory:
                 fallback_model=fallback_model,
             )
 
-        if self._aux_prefers_local:
-            try:
-                from .reranking.cross_encoder import CrossEncoderReranker
+        try:
+            from .reranking.cross_encoder import CrossEncoderReranker
 
-                logger.info("Using local cross-encoder reranker (CPU)")
-                return CrossEncoderReranker(model_name=self._settings.reranker_model)
-            except Exception as e:
-                logger.warning("Cross-encoder unavailable: %s", e)
+            logger.info("Using local cross-encoder reranker (CPU)")
+            return CrossEncoderReranker(model_name=self._settings.reranker_model)
+        except Exception as e:
+            logger.warning("Cross-encoder unavailable: %s", e)
 
         from .reranking.llm_reranker import LLMReranker
 
@@ -517,40 +434,11 @@ class ProviderFactory:
     def build_registry(self) -> ProviderRegistry:
         """활성 LLM Provider 들을 등록한 Registry 반환.
 
-        정책:
-        - 기본: main_llm 을 "main" 으로 등록 (하위 호환). provider_id 는 capability 기준.
-        - AIP_PROVIDER_ENABLE_ANTHROPIC=1 → AnthropicStubProvider 추가 (stub).
-        - 환경변수 `AIP_PROVIDER_ENABLE_OPENAI=1` 이면서 openai_api_key 가 있으면 openai 활성.
+        main_llm 하나만 등록한다. 상용 퇴역(2026-07-16) 전에는 AIP_PROVIDER_ENABLE_ANTHROPIC/
+        _OPENAI 로 벤더 provider 를 추가 등록할 수 있었지만, 등록할 벤더가 없어졌다.
         """
-        import os
-
         registry = ProviderRegistry()
-
-        # 주 Provider (기존 config 기반)
-        main = self.get_main_llm()
-        registry.register_inplace(main)
-
-        # 환경 플래그 기반 추가 Provider
-        enable_anthropic = os.getenv("AIP_PROVIDER_ENABLE_ANTHROPIC", "0") == "1"
-        if enable_anthropic:
-            from .llm.anthropic import AnthropicStubProvider
-            registry.register_inplace(AnthropicStubProvider())
-            logger.info("Registered anthropic_claude (stub)")
-
-        enable_openai = os.getenv("AIP_PROVIDER_ENABLE_OPENAI", "0") == "1"
-        if enable_openai and self._settings.openai_api_key:
-            # 이미 main 이 openai 면 중복 등록 방지
-            if not registry.has("openai"):
-                from .llm.openai import OpenAILLMProvider
-                from src.locale.bundle import get_locale
-                registry.register_inplace(OpenAILLMProvider(
-                    api_key=self._settings.openai_api_key,
-                    model=self._settings.prod_llm_model,
-                    system_prefix=get_locale().prompt("llm_system_prefix"),
-                    max_tokens=self._settings.llm_max_tokens,
-                ))
-                logger.info("Registered openai")
-
+        registry.register_inplace(self.get_main_llm())
         logger.info("Provider registry built: ids=%s", registry.ids())
         return registry
 

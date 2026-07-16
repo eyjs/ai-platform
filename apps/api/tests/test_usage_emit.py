@@ -13,8 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.infrastructure.providers.llm.anthropic import AnthropicStubProvider
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 헬퍼
@@ -246,165 +244,11 @@ async def test_agentic_done_empty_event_stream_graceful(mock_convert, mock_build
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 테스트 3: anthropic _extract_usage dict 반환
+# 테스트 3: (삭제됨) anthropic _extract_usage dict 반환
 # ──────────────────────────────────────────────────────────────────────────────
-
-def test_extract_usage_returns_dict_with_all_fields():
-    """_extract_usage가 usage 객체를 dict로 반환한다."""
-    import os
-    os.environ["AIP_PROVIDER_ANTHROPIC_STUB_MODE"] = "echo"
-    provider = AnthropicStubProvider()
-
-    # usage 객체 Mock
-    usage = MagicMock()
-    usage.input_tokens = 100
-    usage.output_tokens = 50
-    usage.cache_read_input_tokens = 30
-    usage.cache_creation_input_tokens = 0
-
-    # AnthropicStubProvider에는 _extract_usage 없음 — AnthropicLLMProvider 직접 테스트
-    # stub은 _extract_usage 미구현 → 실 클래스에서 테스트
-    # 여기서는 함수 로직을 직접 검증 (실 SDK 없이)
-    from src.infrastructure.providers.llm.anthropic import AnthropicLLMProvider
-
-    # _extract_usage 는 인스턴스 메서드지만 self 사용 안 함 → 직접 바인딩
-    # ProviderUnavailableError 없이 호출하기 위해 object.__new__ 사용
-    obj = object.__new__(AnthropicLLMProvider)
-
-    result = obj._extract_usage(usage)
-
-    assert isinstance(result, dict), "_extract_usage 반환 타입은 dict"
-    assert "input_tokens" in result
-    assert "output_tokens" in result
-    assert "cache_read_input_tokens" in result
-    assert result["input_tokens"] == 100
-    assert result["output_tokens"] == 50
-    assert result["cache_read_input_tokens"] == 30
-
-
-def test_extract_usage_none_returns_empty_dict():
-    """usage=None 시 빈 dict 반환 (throw 없음)."""
-    from src.infrastructure.providers.llm.anthropic import AnthropicLLMProvider
-    obj = object.__new__(AnthropicLLMProvider)
-
-    result = obj._extract_usage(None)
-    assert result == {}, "None usage → 빈 dict"
-
-
-def test_extract_usage_cache_creation_included_when_nonzero():
-    """cache_creation_input_tokens > 0 시 결과 dict에 포함."""
-    from src.infrastructure.providers.llm.anthropic import AnthropicLLMProvider
-    obj = object.__new__(AnthropicLLMProvider)
-
-    usage = MagicMock()
-    usage.input_tokens = 200
-    usage.output_tokens = 60
-    usage.cache_read_input_tokens = 0
-    usage.cache_creation_input_tokens = 500
-
-    result = obj._extract_usage(usage)
-    assert "cache_creation_input_tokens" in result
-    assert result["cache_creation_input_tokens"] == 500
-
-
-def test_extract_usage_cache_creation_omitted_when_zero():
-    """cache_creation_input_tokens == 0 시 결과 dict에서 생략."""
-    from src.infrastructure.providers.llm.anthropic import AnthropicLLMProvider
-    obj = object.__new__(AnthropicLLMProvider)
-
-    usage = MagicMock()
-    usage.input_tokens = 100
-    usage.output_tokens = 40
-    usage.cache_read_input_tokens = 10
-    usage.cache_creation_input_tokens = 0
-
-    result = obj._extract_usage(usage)
-    # 0이면 생략
-    assert "cache_creation_input_tokens" not in result
-
-
-def test_extract_usage_partial_attrs():
-    """usage 객체에 일부 attr 없어도 KeyError/AttributeError 없이 0 처리."""
-    from src.infrastructure.providers.llm.anthropic import AnthropicLLMProvider
-    obj = object.__new__(AnthropicLLMProvider)
-
-    # output_tokens 없는 최소 usage
-    usage = MagicMock(spec=["input_tokens"])
-    usage.input_tokens = 50
-
-    result = obj._extract_usage(usage)
-    assert isinstance(result, dict)
-    assert result["input_tokens"] == 50
-    assert result["output_tokens"] == 0
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 테스트 4: workflow done 봉투 기존 필드 유지 확인
-# ──────────────────────────────────────────────────────────────────────────────
-
-async def test_workflow_done_preserves_existing_fields():
-    """_stream_workflow done 봉투의 기존 workflow{} 필드가 유지된다."""
-    from src.agent.graph_executor import GraphExecutor
-    from src.agent.graph_cache import GraphCache
-    from src.domain.models import AgentMode, SearchScope
-    from src.domain.execution_plan import ExecutionPlan, QuestionStrategy, QuestionType
-    from src.workflow.engine import StepResult
-
-    mock_llm = AsyncMock()
-    mock_registry = MagicMock()
-
-    # mock workflow engine
-    mock_engine = AsyncMock()
-    mock_engine.get_session = AsyncMock(return_value=None)
-
-    step = StepResult(
-        bot_message="안녕하세요!",
-        options=["선택 A", "선택 B"],
-        step_id="s1",
-        step_type="option",
-        collected={"name": "테스터"},
-        completed=False,
-        escaped=False,
-        report=None,
-        intent_confirm=None,
-        collection=None,
-        concluded=False,
-    )
-    mock_engine.start = AsyncMock(return_value=step)
-
-    executor = GraphExecutor(
-        main_llm=mock_llm,
-        tool_registry=mock_registry,
-        guardrails={},
-        chat_model=MagicMock(),
-        workflow_engine=mock_engine,
-        graph_cache=GraphCache(),
-    )
-
-    plan = ExecutionPlan(
-        mode=AgentMode.WORKFLOW,
-        scope=SearchScope(),
-        question_type=QuestionType.STANDALONE,
-        strategy=QuestionStrategy(needs_rag=False),
-        tool_groups=[],
-        system_prompt="",
-        workflow_id="test_wf",
-    )
-
-    events = []
-    async for event in executor.execute_stream("안녕", plan, "sess-wf"):
-        events.append(event)
-
-    done_events = [e for e in events if e.get("type") == "done"]
-    assert len(done_events) == 1
-
-    wf_data = done_events[0]["data"]
-    # 기존 workflow{} 키 보존
-    assert "workflow" in wf_data, "workflow{} 키 보존"
-    wf = wf_data["workflow"]
-    assert wf["options"] == ["선택 A", "선택 B"]
-    assert wf["step_id"] == "s1"
-    assert wf["step_type"] == "option"
-    assert wf["collected"] == {"name": "테스터"}
-    assert wf["completed"] is False
-    assert wf["concluded"] is False
+#
+# AnthropicLLMProvider._extract_usage 를 겨냥한 5개 테스트는 2026-07-16 상용 퇴역과 함께
+# 지웠다. 그 메서드는 Anthropic usage 객체(cache_read_input_tokens 등)를 파싱하는 벤더
+# 전용 코드였고, 벤더가 사라지면서 같이 사라졌다.
+#
+# done 봉투에 usage 를 싣는 계약 자체는 위 테스트 1~2 가 벤더와 무관하게 지킨다.

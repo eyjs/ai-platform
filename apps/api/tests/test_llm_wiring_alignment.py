@@ -10,10 +10,7 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from src.bootstrap import _check_llm_wiring_alignment
-from src.config import ProviderMode
 
 
 def _settings(**kw):
@@ -24,8 +21,6 @@ def _settings(**kw):
     s.dgx_router_model = kw.get("dgx_router_model", "")
     s.dgx_orchestrator_model = kw.get("dgx_orchestrator_model", "")
     s.dgx_fortune_model = kw.get("dgx_fortune_model", "")
-    s.main_llm_backend = kw.get("main_llm_backend", "")
-    s.provider_mode = kw.get("provider_mode", ProviderMode.DEVELOPMENT)
     s.main_llm_server_url = kw.get("main_url", "http://mlx:8106")
     s.router_llm_server_url = kw.get("router_url", "")
     s.report_llm_server_url = kw.get("report_url", "")
@@ -43,26 +38,17 @@ def _fired(caplog, event: str) -> bool:
     return any(event in m for m in _events(caplog))
 
 
-def _hint(caplog, event: str) -> str:
-    """구조화 로거는 kwargs를 _structured_data에 담는다."""
-    for r in caplog.records:
-        if event in r.getMessage():
-            return str(r.__dict__.get("_structured_data", {}).get("hint", ""))
-    return ""
-
-
 # --- 현행 운영 구성: 무소음이어야 한다 ---
 
 
 def test_current_production_wiring_is_silent(caplog):
-    """DGX + 폴백 on + development + 로컬 URL 있음 = 지금 운영 구성.
+    """DGX + 폴백 on + 로컬 URL 있음 = 지금 운영 구성.
 
     여기서 경고가 나면 매 부팅마다 거짓 경고가 찍혀 경고 전체가 무시된다.
     """
     with caplog.at_level("WARNING"):
         _check_llm_wiring_alignment(_settings(
-            dgx_url="http://dgx:11434", fallback=True,
-            provider_mode=ProviderMode.DEVELOPMENT, main_url="http://mlx:8106",
+            dgx_url="http://dgx:11434", fallback=True, main_url="http://mlx:8106",
         ))
     assert _events(caplog) == []
 
@@ -74,38 +60,12 @@ def test_no_dgx_plain_local_is_silent(caplog):
     assert _events(caplog) == []
 
 
-# --- DGX가 가려버리는 설정 ---
-
-
-def test_main_llm_backend_is_flagged_as_fallback_only(caplog):
-    """폴백이 켜져 있어도 main_llm_backend는 primary(DGX)를 못 바꾼다."""
-    with caplog.at_level("WARNING"):
-        _check_llm_wiring_alignment(_settings(
-            dgx_url="http://dgx:11434", fallback=True, main_llm_backend="anthropic",
-        ))
-    assert _fired(caplog, "llm_setting_shadowed_by_dgx")
-    assert "폴백 base에만" in _hint(caplog, "llm_setting_shadowed_by_dgx")
-
-
-def test_main_llm_backend_is_fully_dead_without_fallback(caplog):
-    """폴백이 꺼지면 base 자체가 생성되지 않아 완전히 죽은 값이 된다."""
-    with caplog.at_level("WARNING"):
-        _check_llm_wiring_alignment(_settings(
-            dgx_url="http://dgx:11434", fallback=False, main_llm_backend="anthropic",
-            main_url="",
-        ))
-    assert _fired(caplog, "llm_setting_shadowed_by_dgx")
-    # 폴백 on일 때와 문구가 달라야 한다 — "폴백에만 유효"와 "완전히 죽음"은 대응이 다르다
-    assert "완전히 죽은 값" in _hint(caplog, "llm_setting_shadowed_by_dgx")
-
-
-def test_provider_mode_anthropic_is_flagged(caplog):
-    """provider_mode=anthropic으로 바꿔도 최종 답변은 DGX가 낸다 — 오해를 잡는다."""
-    with caplog.at_level("WARNING"):
-        _check_llm_wiring_alignment(_settings(
-            dgx_url="http://dgx:11434", provider_mode=ProviderMode.ANTHROPIC,
-        ))
-    assert _fired(caplog, "provider_mode_no_longer_decides_main_llm")
+# --- DGX가 가려버리던 설정 (상용 퇴역으로 검사 자체가 사라졌다) ---
+#
+# main_llm_backend / provider_mode 를 겨냥한 세 검사는 2026-07-16 에 지웠다. 그 설정들이
+# 없어졌기 때문이다 — 존재하지 않는 필드를 계속 검사하면 영영 안 울리는 죽은 검사가 되고,
+# 죽은 설정을 잡는 검사가 죽은 검사가 되는 건 자기모순이다. 아래 남은 검사들은 전부
+# 지금도 실재하는 설정(dgx_*, *_llm_server_url)을 본다.
 
 
 def test_local_urls_unused_when_fallback_off(caplog):

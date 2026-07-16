@@ -8,6 +8,7 @@ import asyncio
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
+from src.config import fallback_backend_label
 from src.domain.models import UserRole
 from src.gateway.routes.helpers import APP_VERSION, _authenticate, _get_app_state
 
@@ -30,7 +31,10 @@ async def health(request: Request):
     payload = {
         "status": "ok",
         "version": APP_VERSION,
-        "provider_mode": state.settings.provider_mode.value,
+        # provider_mode 를 대체한다(2026-07-16 상용 퇴역). primary 는 DGX 하나뿐이라 고를
+        # "모드"가 없고, 밖에서 알 가치가 있는 건 "끊기면 뭘로 받는가"뿐이다.
+        "llm_primary": "dgx" if state.settings.dgx_llm_url else "local",
+        "llm_fallback": fallback_backend_label(state.settings),
         "profiles_loaded": state.profile_store.profile_count,
     }
     # 내부 링크(KMS·DocForge) 최신 상태 — 상시 연결 원칙의 외부 관측점
@@ -248,7 +252,11 @@ async def health_llm_engines(request: Request):
     ]
 
     return {
-        "providerMode": settings.provider_mode.value,
+        # ★키 이름은 레거시다(프론트 대시보드 계약). 값은 더 이상 provider_mode 가 아니라
+        # **폴백 백엔드**("mlx"|"ollama"|"none")다 — 상용 퇴역(2026-07-16)으로 provider_mode
+        # 설정 자체가 사라졌고, 없는 스위치를 흉내 내느니 실제로 참인 값을 싣는다.
+        # 프론트의 'development'/'anthropic' 분기는 이제 죽은 가지다(후속 정리 대상).
+        "providerMode": fallback_backend_label(settings),
         # DGX 단절이 무엇으로 떨어지는지(로컬 MLX냐, 전면 정지냐)는 운영자가 알아야 한다.
         "fallbackEnabled": fallback_enabled,
         "dgx": {
