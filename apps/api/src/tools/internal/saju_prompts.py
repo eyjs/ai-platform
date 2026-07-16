@@ -144,6 +144,49 @@ _COMMON_RULES = (
 )
 
 
+# ──────────────────────────────────────────────
+# llmText 키 계약 — _COMMON_RULES 규칙 6~9와 반드시 일치
+# ──────────────────────────────────────────────
+#
+# 제약 디코딩(generate_json / ollama format:"json")은 **문법**만 보장하고 키 이름은
+# 보장하지 않는다. 실측(2026-07-16): tenGodsShinsal이 프롬프트의 마크다운 불릿
+# ("- advice:")을 그대로 베껴 'advice:', 'conclusion:'처럼 콜론 붙은 키를 냈다.
+# 소비 전에 여기서 정규화·검증하지 않으면 그대로 통과해 "조용한 실패"가 된다.
+#
+# _COMMON_RULES를 고칠 때 이 상수도 같이 고칠 것 (규칙 텍스트가 유일한 계약 문서다).
+SECTION_REQUIRED_KEYS: tuple[str, ...] = ("summary", "advice", "conclusion")
+SECTION_OPTIONAL_KEYS: tuple[str, ...] = ("characteristics",)
+
+
+def _is_filled(value: object) -> bool:
+    """계약상 값은 비어있지 않은 문자열이다."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def normalize_section_keys(parsed: dict) -> dict:
+    """LLM이 낸 키의 사소한 변형을 계약 키로 되돌린다.
+
+    공백·트레일링 콜론·대소문자만 손본다. 의미를 추측한 매핑(예: 'tip' → 'advice')은
+    하지 않는다 — 그건 모델이 다른 걸 말한 것이고, 조용히 끼워맞추면 검증의 의미가 없다.
+    정규화가 키를 겹치게 만들면 내용이 있는 쪽을 남긴다.
+    """
+    out: dict = {}
+    for raw_key, value in parsed.items():
+        if not isinstance(raw_key, str):
+            out[raw_key] = value
+            continue
+        key = raw_key.strip().strip(":").strip().lower()
+        if key in out and _is_filled(out[key]) and not _is_filled(value):
+            continue
+        out[key] = value
+    return out
+
+
+def missing_section_keys(parsed: dict) -> list[str]:
+    """계약상 필수인데 없거나 빈 키. 정규화 이후에 호출할 것."""
+    return [k for k in SECTION_REQUIRED_KEYS if not _is_filled(parsed.get(k))]
+
+
 def get_paper_section_prompt(section_key: str) -> tuple[str, str]:
     """Paper 단일 섹션의 (system, user) 프롬프트를 반환한다.
 

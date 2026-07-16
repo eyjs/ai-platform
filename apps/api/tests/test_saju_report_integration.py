@@ -265,7 +265,7 @@ class TestSajuReportPaperToolDirect:
 
         llm = MagicMock()
         llm.generate_json = AsyncMock(
-            return_value={"summary": "ok", "advice": "good"}
+            return_value={"summary": "ok", "advice": "good", "conclusion": "결국 좋다"}
         )
         tool = SajuReportPaperTool(llm_provider=llm)
         context = AgentContext(user_id="u1", session_id="s1")
@@ -277,8 +277,88 @@ class TestSajuReportPaperToolDirect:
         assert result.success
         assert result.metadata["sections_completed"] == 7
         assert result.metadata["sections_total"] == 7
+        assert result.metadata["degraded_sections"] == []
         for key in PAPER_V2_SECTION_KEYS:
             assert key in result.data
+
+
+# --- 섹션 키 계약 (제약 디코딩이 보장하지 않는 층) ---
+#
+# 실측(2026-07-16): 제약 디코딩은 문법상 유효한 JSON을 보장하지만 키 이름은 보장하지
+# 않는다. tenGodsShinsal이 프롬프트의 마크다운 불릿("- advice:")을 베껴 'advice:',
+# 'conclusion:'처럼 콜론 붙은 키를 냈고, 검증이 없어 failed_sections가 빈 채
+# job이 completed로 끝났다 — 조용한 실패.
+
+
+class TestSajuReportPaperSectionContract:
+    @staticmethod
+    def _tool(payload):
+        from src.tools.internal.saju_report_paper import SajuReportPaperTool
+
+        llm = MagicMock()
+        llm.generate_json = AsyncMock(return_value=payload)
+        return SajuReportPaperTool(llm_provider=llm)
+
+    async def _run(self, payload):
+        context = AgentContext(user_id="u1", session_id="s1")
+        return await self._tool(payload).execute(
+            params={"saju_data": SAMPLE_SAJU_DATA}, context=context,
+        )
+
+    async def test_colon_suffixed_keys_are_recovered(self, caplog):
+        """실측 회귀: 'advice:' 콜론 키가 계약 키로 복원되고 내용이 보존된다.
+
+        수리는 조용히 하지 않는다 — 소리 없이 고치면 "모델이 프롬프트를 잘못 읽는다"는
+        신호가 묻혀 프롬프트를 못 고친다.
+        """
+        with caplog.at_level("WARNING"):
+            result = await self._run({
+                "summary": "요약", "advice:": "조언", "conclusion:": "결론",
+            })
+
+        assert result.success
+        assert result.metadata["degraded_sections"] == []
+        llm_text = result.data["sajuWonguk"]["llmText"]
+        assert llm_text["advice"] == "조언"
+        assert llm_text["conclusion"] == "결론"
+        assert "advice:" not in llm_text
+        assert any("saju_paper_section_keys_repaired" in r.getMessage() for r in caplog.records)
+
+    async def test_clean_keys_do_not_log_repair(self, caplog):
+        """계약대로 낸 섹션은 무소음 — 수리 로그가 신호로 남으려면 가짜 양성이 없어야 한다."""
+        with caplog.at_level("WARNING"):
+            await self._run({"summary": "요약", "advice": "조언", "conclusion": "결론"})
+        assert not [
+            r for r in caplog.records if "saju_paper_section_keys_repaired" in r.getMessage()
+        ]
+
+    async def test_missing_required_key_is_degraded_not_dropped(self):
+        """conclusion만 빠지면 섹션을 버리지 않는다 — 멀쩡한 summary·advice까지 잃는다.
+
+        대신 degraded_sections로 드러낸다(조용히 넘기지 않는 게 이 검증의 목적).
+        """
+        result = await self._run({"summary": "요약", "advice": "조언"})
+
+        assert result.success
+        assert result.metadata["sections_completed"] == 7
+        assert result.metadata["failed_sections"] == []
+        assert set(result.metadata["degraded_sections"]) == set(PAPER_V2_SECTION_KEYS)
+        assert result.data["sajuWonguk"]["llmText"]["summary"] == "요약"
+
+    async def test_no_required_key_at_all_fails_section(self):
+        """필수 키가 하나도 없으면 섹션 형태가 아니다 — 살릴 게 없으니 실패."""
+        result = await self._run({"foo": "bar"})
+
+        assert set(result.metadata["failed_sections"]) == set(PAPER_V2_SECTION_KEYS)
+        assert result.metadata["sections_completed"] == 0
+
+    async def test_blank_value_counts_as_missing(self):
+        """키만 있고 값이 공백이면 없는 것과 같다."""
+        result = await self._run({
+            "summary": "요약", "advice": "조언", "conclusion": "   ",
+        })
+
+        assert set(result.metadata["degraded_sections"]) == set(PAPER_V2_SECTION_KEYS)
 
 
 class TestSajuReportServiceCareer:

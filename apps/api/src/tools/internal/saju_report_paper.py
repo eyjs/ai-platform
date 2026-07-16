@@ -17,7 +17,13 @@ from src.observability.logging import get_logger
 from src.tools.base import ToolResult
 from src.tools.internal.hanja_normalizer import normalize_llm_text
 from src.tools.internal.saju_context_formatter import format_single_person_context
-from src.tools.internal.saju_prompts import PAPER_V2_SECTION_KEYS, get_paper_section_prompt
+from src.tools.internal.saju_prompts import (
+    PAPER_V2_SECTION_KEYS,
+    SECTION_REQUIRED_KEYS,
+    get_paper_section_prompt,
+    missing_section_keys,
+    normalize_section_keys,
+)
 
 logger = get_logger(__name__)
 
@@ -78,6 +84,8 @@ class SajuReportPaperTool:
 
         report_json: dict[str, Any] = {"$schema": "report.v2/paper"}
         failed_sections: list[str] = []
+        # 생성은 됐지만 계약상 필수 키가 일부 빠진 섹션 — 내용은 살리되 조용히 넘기지 않는다.
+        degraded_sections: list[str] = []
         completed_count = 0
 
         for section_key in PAPER_V2_SECTION_KEYS:
@@ -105,16 +113,44 @@ class SajuReportPaperTool:
                 # 보장한다. generate()+_extract_json은 모델이 규칙("순수 JSON만")을 어기면
                 # 그대로 깨졌다(실측: 7섹션 중 1~2개가 매번 실패 — 따옴표 미이스케이프,
                 # JSON 뒤 잡텍스트, JSON 자체 누락).
+                # 단, 제약 디코딩은 문법만 보장하고 키 이름은 보장하지 않는다 → 아래 검증.
                 parsed = await self._llm.generate_json(
                     prompt=user_prompt,
                     system=system_prompt,
                 )
 
+                raw_keys = set(parsed)
+                parsed = normalize_section_keys(parsed)
+                repaired = sorted(raw_keys - set(parsed))
+                if repaired:
+                    # 정규화는 값을 살리지만, 소리 없이 고치면 "모델이 프롬프트를 잘못
+                    # 읽고 있다"는 신호가 영원히 묻힌다(실측: 마크다운 불릿 '- advice:'를
+                    # 키로 베낌). 수리했다는 사실 자체를 남겨 프롬프트를 고칠 근거로 둔다.
+                    logger.warning(
+                        "saju_paper_section_keys_repaired",
+                        section=section_key,
+                        raw_keys=repaired,
+                    )
+                missing = missing_section_keys(parsed)
+                if len(missing) == len(SECTION_REQUIRED_KEYS):
+                    # 필수 키가 하나도 없다 = 섹션 형태가 아니다. 살릴 게 없으니 실패 처리.
+                    raise ValueError(f"섹션 계약 위반 — 필수 키 전무: {sorted(parsed)[:5]}")
+
                 llm_text = normalize_llm_text(parsed)
                 report_json[section_key] = {"llmText": llm_text}
                 completed_count += 1
 
-                logger.info("saju_paper_section_done", section=section_key)
+                if missing:
+                    # 일부만 빠졌으면 있는 내용은 살린다 — 통째로 버리면 멀쩡한 summary·
+                    # advice까지 잃는다. 대신 조용히 넘기지 않고 남긴다(원래 문제가 그거였다).
+                    degraded_sections.append(section_key)
+                    logger.warning(
+                        "saju_paper_section_degraded",
+                        section=section_key,
+                        missing_keys=missing,
+                    )
+                else:
+                    logger.info("saju_paper_section_done", section=section_key)
 
             except Exception as e:
                 logger.error(
@@ -141,6 +177,7 @@ class SajuReportPaperTool:
             sections_completed=completed_count,
             sections_total=total,
             failed_sections=failed_sections,
+            degraded_sections=degraded_sections,
         )
 
 
