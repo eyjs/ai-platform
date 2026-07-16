@@ -5,7 +5,7 @@ HTTP 서버 URL이 설정되면 GPU 서버를 우선 사용.
 """
 
 import logging
-from typing import Callable
+from typing import Callable, Iterable
 
 import httpx
 
@@ -33,6 +33,9 @@ class ProviderFactory:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._mode = settings.provider_mode
+        # DGX 서빙 모델 태그 집합. None = 모름(조회 실패/미주입) → 프로필 모델을 DGX 에
+        # 태우지 않는다. set_dgx_catalog 로 부트스트랩에서 채운다.
+        self._dgx_catalog: frozenset[str] | None = None
 
     @property
     def _is_local(self) -> bool:
@@ -131,6 +134,39 @@ class ProviderFactory:
             ),
             "orchestration", self._dgx_model_for("orchestration"),
         )
+
+    def set_dgx_catalog(self, names: Iterable[str]) -> None:
+        """DGX 가 실제 서빙 중인 모델 태그 집합을 주입한다(부트스트랩에서 /api/tags 조회).
+
+        None 으로 남으면 _split_model_request 는 프로필 모델을 DGX 에 태우지 않는다.
+        """
+        self._dgx_catalog = frozenset(n for n in names if n)
+
+    def _split_model_request(self, requested: str, role: str) -> tuple[str, str]:
+        """요청 모델을 (DGX 주 경로 모델, 폴백 모델)로 가른다.
+
+        관리자 UI 의 main_model 드롭다운은 DGX /api/tags 가 준 실제 태그를 넣는다. 그런
+        값만 DGX 주 경로에 태운다 — 예전엔 model_name 을 통째로 버려서 무엇을 고르든
+        dgx_main_model 로만 돌았고 선택이 장식이었다.
+
+        ★카탈로그에 있는 이름만 태우는 이유(중요):
+        get_chat_model 에 오는 값은 이미 resolve_model_alias 를 거친 결과다. development
+        모드에서 "haiku" 는 settings.router_model 인 "qwen3.5:9b" 로 풀린다 — 생김새가
+        DGX 태그와 똑같지만 DGX 엔 없는 로컬 모델명이다. 접두사/슬래시 휴리스틱으로
+        가르면 이런 값이 DGX 로 새어나가 매 요청 404("model not found") → 폴백이 되고,
+        폴백이 답을 주니 겉보기엔 멀쩡한 채 DGX 가 통째로 우회된다(실측 확인).
+        그래서 "카탈로그에 있는가"만 믿는다.
+
+        카탈로그를 모르면(조회 실패·미주입) 무조건 기본 DGX 모델 + 요청값은 폴백으로 —
+        이는 이 함수가 생기기 전의 동작과 정확히 같다. 모르면 안전한 쪽으로 판단한다.
+        """
+        default = self._dgx_model_for(role)
+        if not requested:
+            return default, ""
+        catalog = getattr(self, "_dgx_catalog", None)
+        if catalog and requested in catalog:
+            return requested, ""
+        return default, requested
 
     def _dgx_model_for(self, role: str) -> str:
         """역할별 DGX 모델. 미지정이면 dgx_main_model — 즉 전 역할이 한 모델을 공유한다.
@@ -331,8 +367,10 @@ class ProviderFactory:
         DGX 설정 시 ollama의 OpenAI 호환 엔드포인트(/v1)를 ChatOpenAI로 쓴다.
         langchain_ollama(ChatOllama)를 안 쓰는 이유: 이 이미지에 미설치이고, /v1로도
         tool calling이 정상 동작한다(qwen3.6:35b-a3b capabilities에 tools 포함).
-        model_name(로컬 MLX 자동감지 결과)은 DGX 경로에서 무시한다 — 그건 MLX 모델명이라
-        DGX에 존재하지 않는다.
+        model_name 은 _split_model_request 가 가른다: DGX 태그면 주 경로에 태우고,
+        상용 ID/MLX 경로면 DGX 에 없는 이름이라 폴백에만 넘긴다. 프로필의 main_model 을
+        관리자 UI 가 DGX /api/tags 목록에서 고르게 되면서, 고른 값이 실제로 주 경로에
+        반영되어야 하기 때문이다.
 
         ★reasoning_effort="none" 필수: qwen3.6은 thinking 모델이라 기본적으로 추론을
         content가 아닌 `reasoning` 필드로 흘린다. 그러면 LangChain이 읽는 delta.content가
@@ -348,7 +386,7 @@ class ProviderFactory:
         if s.dgx_llm_url:
             from langchain_openai import ChatOpenAI
 
-            dgx_model = self._dgx_model_for("main")
+            dgx_model, fallback_model = self._split_model_request(model_name, "main")
             primary = ChatOpenAI(
                 base_url=f"{s.dgx_llm_url.rstrip('/')}/v1",
                 api_key="not-needed", model=dgx_model, streaming=True,
@@ -369,7 +407,7 @@ class ProviderFactory:
                 "Using DGX Spark chat model (agentic, primary): %s @ %s/v1 — fallback: 현행 로컬",
                 dgx_model, s.dgx_llm_url,
             )
-            return primary.with_fallbacks([self._local_chat_model(model_name)])
+            return primary.with_fallbacks([self._local_chat_model(fallback_model)])
 
         return self._local_chat_model(model_name)
 

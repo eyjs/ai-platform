@@ -29,11 +29,15 @@ services:
     command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment: &shared-env
       AIP_DATABASE_URL: postgresql://aip:aip_dev@postgres:5432/ai_platform
-      # ── LLM 스위치(딸깍): AIP_PROVIDER_MODE 하나로 메인/에이전틱/오케스트레이터 전부 전환 ──
-      #   anthropic   = Claude Haiku (프로덕션, 키는 루트 .env에서 주입)
-      #   development = MLX (아래 MLX 블록 주석 해제 + PROVIDER_MODE=development)
-      AIP_PROVIDER_MODE: anthropic
-      AIP_ANTHROPIC_API_KEY: ${AIP_ANTHROPIC_API_KEY}
+      # ── 폴백 LLM 스위치 ── (메인 LLM 스위치가 아니다)
+      # 메인은 DGX Spark다. AIP_DGX_LLM_URL 이 설정되면 ProviderFactory._wrap_with_dgx 가
+      # 모든 역할(main/router/report/orchestration/fortune)을 DGX 우선으로 감싼다 —
+      # AIP_PROVIDER_MODE 와 무관하게. 즉 이 값은 "DGX 가 끊겼을 때 무엇으로 떨어질지"만 고른다.
+      #   development = 로컬 MLX 로 폴백 (기본. 상용 호출 0)
+      #   anthropic   = Claude 로 폴백 (테스트 전용 — 상용 키 과금됨)
+      # 예전엔 여기가 anthropic 하드코딩이라 "상용을 걷어냈다"는 인식과 배선이 어긋나 있었다.
+      AIP_PROVIDER_MODE: ${AIP_PROVIDER_MODE:-development}
+      AIP_ANTHROPIC_API_KEY: ${AIP_ANTHROPIC_API_KEY:-}
       AIP_ANTHROPIC_MAIN_MODEL: claude-haiku-4-5
       AIP_ANTHROPIC_ROUTER_MODEL: claude-haiku-4-5
       # 임베딩/리랭커는 모드와 무관하게 항상 MLX (Anthropic 임베딩 없음 + 기존 코퍼스 동일 모델)

@@ -18,6 +18,7 @@ from src.agent.profile_store import ProfileStore
 from src.config import ProviderMode, Settings
 from src.gateway.access_policy import AccessPolicyStore
 from src.gateway.auth import AuthService
+from src.gateway.concurrency_gate import ConcurrencyGate
 from src.gateway.rate_limiter import PGRateLimiter
 from src.infrastructure.fact_store import FactStore
 from src.infrastructure.job_queue import JobQueue
@@ -46,6 +47,7 @@ from src.services.null_kms_client import NullKmsClient
 from src.supervisor.authz import DelegationAuthorizer
 from src.supervisor.models import SupervisorLimits
 from src.supervisor.planner_llm import SupervisorPlanner
+from src.supervisor.sticky_guard import StickyGuardConfig
 from src.supervisor.subagent_runner import SubAgentRunner
 from src.supervisor.supervisor import Supervisor
 from src.workflow.action_client import ActionClient
@@ -78,6 +80,9 @@ class AppState:
     provider_factory: ProviderFactory
     job_queue: JobQueue
     rate_limiter: PGRateLimiter
+    # 전역 동시 실행 게이트 (프로세스 단위). 레이트리밋(사용자별 속도)과 다른 축 —
+    # 이쪽은 "지금 몇 개가 동시에 돌고 있나"의 절대 상한이다.
+    concurrency_gate: ConcurrencyGate
     tenant_service: Optional[TenantService] = None
     # Task 002 (P0-2): Supervisor 합성 결과. 미배선/구성요소 부재 시 None(안전 폴백 — 엔트리 분기 미진입).
     supervisor: Optional[Supervisor] = None
@@ -310,7 +315,38 @@ async def create_app_state(settings: Settings) -> AppState:
     # "설정은 이런데 실제 배선은 저렇다"가 한눈에 대조된다.
     _check_llm_wiring_alignment(settings)
 
+    async def _load_dgx_catalog(factory: "ProviderFactory", s) -> None:
+        """DGX 가 실제 서빙하는 모델 태그를 팩토리에 주입한다.
+
+        프로필의 main_model 을 DGX 주 경로에 태울지 판단하는 유일한 근거다. 이게 없으면
+        팩토리는 프로필 모델을 무시하고 기본 DGX 모델만 쓴다(안전한 기존 동작).
+
+        조회 실패를 치명으로 보지 않는다 — DGX 가 잠깐 안 잡혀도 부팅은 되어야 하고,
+        카탈로그를 모르면 팩토리가 알아서 보수적으로 동작한다.
+        """
+        if not s.dgx_llm_url:
+            return
+        # 함수 안에서 import 한다 — 이 감싸는 함수 안에 이미 지역 `import httpx` 가 있어
+        # httpx 가 함수 스코프 지역명이 되고, 모듈 레벨 import 를 참조하면
+        # "cannot access free variable 'httpx'" 로 죽는다(실측).
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                res = await client.get(f"{s.dgx_llm_url.rstrip('/')}/api/tags")
+                res.raise_for_status()
+                names = [m.get("name", "") for m in res.json().get("models", [])]
+            factory.set_dgx_catalog(names)
+            logger.info("dgx_catalog_loaded", count=len(names), models=names)
+        except Exception as e:
+            logger.warning(
+                "dgx_catalog_load_failed",
+                error=str(e),
+                effect="프로필 main_model 은 무시되고 dgx_main_model 로만 서빙한다",
+            )
+
     provider_factory = ProviderFactory(settings)
+    await _load_dgx_catalog(provider_factory, settings)
     embedding_provider = provider_factory.get_embedding_provider()
     router_llm = provider_factory.get_router_llm()               # 분류/라우팅(1.7B 등)
     orchestration_llm = provider_factory.get_orchestration_llm()  # 계획·재작성·확장(4B 등)
@@ -544,6 +580,16 @@ async def create_app_state(settings: Settings) -> AppState:
     rate_limiter = PGRateLimiter(pool)
     logger.info("rate_limiter_initialized")
 
+    # 13-1. 전역 동시 실행 게이트 — max_concurrent_agents를 실제 상한으로 배선한다.
+    # 이 값은 2026-07-15 진단까지 소비처가 없어 죽은 설정이었다("50까지 받는다"는
+    # 착시). 프로세스 단위 상한임을 로그에 남겨 워커 증설 시 곱셈을 놓치지 않게 한다.
+    concurrency_gate = ConcurrencyGate(settings.max_concurrent_agents)
+    logger.info(
+        "concurrency_gate_initialized",
+        limit=settings.max_concurrent_agents,
+        scope="per-process",
+    )
+
     # 14. TenantService
     tenant_service = TenantService(pool)
 
@@ -563,15 +609,26 @@ async def create_app_state(settings: Settings) -> AppState:
         # Phase 3: 단일 위임 passthrough(라우팅 파리티 — 자동 라우팅은 supervisor 전담).
         single_passthrough=settings.supervisor_single_passthrough,
     )
+    # V1 sticky 이중 가드 — 방치 세션(TTL)과 타도메인 하이재킹을 걸러낸다.
+    # 임베딩은 이미 만들어둔 provider를 재사용한다(질문·프로필 신호 유사도용).
+    supervisor_sticky_guard = StickyGuardConfig(
+        ttl_seconds=settings.sticky_ttl_seconds,
+        break_similarity=settings.sticky_break_similarity,
+        break_margin=settings.sticky_break_margin,
+    )
     supervisor = Supervisor(
         supervisor_planner, supervisor_runner, supervisor_authorizer, supervisor_limits, profile_store,
         workflow_engine=workflow_engine,
+        sticky_guard=supervisor_sticky_guard,
+        embedding_provider=embedding_provider,
     )
     logger.info(
         "supervisor_initialized",
         profile_id=settings.supervisor_profile_id,
         adaptive_replan=settings.supervisor_adaptive_replan,
         review_gate=settings.supervisor_review_gate,
+        sticky_ttl_seconds=settings.sticky_ttl_seconds,
+        sticky_break_similarity=settings.sticky_break_similarity,
     )
 
     # 15. (제거됨) 레거시 MasterOrchestrator — Phase 3 컷오버로 자동 라우팅은 supervisor가
@@ -663,6 +720,7 @@ async def create_app_state(settings: Settings) -> AppState:
         provider_factory=provider_factory,
         job_queue=job_queue,
         rate_limiter=rate_limiter,
+        concurrency_gate=concurrency_gate,
         tenant_service=tenant_service,
         supervisor=supervisor,
         provider_registry=provider_registry,
