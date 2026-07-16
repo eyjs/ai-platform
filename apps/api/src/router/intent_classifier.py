@@ -13,6 +13,8 @@ from src.domain.agent_profile import AgentProfile, IntentHint
 from src.infrastructure.providers.base import LLMProvider
 from src.locale.bundle import get_locale
 from src.domain.execution_plan import QuestionType
+from src.router.token_match import matches as token_matches
+from src.router.token_match import tokenize
 
 logger = logging.getLogger(__name__)
 
@@ -78,18 +80,31 @@ class IntentClassifier:
 
     @staticmethod
     def _detect_comparison(query: str) -> Optional[QuestionType]:
-        """비교/통합 질문 신호 — 대화 이력과 무관한 구조 신호."""
+        """비교/통합 질문 신호 — 대화 이력과 무관한 구조 신호.
+
+        V6 수정: 부분문자열 → 토큰 경계. 비교 감지는 전 계층 위로 승격돼 있어(위 2번)
+        오탐 비용이 특히 크다 — "차이" substring이 **차이나타운**에 걸려
+        "차이나타운 화재보험 있어요?"가 불필요한 다문서 비교 전략으로 승격됐다(진단 V6).
+        """
         locale = get_locale()
+        tokens = tokenize(query)
         for marker in locale.raw_patterns("comparison_markers"):
-            if marker in query:
+            if token_matches(query, marker, tokens=tokens):
                 return QuestionType.CROSS_DOC_INTEGRATION
         return None
 
     @staticmethod
     def _check_custom_intents(query: str, hints: List[IntentHint]) -> Optional[str]:
+        """커스텀 인텐트 매칭 (V4 수정: 부분문자열 → 토큰 경계).
+
+        예전엔 `pattern in query`라 flowsns-ops의 1글자 패턴 "건"이 조건·안건·건강·
+        물건에 전부 걸려 "이 조건이 궁금해요"가 TASK로 오태깅됐다(진단 V4).
+        1글자 패턴은 token_match가 로드 자체를 거부한다.
+        """
+        tokens = tokenize(query)
         for hint in hints:
             for pattern in hint.patterns:
-                if pattern in query:
+                if token_matches(query, pattern, tokens=tokens):
                     return hint.name
         return None
 

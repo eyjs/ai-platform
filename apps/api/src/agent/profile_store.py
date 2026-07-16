@@ -14,6 +14,7 @@ import yaml
 from src.domain.models import AgentMode
 from src.domain.agent_profile import AgentProfile, HybridTrigger, IntentHint, ToolRef
 from src.observability.logging import get_logger
+from src.router.token_match import MIN_PATTERN_LENGTH, is_valid_pattern
 
 logger = get_logger(__name__)
 
@@ -216,6 +217,31 @@ class ProfileStore:
             patterns = [single]
         if not isinstance(patterns, list):
             patterns = [patterns]
+
+        # 1글자 패턴 거부(진단 V4): "건" 하나가 조건·안건·건강·물건에 전부 걸려
+        # "이 조건이 궁금해요"를 TASK로 오태깅했다. 토큰 경계 매칭으로도 못 막는다 —
+        # '조건'이 한 토큰이라 꼬리 규칙이 통하지 않는다. 그래서 로드에서 걷어낸다.
+        # 조용히 버리면 작성자가 패턴이 죽은 줄 모르므로 반드시 남긴다.
+        too_short = [p for p in patterns if not is_valid_pattern(str(p))]
+        if too_short:
+            kept = [p for p in patterns if is_valid_pattern(str(p))]
+            logger.warning(
+                "intent_hint_patterns_rejected",
+                profile_id=profile_id,
+                hint=name,
+                patterns=too_short,
+                remaining=len(kept),
+                reason=f"{MIN_PATTERN_LENGTH}글자 미만은 오탐만 만든다 — 더 긴 표현으로 바꿀 것",
+            )
+            if not kept:
+                # 남는 패턴이 없으면 이 인텐트는 영영 매칭되지 않는다 — 오탐을 막으려다
+                # 인텐트를 통째로 죽이는 건 다른 종류의 사고다. 조용히 넘기지 않는다.
+                raise ValueError(
+                    f"intent_hint '{name}' in profile '{profile_id}': 모든 패턴이 "
+                    f"{MIN_PATTERN_LENGTH}글자 미만({too_short})이라 이 인텐트는 매칭될 수 "
+                    f"없다. 더 긴 표현으로 바꿀 것."
+                )
+            patterns = kept
 
         return IntentHint(
             name=name,
