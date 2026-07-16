@@ -222,12 +222,12 @@ class Settings(BaseSettings):
     dgx_router_model: str = ""
     dgx_orchestrator_model: str = ""
     dgx_fortune_model: str = ""
-    # 로컬 MLX 폴백 사용 여부. False(기본) = DGX 단독 — 로컬 LLM 서버 의존을 걷어낸다.
-    # True면 DGX 단절 시 현행 로컬 구조로 자동 폴백(FailoverLLMProvider).
-    # 끄는 이유: 로컬 MLX가 맥 메모리를 상시 점유하고, 8104(리포트용 14B)는 이미
-    # 죽어 있어(unicode-escape 전건 실패) 폴백이 명목뿐이었다.
-    # 대가: DGX(Tailscale) 단절 = 전 LLM 경로 정지. 되살리려면 이 값을 true로.
-    dgx_local_fallback: bool = False
+    # 로컬 MLX 폴백 사용 여부. True(기본) = DGX 단절 시 현행 로컬 구조로 자동 폴백
+    # (FailoverLLMProvider). 로컬 MLX LLM 서버(8104 리포트·8105 라우터·8106 메인/무료)는
+    # 폴백으로 상시 기동해 두는 것이 운영 기준 — 맥 메모리를 점유하는 대가로 DGX·Tailscale
+    # 단절이 전 LLM 정지로 번지지 않게 한다.
+    # False로 두면 DGX 단독 = 단절 시 라우팅·생성·리포트가 동시에 멈춘다.
+    dgx_local_fallback: bool = True
 
     # 최종 답변(main) LLM만 백엔드 강제 오버라이드. ""=provider_mode 따름.
     # "anthropic"이면 판단 레이어(라우터·플래너)는 로컬 유지, 생성만 상용 —

@@ -46,8 +46,8 @@ services:
       AIP_DGX_ROUTER_MODEL: ${AIP_DGX_ROUTER_MODEL:-}
       AIP_DGX_ORCHESTRATOR_MODEL: ${AIP_DGX_ORCHESTRATOR_MODEL:-}
       AIP_DGX_FORTUNE_MODEL: ${AIP_DGX_FORTUNE_MODEL:-}
-      # false(기본)=DGX 단독, 로컬 MLX 의존 걷어냄. true=DGX 단절 시 로컬 폴백.
-      AIP_DGX_LOCAL_FALLBACK: ${AIP_DGX_LOCAL_FALLBACK:-false}
+      # true(기본)=DGX 단절 시 로컬 MLX 폴백. 로컬 LLM 서버는 폴백용으로 상시 기동이 운영 기준.
+      AIP_DGX_LOCAL_FALLBACK: ${AIP_DGX_LOCAL_FALLBACK:-true}
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       # 하이브리드: 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). get_local_llm 전용 변수.
