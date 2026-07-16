@@ -42,8 +42,11 @@ class Supervisor:
         limits: SupervisorLimits,
         profile_store,
         workflow_engine=None,
+        sticky_guard=None,
+        embedding_provider=None,
     ) -> None:
         # sticky 감지용(진행 중 서브 워크플로우 우선 재위임). 미주입 시 sticky 비활성.
+        # sticky_guard/embedding_provider 미주입 시 이중 가드(V1)만 꺼진다 — sticky 자체는 동작.
         self._graph = build_supervisor_graph(
             planner=planner,
             runner=runner,
@@ -51,6 +54,8 @@ class Supervisor:
             limits=limits,
             profile_store=profile_store,
             workflow_engine=workflow_engine,
+            sticky_guard=sticky_guard,
+            embedding_provider=embedding_provider,
         )
 
     @staticmethod

@@ -43,6 +43,12 @@ from src.supervisor.models import DelegationStep, SubAgentResult, SupervisorLimi
 from src.supervisor.planner_llm import SupervisorPlanner
 from src.supervisor.scoped_context import derive_scoped_context
 from src.supervisor.state import SupervisorState
+from src.supervisor.sticky_guard import (
+    StickyGuardConfig,
+    is_session_stale,
+    profile_signal_text,
+    should_break_sticky,
+)
 from src.supervisor.subagent_runner import SubAgentRunner
 
 logger = get_logger(__name__)
@@ -157,13 +163,55 @@ def _create_resolve_scope(authorizer: DelegationAuthorizer, profile_store):
     return resolve_scope
 
 
-def _create_detect_sticky(authorizer: DelegationAuthorizer, workflow_engine):
-    """진행 중인 서브 워크플로우 탐지 (sticky delegation).
+def _create_detect_sticky(
+    authorizer: DelegationAuthorizer,
+    workflow_engine,
+    guard_cfg: StickyGuardConfig | None = None,
+    embedding_provider=None,
+):
+    """진행 중인 서브 워크플로우 탐지 (sticky delegation) + 이중 가드(V1).
 
     워크플로우 세션은 스코프 세션 id(`{parent}::sub::{profile}`)로 결정적으로
     파생되므로, 별도 상태 저장 없이 workflow engine이 곧 정본이다.
     결정권은 메인에 있다 — 서브가 요청하는 게 아니라 메인이 감지해 재위임한다(§0-5).
+
+    가드(진단 V1 "sticky 하이재킹"):
+      ① TTL — 방치된 세션은 놓는다.
+      ② 비대칭 관련성 — 다른 도메인이라는 강한 증거가 있을 때만 깬다.
+         (기본은 유지. 이유는 sticky_guard 모듈 docstring 참조 — 중간 발화 보존)
+    guard_cfg나 embedding_provider가 없으면 해당 가드는 건너뛴다(구버전 배선 무영향).
     """
+    # 프로필 신호 임베딩 캐시 — 프로필은 자주 안 바뀌는데 매 턴 재임베딩하면 낭비다.
+    # 텍스트를 키로 두면 프로필이 바뀌었을 때 자동으로 무효화된다.
+    signal_cache: dict[str, list[float]] = {}
+
+    async def _embed_signal(text: str) -> list[float]:
+        if text not in signal_cache:
+            vecs = await embedding_provider.embed_batch([text])
+            signal_cache[text] = list(vecs[0]) if vecs else []
+        return signal_cache[text]
+
+    async def _hijack_evidence(state: SupervisorState, sticky_profile) -> tuple[bool, dict]:
+        """sticky를 깰 만한 '다른 도메인' 증거가 있는지."""
+        sticky_text = profile_signal_text(sticky_profile)
+        if not sticky_text:
+            return False, {"skipped": "sticky 프로필 신호 없음"}
+
+        allowed = state["allowed"]
+        rivals = {
+            p.id: profile_signal_text(p)
+            for p in state["all_profiles"]
+            if p.id not in (state["supervisor_id"], sticky_profile.id)
+            and authorizer.is_delegation_allowed(allowed, p.id)
+        }
+        rivals = {pid: t for pid, t in rivals.items() if t}
+        if not rivals:
+            return False, {"skipped": "경합 프로필 없음"}
+
+        q_vec = await _embed_signal(state["question"])
+        sticky_vec = await _embed_signal(sticky_text)
+        rival_vecs = {pid: await _embed_signal(t) for pid, t in rivals.items()}
+        return should_break_sticky(q_vec, sticky_vec, rival_vecs, guard_cfg)
 
     async def detect_sticky(state: SupervisorState) -> dict:
         if not workflow_engine:
@@ -179,8 +227,33 @@ def _create_detect_sticky(authorizer: DelegationAuthorizer, workflow_engine):
                 session = await workflow_engine.get_session(scoped_id)
             except Exception:  # noqa: BLE001 - sticky 탐지 실패는 일반 경로로 degrade
                 continue
-            if session and not getattr(session, "completed", True):
-                return {"sticky_profile": p.id}
+            if not session or getattr(session, "completed", True):
+                continue
+
+            # ① TTL — 방치 세션이 이후 모든 턴을 삼키는 것을 막는다.
+            if guard_cfg and is_session_stale(
+                getattr(session, "started_at", 0.0) or 0.0, guard_cfg.ttl_seconds,
+            ):
+                logger.info(
+                    "sticky_released_stale",
+                    profile=p.id,
+                    ttl_seconds=guard_cfg.ttl_seconds,
+                    hint="세션이 방치됨 — decompose로 보낸다",
+                )
+                continue
+
+            # ② 비대칭 관련성 — 강한 반증이 있을 때만 깬다(없으면 유지가 기본).
+            if guard_cfg and embedding_provider is not None:
+                try:
+                    breaks, evidence = await _hijack_evidence(state, p)
+                except Exception as e:  # noqa: BLE001 - 가드 실패가 sticky를 죽이면 안 된다
+                    logger.warning("sticky_guard_error", profile=p.id, error=repr(e))
+                    breaks, evidence = False, {"error": repr(e)}
+                if breaks:
+                    logger.info("sticky_released_hijack", profile=p.id, **evidence)
+                    continue
+
+            return {"sticky_profile": p.id}
         return {"sticky_profile": None}
 
     return detect_sticky
@@ -573,16 +646,24 @@ def build_supervisor_graph(
     limits: SupervisorLimits,
     profile_store,
     workflow_engine=None,
+    sticky_guard: StickyGuardConfig | None = None,
+    embedding_provider=None,
 ):
     """Supervisor 위임 그래프를 빌드·컴파일한다.
 
     체크포인터는 아직 붙이지 않는다(단일 요청 in-memory). 붙일 때
     상태 직렬화 경계를 함께 재설계한다.
+
+    sticky_guard/embedding_provider 미지정 시 sticky 이중 가드(V1)는 꺼진다 —
+    가드 없이도 기존 동작 그대로라 배선하지 않은 환경(일부 테스트)이 깨지지 않는다.
     """
     workflow = StateGraph(SupervisorState)
 
     workflow.add_node("resolve_scope", _create_resolve_scope(authorizer, profile_store))
-    workflow.add_node("detect_sticky", _create_detect_sticky(authorizer, workflow_engine))
+    workflow.add_node(
+        "detect_sticky",
+        _create_detect_sticky(authorizer, workflow_engine, sticky_guard, embedding_provider),
+    )
     workflow.add_node("sticky_delegate", _create_sticky_delegate(runner, limits))
     workflow.add_node("decompose", _create_decompose(planner, limits))
     workflow.add_node("delegate", _create_delegate(runner, limits))
