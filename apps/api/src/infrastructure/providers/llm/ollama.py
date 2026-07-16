@@ -12,13 +12,26 @@ logger = logging.getLogger(__name__)
 
 _STOP_TOKENS = ["<|im_start|>", "<|im_end|>", "<|endoftext|>"]
 
+# 컨텍스트 크기는 **서버가 정한다**(ollama의 OLLAMA_CONTEXT_LENGTH). 클라이언트가
+# options.num_ctx로 덮지 않는다 — 그게 2026-07-16에 잡은 사고의 원인이다.
+#
+# ollama는 요청한 컨텍스트 크기별로 러너를 따로 띄운다. 우리는 두 표면을 쓰는데
+# (OllamaProvider → /api/chat, agentic ChatOpenAI → ollama의 /v1 shim), 여기서만
+# num_ctx=16384를 보내는 바람에 **매 턴 두 러너를 오가며 29.8GB 모델을 리로드**했다.
+# 실측: /v1 0.55s → /api/chat(num_ctx) 7.17s → /v1 6.87s → /api/chat 6.94s.
+# 리로드가 planner_timeout(5s)을 넘겨 의도 분류가 조용히 STANDALONE으로 폴백했다.
+# num_ctx를 빼자 두 표면이 한 러너를 공유한다.
+#
+# 아래 값은 **선언용 메타데이터일 뿐**이다(ProviderCapability.max_context). 이 값으로
+# 프롬프트를 잘라내는 곳은 없다(전수 확인). 진짜 상한은 DGX의 OLLAMA_CONTEXT_LENGTH다.
+_DECLARED_MAX_CONTEXT = 128 * 1024
+
 
 class OllamaProvider(LLMProvider):
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen3:8b",
-        num_ctx: int = 16384,
         system_prefix: str = "",
         connect_timeout: float = 5.0,
         read_timeout: float | None = 120.0,
@@ -26,7 +39,6 @@ class OllamaProvider(LLMProvider):
     ):
         self._base_url = base_url.rstrip("/")
         self._model = model
-        self._num_ctx = num_ctx
         self._system_prefix = system_prefix
         # 호출부가 max_tokens를 안 주면 쓰는 기본 상한. HttpLLMProvider와 같은 의미 —
         # 폴백(Http)만 상한이 걸리고 primary(여기)는 무제한이 되는 비대칭을 막는다.
@@ -50,7 +62,7 @@ class OllamaProvider(LLMProvider):
             provider_id="ollama",
             supports_tool_use=False,
             supports_streaming=True,
-            max_context=self._num_ctx,
+            max_context=_DECLARED_MAX_CONTEXT,
             cost_per_1k_tokens=0.0,
             stub=False,
         )
@@ -69,7 +81,7 @@ class OllamaProvider(LLMProvider):
         system_msg = self._build_system(
             self._combine_system(system, cacheable_system, volatile_system)
         )
-        options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
+        options = {"stop": _STOP_TOKENS}
         effective_max = max_tokens if max_tokens is not None else self._max_tokens
         if effective_max is not None:
             options["num_predict"] = effective_max
@@ -106,7 +118,7 @@ class OllamaProvider(LLMProvider):
                 "stream": False,
                 "think": False,
                 "format": "json",
-                "options": {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS},
+                "options": {"stop": _STOP_TOKENS},
             },
         )
         response.raise_for_status()
@@ -122,7 +134,7 @@ class OllamaProvider(LLMProvider):
         system_msg = self._build_system(
             self._combine_system(system, cacheable_system, volatile_system)
         )
-        stream_options = {"num_ctx": self._num_ctx, "stop": _STOP_TOKENS}
+        stream_options = {"stop": _STOP_TOKENS}
         if max_tokens is not None:
             stream_options["num_predict"] = max_tokens
         async with self._client.stream(

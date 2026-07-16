@@ -60,7 +60,10 @@ class Settings(BaseSettings):
 
     # Ollama 폴백 (MLX 서버 미실행 시)
     ollama_host: str = "http://localhost:11434"
-    ollama_num_ctx: int = 16384
+    # ollama_num_ctx 제거(2026-07-16): 컨텍스트 크기는 서버가 정한다
+    # (OLLAMA_CONTEXT_LENGTH). 클라이언트가 덮으면 ollama가 크기별로 러너를 따로
+    # 띄워, /api/chat(num_ctx)과 agentic /v1(num_ctx 없음)이 매 턴 서로를 밀어내며
+    # 29.8GB 모델을 리로드했다(실측 7s/회). 자세한 근거는 llm/ollama.py 상단.
     router_model: str = "qwen3.5:9b"
     main_model: str = "qwen3.5:27b"
     dev_embedding_model: str = "dragonkue/BGE-m3-ko"

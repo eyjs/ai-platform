@@ -184,7 +184,6 @@ class ProviderFactory:
         primary = OllamaProvider(
             base_url=self._settings.dgx_llm_url,
             model=model,
-            num_ctx=self._settings.ollama_num_ctx,
             system_prefix=get_locale().prompt("llm_system_prefix"),
             # 원격 DGX가 다운되면 짧은 connect 타임아웃으로 즉시 감지 → 로컬 폴백.
             # read는 무제한(None) — 복잡한 쿼리 생성이 수 분~수십 분 걸려도 자르지
@@ -284,7 +283,7 @@ class ProviderFactory:
 
         return OllamaProvider(
             base_url=self._settings.ollama_host, model=local_model,
-            num_ctx=self._settings.ollama_num_ctx, system_prefix=system_prefix,
+            system_prefix=system_prefix,
         )
 
     def get_chat_model(self, model_name: str = ""):
