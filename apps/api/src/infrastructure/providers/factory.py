@@ -335,22 +335,47 @@ class ProviderFactory:
         content가 아닌 `reasoning` 필드로 흘린다. 그러면 LangChain이 읽는 delta.content가
         계속 비어 agent_timeout_seconds(30s) 안에 토큰이 0개가 되고 챗이 통째로 죽는다.
         네이티브 API의 think:false는 /v1에서 무시되고(실측), reasoning_effort만 먹는다.
+
+        폴백은 LLMProvider 경로(_wrap_with_dgx)와 기전이 다르다. 여긴 langchain
+        Runnable이라 with_fallbacks()를 쓴다 — create_react_agent가 넘겨받아
+        bind_tools()를 호출해도 RunnableWithFallbacks가 primary·fallback 양쪽에
+        도구를 바인딩해 되감으므로 폴백이 유지된다(실측).
         """
         s = self._settings
         if s.dgx_llm_url:
             from langchain_openai import ChatOpenAI
 
             dgx_model = self._dgx_model_for("main")
-            logger.info(
-                "Using DGX Spark chat model (agentic): %s @ %s/v1 (reasoning off)",
-                dgx_model, s.dgx_llm_url,
-            )
-            return ChatOpenAI(
+            primary = ChatOpenAI(
                 base_url=f"{s.dgx_llm_url.rstrip('/')}/v1",
                 api_key="not-needed", model=dgx_model, streaming=True,
                 reasoning_effort="none",
+                # connect만 짧게, read는 무제한 — OllamaProvider와 같은 이유다(다운은
+                # 즉시 감지, 긴 생성은 끝까지 대기). max_retries=0: openai 클라이언트
+                # 기본 2회 재시도가 붙으면 DGX 다운 시 폴백이 그만큼 늦어진다.
+                timeout=httpx.Timeout(None, connect=3.0),
+                max_retries=0,
             )
+            if not s.dgx_local_fallback:
+                logger.info(
+                    "Using DGX Spark chat model (agentic, DGX 단독): %s @ %s/v1 — 로컬 폴백 없음",
+                    dgx_model, s.dgx_llm_url,
+                )
+                return primary
+            logger.info(
+                "Using DGX Spark chat model (agentic, primary): %s @ %s/v1 — fallback: 현행 로컬",
+                dgx_model, s.dgx_llm_url,
+            )
+            return primary.with_fallbacks([self._local_chat_model(model_name)])
 
+        return self._local_chat_model(model_name)
+
+    def _local_chat_model(self, model_name: str = ""):
+        """DGX를 뺀 현행(로컬 MLX/ollama/상용) langchain BaseChatModel.
+
+        DGX 경로의 폴백으로도 쓰이므로 단독 호출 가능해야 한다.
+        """
+        s = self._settings
         backend = self._llm_backend(s.main_llm_server_url)
 
         if backend == "http":

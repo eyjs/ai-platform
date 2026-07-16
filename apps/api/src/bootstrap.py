@@ -348,9 +348,11 @@ async def create_app_state(settings: Settings) -> AppState:
             chat_model_name = settings.anthropic_main_model
         else:
             chat_model_name = settings.main_model
-        # DGX 사용 시 자동감지 생략 — 감지 대상은 로컬 MLX 모델명이라 DGX엔 없는 이름이다.
-        # (get_chat_model도 DGX 경로에선 model_name을 무시한다.)
-        if settings.main_llm_server_url and not settings.dgx_llm_url:
+        # 자동감지는 로컬 MLX 서버에 "지금 뜬 모델명"을 묻는 것이라 로컬 경로를 쓸 때만
+        # 의미가 있다. DGX 단독(폴백 off)이면 model_name을 아무도 안 쓰므로 생략하고,
+        # 폴백이 켜져 있으면 그 이름이 폴백 chat model로 들어가니 반드시 감지해야 한다.
+        needs_local_model_name = not settings.dgx_llm_url or settings.dgx_local_fallback
+        if settings.main_llm_server_url and needs_local_model_name:
             try:
                 import httpx
                 async with httpx.AsyncClient(timeout=5.0) as client:
