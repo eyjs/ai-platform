@@ -62,6 +62,34 @@ async def test_cooldown_expiry_retries_primary():
 
 
 @pytest.mark.asyncio
+async def test_recovery_is_logged_once(caplog):
+    """복구 로그가 없으면 저품질(폴백 모델) 구간의 끝을 특정할 수 없다.
+
+    전이일 때만 남긴다 — 이후 정상 호출은 무소음이어야 한다.
+    """
+    p = _Fake("dgx", fail_with=httpx.ConnectError("down"))
+    f = _Fake("local")
+    prov = FailoverLLMProvider(p, f, cooldown_seconds=0.0, label="main")
+
+    await prov.generate("q")          # 폴백 발동
+    p._fail = None
+    with caplog.at_level("INFO"):
+        await prov.generate("q")      # 복귀 — 로그 1회
+        await prov.generate("q")      # 이후 정상 — 무소음
+    recovered = [r for r in caplog.records if "llm_failover_recovered" in r.getMessage()]
+    assert len(recovered) == 1
+
+
+@pytest.mark.asyncio
+async def test_healthy_primary_never_logs_recovery(caplog):
+    """폴백을 탄 적 없으면 복구 로그도 없다(가짜 전이 금지)."""
+    prov = FailoverLLMProvider(_Fake("dgx"), _Fake("local"))
+    with caplog.at_level("INFO"):
+        await prov.generate("q")
+    assert not [r for r in caplog.records if "llm_failover_recovered" in r.getMessage()]
+
+
+@pytest.mark.asyncio
 async def test_non_availability_error_propagates():
     """논리 오류(4xx 등)는 폴백해도 같은 결과 — 전파한다."""
     p = _Fake("dgx", fail_with=ValueError("bad prompt"))

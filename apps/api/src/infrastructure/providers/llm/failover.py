@@ -72,6 +72,16 @@ class FailoverLLMProvider(LLMProvider):
             cooldown_seconds=self._cooldown,
         )
 
+    def _mark_primary_ok(self) -> None:
+        """primary 성공. 폴백 중이었다면 복귀를 남긴다.
+
+        복구 로그가 없으면 "언제 폴백에서 빠져나왔는지"를 알 수 없어, 저품질(폴백 모델)
+        구간의 끝을 특정하지 못한다. 전이일 때만 남긴다 — 정상 호출은 무소음.
+        """
+        if self._primary_failed_at:
+            self._primary_failed_at = 0.0
+            logger.info("llm_failover_recovered", label=self._label)
+
     def _should_failover(self, exc: Exception) -> bool:
         return isinstance(exc, _FAILOVER_ERRORS) or _is_failover_status(exc)
 
@@ -87,7 +97,9 @@ class FailoverLLMProvider(LLMProvider):
     async def generate(self, prompt: str, system: str = "", **kwargs) -> str:
         if self._primary_available:
             try:
-                return await self._primary.generate(prompt, system=system, **kwargs)
+                result = await self._primary.generate(prompt, system=system, **kwargs)
+                self._mark_primary_ok()
+                return result
             except Exception as e:  # noqa: BLE001 - 폴백 대상만 전환, 나머지 전파
                 if not self._should_failover(e):
                     raise
@@ -97,7 +109,9 @@ class FailoverLLMProvider(LLMProvider):
     async def generate_json(self, prompt: str, system: str = "", **kwargs) -> dict:
         if self._primary_available:
             try:
-                return await self._primary.generate_json(prompt, system=system, **kwargs)
+                result = await self._primary.generate_json(prompt, system=system, **kwargs)
+                self._mark_primary_ok()
+                return result
             except Exception as e:  # noqa: BLE001
                 if not self._should_failover(e):
                     raise
@@ -122,6 +136,7 @@ class FailoverLLMProvider(LLMProvider):
                 ):
                     emitted = True
                     yield chunk
+                self._mark_primary_ok()
                 return
             except Exception as e:  # noqa: BLE001
                 # 첫 청크 이전의 가용성 실패만 폴백 — 부분 출력 후엔 전파(중복 방지)
