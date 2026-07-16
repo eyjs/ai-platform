@@ -34,6 +34,11 @@ async def health(request: Request):
     link_monitor = getattr(request.app.state, "link_monitor", None)
     if link_monitor:
         payload["links"] = link_monitor.status
+    # 전역 동시 실행 상한 — 상한이 실제로 물리는지(rejected_total) 밖에서 보이게 한다.
+    # 이 값이 죽은 설정이었을 때 아무도 용량 한계를 몰랐다는 게 문제의 시작이었다.
+    gate = getattr(state, "concurrency_gate", None)
+    if gate:
+        payload["concurrency"] = gate.snapshot()
     return payload
 
 

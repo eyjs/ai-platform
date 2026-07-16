@@ -12,11 +12,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import HTTPException, Request
+from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 
 from src.domain.agent_context import AgentContext
 from src.domain.models import AgentMode, SearchScope
 from src.gateway.auth import AuthError
 from src.gateway.models import ChatRequest, UserContext
+from src.gateway.concurrency_gate import RETRY_AFTER_SECONDS
 from src.gateway.rate_limiter import build_client_id
 from src.infrastructure.db.tenant_context import current_tenant
 from src.infrastructure.memory.memory_extractor import MemoryExtractor
@@ -172,6 +174,31 @@ async def _check_rate_limit(
         client_id=client_id,
         rate_limit_per_min=user_ctx.rate_limit_per_min,
     )
+
+
+def _acquire_agent_slot(request: Request) -> None:
+    """전역 동시 실행 슬롯을 잡는다. 상한 초과면 503 + Retry-After로 즉시 거부한다.
+
+    레이트리밋(사용자별 속도)과 다른 축이다 — 각자 한도 내에 있어도 전부 합치면
+    프로세스가 감당 못 하는 수가 될 수 있고, 그때 PG 풀·LLM 큐가 먼저 무너진다.
+
+    **해제 책임은 호출자에게 있다.** 잡았으면 반드시 _release_agent_slot을 부른다
+    (비스트리밍은 finally, 스트리밍은 제너레이터 finally — 슬롯은 스트림이 끝날 때까지
+    점유돼야 하므로 핸들러 반환 시점에 놓으면 상한이 무의미해진다).
+    """
+    gate = _get_app_state(request).concurrency_gate
+    if gate.try_acquire():
+        return
+    raise HTTPException(
+        status_code=HTTP_503_SERVICE_UNAVAILABLE,
+        detail="서버가 처리 가능한 동시 요청 수를 초과했습니다. 잠시 후 다시 시도해 주세요.",
+        headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
+    )
+
+
+def _release_agent_slot(request: Request) -> None:
+    """_acquire_agent_slot으로 잡은 슬롯을 놓는다."""
+    _get_app_state(request).concurrency_gate.release()
 
 
 def _is_supervisor_request(chatbot_id: str | None, state) -> bool:

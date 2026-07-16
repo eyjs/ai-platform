@@ -27,6 +27,7 @@ import pytest
 
 from src.domain.agent_profile import AgentProfile
 from src.domain.models import SourceRef
+from src.gateway.concurrency_gate import ConcurrencyGate
 from src.gateway.models import ChatRequest, UserContext
 from src.gateway.routes import chat as chat_module
 from src.supervisor.authz import DelegationAuthorizer
@@ -184,7 +185,10 @@ def _make_state(supervisor: Supervisor) -> SimpleNamespace:
     session_memory = AsyncMock()
     session_memory.get_turns.return_value = []
 
-    return SimpleNamespace(settings=settings, supervisor=supervisor, session_memory=session_memory)
+    return SimpleNamespace(
+        settings=settings, supervisor=supervisor, session_memory=session_memory,
+        concurrency_gate=ConcurrencyGate(limit=100),
+    )
 
 
 def _make_request(state) -> MagicMock:

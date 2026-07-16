@@ -27,6 +27,7 @@ from src.domain.agent_context import AgentContext
 from src.domain.agent_profile import AgentProfile
 from src.domain.execution_plan import ExecutionPlan
 from src.domain.models import AgentMode, AgentResponse, SearchScope
+from src.gateway.concurrency_gate import ConcurrencyGate
 from src.gateway.models import ChatRequest, UserContext
 from src.gateway.routes import chat as chat_module
 from src.gateway.routes.helpers import _is_supervisor_request, _prepare_chat
@@ -92,6 +93,7 @@ def _make_full_state(
         agent=agent,
         request_log_service=None,
         response_cache_service=None,
+        concurrency_gate=ConcurrencyGate(limit=100),
     )
 
 

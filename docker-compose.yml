@@ -48,6 +48,10 @@ services:
       AIP_DGX_FORTUNE_MODEL: ${AIP_DGX_FORTUNE_MODEL:-}
       # true(기본)=DGX 단절 시 로컬 MLX 폴백. 로컬 LLM 서버는 폴백용으로 상시 기동이 운영 기준.
       AIP_DGX_LOCAL_FALLBACK: ${AIP_DGX_LOCAL_FALLBACK:-true}
+      # 전역 동시 실행 상한(프로세스 단위). 초과 요청은 503 + Retry-After로 즉시 거부한다.
+      # ⚠️ uvicorn workers를 늘리면 실효 상한이 워커 수만큼 곱해진다 — 그때는 이 값을 나눌 것.
+      # 0/음수 = 무제한(게이트 끔).
+      AIP_MAX_CONCURRENT_AGENTS: ${AIP_MAX_CONCURRENT_AGENTS:-50}
       AIP_EMBEDDING_SERVER_URL: http://host.docker.internal:8103
       AIP_RERANKER_SERVER_URL: http://host.docker.internal:8102
       # 하이브리드: 무료 콘텐츠 전용 로컬 MLX(8106=Qwen3.5-9B). get_local_llm 전용 변수.
@@ -148,6 +152,10 @@ services:
       AIP_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private.pem
       AIP_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public.pem
       AIP_JWT_HS256_FALLBACK: "true"
+      # 관리자 UI 의 main_model 드롭다운 후보를 DGX(ollama)에서 직접 읽는다.
+      # api 와 같은 값을 봐야 한다 — 어긋나면 UI 가 서빙되지 않는 모델을 권한다.
+      AIP_DGX_LLM_URL: ${AIP_DGX_LLM_URL:-}
+      AIP_DGX_MAIN_MODEL: ${AIP_DGX_MAIN_MODEL:-qwen3.6:35b-a3b}
       CORS_ORIGIN: "http://localhost:3000,https://ai-platform-eight-sigma.vercel.app"
     depends_on:
       postgres:

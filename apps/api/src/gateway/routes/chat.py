@@ -17,12 +17,14 @@ from src.gateway.gateway_hooks import (
 from src.gateway.models import ChatRequest, UserContext
 from src.gateway.routes.helpers import (
     _authenticate,
+    _acquire_agent_slot,
     _check_rate_limit,
     _ChatSetup,
     _get_app_state,
     _is_supervisor_request,
     _prepare_chat,
     _prepare_chat_fast,
+    _release_agent_slot,
     _save_extracted_memories,
     decrement_active,
     increment_active,
@@ -275,6 +277,7 @@ async def _run_supervisor_chat_stream(
             except ValueError:
                 pass  # 다른 Context에서 생성된 토큰(SSE 제너레이터는 별도 Task에서 실행)
             decrement_active()
+            _release_agent_slot(request)
 
     return EventSourceResponse(event_generator())
 
@@ -284,6 +287,8 @@ async def chat(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+    # 인증·레이트리밋 통과 후 전역 상한. 여기서 503이면 이 요청은 실행되지 않는다.
+    _acquire_agent_slot(request)
 
     if _is_supervisor_request(req.chatbot_id, state):
         # Supervisor 엔트리 분기(task-002, §0-2) — 이하 직접 모드/오케스트레이터 경로는 타지 않는다.
@@ -292,6 +297,7 @@ async def chat(req: ChatRequest, request: Request):
             return await _run_supervisor_chat(req, state, user_ctx, request)
         finally:
             decrement_active()
+            _release_agent_slot(request)
 
     setup: Optional[_ChatSetup] = None
 
@@ -411,6 +417,7 @@ async def chat(req: ChatRequest, request: Request):
         if setup:
             request_context.reset(setup.ctx_token)
         decrement_active()
+        _release_agent_slot(request)
 
 
 @router.post("/chat/stream")
@@ -418,6 +425,9 @@ async def chat_stream(req: ChatRequest, request: Request):
     state = _get_app_state(request)
     user_ctx = await _authenticate(request)
     await _check_rate_limit(request, user_ctx, sub_key=req.session_id)
+    # 전역 상한. 슬롯은 활성 카운트와 같은 수명 — 스트림이 끝나는 제너레이터 finally에서
+    # 놓는다. 핸들러 반환 시점에 놓으면 스트리밍 중인 요청이 슬롯을 안 물어 상한이 무의미해진다.
+    _acquire_agent_slot(request)
 
     if _is_supervisor_request(req.chatbot_id, state):
         # Supervisor 엔트리 분기(task-002, §0-2) — 이하 직접 모드/오케스트레이터 경로는 타지 않는다.
@@ -452,6 +462,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 ),
             )
         decrement_active()
+        _release_agent_slot(request)
         raise
     except Exception as e:
         logger.error("chat_stream_setup_error", error=str(e), exc_info=True)
@@ -471,6 +482,7 @@ async def chat_stream(req: ChatRequest, request: Request):
                 ),
             )
         decrement_active()
+        _release_agent_slot(request)
         raise HTTPException(status_code=500, detail="Internal server error")
 
     # 메모리 추출 대상 프로필 조회
@@ -667,5 +679,6 @@ async def chat_stream(req: ChatRequest, request: Request):
             except ValueError:
                 pass  # 다른 Context에서 생성된 토큰
             decrement_active()
+            _release_agent_slot(request)
 
     return EventSourceResponse(event_generator())
