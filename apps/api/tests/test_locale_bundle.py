@@ -154,20 +154,7 @@ class TestPatternAccessors:
         assert all(isinstance(p, re.Pattern) for p in patterns)
         assert patterns[0].search("안녕하세요")
 
-    def test_compiled_pattern_single(self, bundle):
-        pattern = bundle.compiled_pattern("tokenize")
-        assert isinstance(pattern, re.Pattern)
-        assert pattern.findall("안녕하세요 hello")
-
-    def test_compiled_pattern_missing(self, bundle):
-        assert bundle.compiled_pattern("nonexistent") is None
-
-    def test_pattern_set(self, bundle):
-        keywords = bundle.pattern_set("escape_keywords")
-        assert keywords == {"취소", "나가기", "exit"}
-
-    def test_pattern_set_missing(self, bundle):
-        assert bundle.pattern_set("nonexistent") == set()
+    # compiled_pattern(단수)·pattern_set accessor는 2026-07-20 제거(소비처 0).
 
 
 # --- 대명사 패턴 ---

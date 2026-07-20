@@ -31,6 +31,55 @@ def _make_history():
     ]
 
 
+class TestProfileSignalInjection:
+    """★재설계 핵심: 분류 LLM이 프로필 신호를 컨텍스트로 받는다 (RAG처럼).
+
+    "이 챗봇이 뭘 하는지" 알아야 "이 특약 기능이 뭐죠?"를 도메인 질문(STANDALONE)으로
+    보고 챗봇 기능 질문(SYSTEM_META)으로 오판하지 않는다(진단 V5의 근본 처방).
+    """
+
+    async def test_profile_signals_are_in_prompt(self):
+        from src.domain.agent_profile import AgentProfile
+
+        profile = AgentProfile(
+            id="ins", name="보험 상담봇", description="자동차보험 약관 안내",
+            domain_scopes=["보험"], intent_hints=[],
+        )
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "STANDALONE"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        await classifier.classify("이 특약 기능이 뭐죠?", [], profile)
+
+        prompt = mock_llm.generate_json.call_args.args[0]
+        assert "보험 상담봇" in prompt
+        assert "자동차보험 약관 안내" in prompt
+        assert "보험" in prompt  # domain_scopes
+
+    async def test_greeting_and_system_meta_in_type_list(self):
+        """GREETING·SYSTEM_META가 프롬프트 유형 후보에 있어야 LLM이 그리로 분류할 수 있다."""
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "STANDALONE"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        await classifier.classify("아무 질문", [], _make_profile())
+
+        prompt = mock_llm.generate_json.call_args.args[0]
+        assert "GREETING" in prompt
+        assert "SYSTEM_META" in prompt
+
+    async def test_system_meta_classified_by_llm(self):
+        """"너 뭐 할 수 있어?"처럼 챗봇 자체를 묻는 질문은 SYSTEM_META."""
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "SYSTEM_META"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        qtype, custom = await classifier.classify("너 뭐 할 수 있어?", [], _make_profile())
+
+        assert qtype == QuestionType.SYSTEM_META
+        assert custom is None
+
+
 class TestLLMFallbackClassification:
     """LLM 폴백 분류 결과 테스트."""
 
@@ -156,22 +205,21 @@ class TestLLMFallbackErrorHandling:
         )
         assert qtype == QuestionType.STANDALONE
 
-    async def test_classify_llm_greeting_type_rejected(self):
-        """LLM이 GREETING 반환해도 유효하지 않으므로 STANDALONE으로 폴백."""
+    async def test_classify_llm_greeting_accepted(self):
+        """★재설계: GREETING은 이제 LLM이 판단하는 유효 타입이다.
+
+        예전엔 GREETING/SYSTEM_META를 전역 정규식이 전담하고 LLM 목록엔 없어서,
+        LLM이 GREETING을 내면 STANDALONE으로 폴백했다. 정규식이 "고맙게도"를 인사로
+        오판하는 등 도메인·언어에 취약해(진단 V3/V5) 판단을 LLM으로 흡수했다.
+        """
         mock_llm = AsyncMock()
-        mock_llm.generate_json = AsyncMock(
-            return_value={"type": "GREETING"},
-        )
+        mock_llm.generate_json = AsyncMock(return_value={"type": "GREETING"})
 
         classifier = IntentClassifier(llm=mock_llm)
-        profile = _make_profile()
-        history = _make_history()
+        qtype, custom = await classifier.classify("안녕하세요", [], _make_profile())
 
-        qtype, custom = await classifier.classify(
-            "보험 관련 질문인데", history, profile,
-        )
-        # GREETING은 _LLM_VALID_TYPES에 없으므로 STANDALONE으로 폴백
-        assert qtype == QuestionType.STANDALONE
+        assert qtype == QuestionType.GREETING
+        assert custom is None  # 인사는 도메인 질문이 아니므로 라벨 버림
 
 
 class TestLLMFallbackSkipConditions:
@@ -234,22 +282,19 @@ class TestLLMFallbackSkipConditions:
         prompt = mock_llm.generate_json.call_args.args[0]
         assert "SAME_DOC_FOLLOWUP" in prompt
 
-    async def test_pattern_match_greeting_skips_llm(self):
-        """패턴 매칭으로 GREETING 분류 시 LLM 호출하지 않는다."""
+    async def test_greeting_now_decided_by_llm_not_regex(self):
+        """★재설계: "안녕"도 이제 정규식이 아니라 LLM이 GREETING으로 판단한다.
+
+        전역 greeting 정규식을 삭제했으므로 LLM이 호출되고, 그 판단이 결과가 된다.
+        """
         mock_llm = AsyncMock()
-        mock_llm.generate_json = AsyncMock(
-            return_value={"type": "STANDALONE"},
-        )
+        mock_llm.generate_json = AsyncMock(return_value={"type": "GREETING"})
 
         classifier = IntentClassifier(llm=mock_llm)
-        profile = _make_profile()
-        history = _make_history()
+        qtype, _ = await classifier.classify("안녕", _make_history(), _make_profile())
 
-        qtype, custom = await classifier.classify(
-            "안녕", history, profile,
-        )
         assert qtype == QuestionType.GREETING
-        mock_llm.generate_json.assert_not_called()
+        mock_llm.generate_json.assert_called_once()  # 정규식 단축 없음 → LLM이 판단
 
     async def test_custom_intent_does_not_decide_structure(self):
         """★도메인 라벨과 구조 유형은 직교 — 라벨이 붙어도 구조는 LLM이 정한다.
@@ -291,17 +336,24 @@ class TestLLMFallbackSkipConditions:
 class TestComparisonDetection:
     """비교 신호 감지 — 이력·커스텀 인텐트와 직교 (첫 질문 비교 오분류 회귀)."""
 
-    async def test_comparison_first_question_no_history(self):
-        """이력 없는 첫 질문도 비교 마커로 CROSS_DOC_INTEGRATION 분류."""
-        classifier = IntentClassifier(llm=None)
-        qtype, custom = await classifier.classify(
+    async def test_comparison_first_question_via_llm(self):
+        """★재설계: 첫 질문 비교도 마커가 아니라 LLM이 CROSS_DOC로 판단한다.
+
+        comparison_markers 정규식을 삭제했다 — "차이"가 차이나타운에 걸리는 오탐(V6)
+        때문. 마커 없는 비교("A와 B 중 뭐가 나아?")까지 LLM이 잡는 게 재설계 목표다.
+        """
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "CROSS_DOC_INTEGRATION"})
+
+        classifier = IntentClassifier(llm=mock_llm)
+        qtype, _ = await classifier.classify(
             "New간편간병보험이랑 참좋은더보장간병보험 가입 조건 차이만 표로 비교해줘",
             [], _make_profile(),
         )
         assert qtype == QuestionType.CROSS_DOC_INTEGRATION
 
-    async def test_comparison_beats_custom_intent_standalone(self):
-        """커스텀 인텐트 매칭돼도 비교 신호가 구조 유형을 결정한다 (직교)."""
+    async def test_comparison_preserves_custom_intent_label(self):
+        """구조 유형(CROSS_DOC)과 도메인 라벨(custom)은 직교 — 라벨은 보존된다."""
         from src.domain.agent_profile import AgentProfile, IntentHint
         profile = AgentProfile(
             id="test", name="Test", domain_scopes=["보험"],
@@ -309,7 +361,10 @@ class TestComparisonDetection:
                 name="INSURANCE_INQUIRY", patterns=["보험"], description="보험 문의",
             )],
         )
-        classifier = IntentClassifier(llm=None)
+        mock_llm = AsyncMock()
+        mock_llm.generate_json = AsyncMock(return_value={"type": "CROSS_DOC_INTEGRATION"})
+
+        classifier = IntentClassifier(llm=mock_llm)
         qtype, custom = await classifier.classify(
             "두 보험 상품 차이점 알려줘", [], profile,
         )

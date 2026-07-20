@@ -117,25 +117,9 @@ class LocaleBundle:
             return cached
         return [cached]
 
-    def compiled_pattern(self, key: str) -> re.Pattern | None:
-        """단일 pre-compiled 패턴을 반환한다."""
-        cached = self._compiled_cache.get(key)
-        if isinstance(cached, re.Pattern):
-            return cached
-        if isinstance(cached, list) and cached:
-            return cached[0]
-        return None
-
     def pronoun_patterns(self) -> list[tuple[re.Pattern, float]]:
         """대명사 패턴 [(compiled_regex, confidence), ...]을 반환한다."""
         return self._compiled_cache.get("pronoun", [])
-
-    def pattern_set(self, key: str) -> set[str]:
-        """패턴을 set으로 반환한다 (escape_keywords 등)."""
-        value = self._data.get("patterns", {}).get(key, [])
-        if isinstance(value, list):
-            return set(value)
-        return set()
 
     # --- 특화 접근자 ---
 

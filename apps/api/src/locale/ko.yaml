@@ -130,36 +130,23 @@ labels:
   pii_masked_suffix: "마스킹됨"
 
 # 언어 패턴 (regex)
+# ── 라우팅 의미 판단(인사·비교·시스템질문)은 여기 없다 ──
+# greeting·system_meta·comparison_markers는 2026-07-20에 삭제했다. 전역 정규식이
+# 도메인·언어에 튜닝돼 "고맙게도"를 인사로, "차이나타운"을 비교로 오판했다(진단 V3/V5/V6).
+# 그 판단은 IntentClassifier._classify_with_llm이 프로필 신호와 함께 LLM으로 한다.
+# 여기 남은 것은 결정적 단축(followup 대명사)과 라우팅 아닌 신호(no_answer·pronoun·escape).
 patterns:
-  greeting:
-    - "^(안녕|하이|헬로|반가워|반갑)"
-    - "(감사합니다|감사해|감사드|고마워|고맙)"
-    - "^(바이바이|잘가|수고)"
-
-  greeting_compiled: "^(안녕|하이|헬로|hi|hello|ㅎㅇ)(?:하세요|요|~|!|$)|^(고마워|감사합니다|감사해요|감사드|thanks|thank you)|^(잘가|바이바이|bye|수고|다음에)"
-
-  system_meta:
-    - "(너는?\\s*누구|뭘\\s*할\\s*수|기능|도움말)"
-    - "(어떤\\s*문서|몇\\s*개|상태)"
-
+  # 이력 기반 후속 단축 — 대명사성 신호는 결정성이 품질보다 중요한 "극소수" (IntentClassifier._detect_followup)
   followup_markers: ["그러면", "그럼", "그래서", "그건", "이건", "그리고"]
   short_followup_markers: ["더 ", "또 ", "더는", "또한"]
   same_doc_markers: ["같은 문서", "이 문서", "위 문서", "방금 문서"]
-  # 토큰 경계 매칭(V6 수정)이라 "차이"는 "차이나타운"에 걸리지 않는다. 대신 앞머리
-  # 합성어("차이"+"점")도 안 걸리므로 자주 쓰는 형태는 여기 명시한다 — 그게 엄격한
-  # 매칭의 대가다(router/token_match.py의 의도적 비대칭 참조).
-  comparison_markers: ["비교해", "비교하", "차이", "차이점", "다른 점", "vs"]
-  # 무답변 판정 마커 — 답변이 "정보 부재"를 선언하는 정형 문구(시스템 프롬프트가
-  # 처방한 표현). 감지 시 검색을 넓혀 1회 재시도한다(경계선 정원 컷 오답 방지).
+  # 무답변 판정 마커 — 라우팅이 아니라 답변 사후, "정보 부재" 정형 문구 감지 → 검색 확장 재시도.
   no_answer_markers: ["확인이 필요합니다", "포함되어 있지 않습니다", "명시되어 있지 않습니다", "명시적 내용은 없", "문서에는 없", "찾을 수 없습니다"]
 
   escape_keywords: ["취소", "처음으로", "나가기", "중단", "그만", "exit", "cancel", "quit"]
   back_keywords: ["뒤로", "이전", "돌아가기", "back", "prev"]
 
-  resume: "다시|이어서|계속|재개|resume|continue"
-  continuation: "^(이거|그거|저거|이것|그것|저것|그래|네|응|맞아|ㅇㅇ|그리고|또|추가로|그러면|그래서|근데|그런데|그럼)"
-  past_reference: "(아까|이전에|방금|전에)"
-
+  # 대명사 해소(Layer 0 ContextResolver) — 라우팅 유형이 아니라 질의 재작성용. 감지만 하고 해소는 LLM.
   pronoun:
     - pattern: "^(그|이|저)(것|거|건|게)\\s"
       confidence: 0.9
@@ -170,7 +157,6 @@ patterns:
     - pattern: "^(더|또)\\s*(알려|설명|자세)"
       confidence: 0.8
 
-  tokenize: "[가-힣a-zA-Z]{2,}"
 
 # 숫자 추출 패턴 (faithfulness 검증)
 number_patterns:

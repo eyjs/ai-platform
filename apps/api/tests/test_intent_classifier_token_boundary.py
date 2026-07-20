@@ -1,8 +1,12 @@
-"""IntentClassifier — 진단 V4/V6 오라우팅 시나리오 회귀.
+"""IntentClassifier — 진단 V4 오라우팅 시나리오 회귀.
 
-진단서가 든 예시를 분류기 수준에서 그대로 재현한다:
-- V4: "이 조건이 궁금해요" → 1글자 "건"에 걸려 TASK 오태깅 → STANDALONE 강제
-- V6: "차이나타운 화재보험 있어요?" → "차이"에 걸려 CROSS_DOC_INTEGRATION 승격
+V4: "이 조건이 궁금해요" → 1글자 "건"에 걸려 TASK 오태깅 → STANDALONE 강제.
+
+V6(비교 마커 오탐 "차이나타운")은 더 이상 정규식이 판단하지 않는다 — 2026-07-20에
+comparison_markers를 삭제하고 CROSS_DOC 판단을 LLM으로 흡수했다. "차이나타운은 비교
+아님"·"실손 vs 암보험은 비교"의 회귀는 test_intent_classifier_llm.py의 LLM 경로와
+라이브 검증이 담당한다. V4의 커스텀 인텐트 토큰 매칭은 아직 살아있어(Phase 2 대상)
+여기 남는다.
 """
 
 from unittest.mock import MagicMock
@@ -16,29 +20,6 @@ from src.router.intent_classifier import IntentClassifier
 
 def _classifier():
     return IntentClassifier(llm=None)
-
-
-# --- V6: 비교 마커 ---
-
-
-def test_v6_chinatown_is_not_a_comparison():
-    """'차이나타운'이 '차이'로 읽혀 다문서 비교 전략이 붙던 오탐."""
-    assert _classifier()._detect_comparison("차이나타운 화재보험 있어요?") is None
-
-
-@pytest.mark.parametrize("query", [
-    "두 상품 차이가 뭐야",
-    "이 둘의 차이를 알려줘",
-    "A랑 B 비교해줘",
-    "실손보험이랑 암보험 다른 점이 뭐야",
-    # "차이점"은 앞머리 합성어(차이+점)라 토큰 규칙으로는 "차이"에 안 걸린다.
-    # ko.yaml comparison_markers에 명시해서 잡는다 — 엄격한 매칭의 대가이자,
-    # 이 테스트가 그 명시가 사라지면 잡아낸다.
-    "두 보험 상품 차이점 알려줘",
-])
-def test_v6_real_comparisons_still_detected(query):
-    """오탐만 막고 진짜 비교를 놓치면 실사고(비교 질문 강등 → 한 상품 쏠림 오답)."""
-    assert _classifier()._detect_comparison(query) == QuestionType.CROSS_DOC_INTEGRATION
 
 
 # --- V4: 커스텀 인텐트 ---
