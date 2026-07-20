@@ -55,12 +55,12 @@ def _settings(**kw):
 
 def _link_status(**kw):
     return kw or {
-        "llm:dgx": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok"},
-        "llm:local:main": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok"},
-        "llm:local:router": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok"},
-        "llm:local:report": {"up": False, "checked_at": 1784173221.5, "detail": "http 500"},
+        "llm:dgx": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok", "latency_ms": 412.0},
+        "llm:local:main": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok", "latency_ms": 88.0},
+        "llm:local:router": {"up": True, "checked_at": 1784173221.5, "detail": "generate ok", "latency_ms": 90.0},
+        "llm:local:report": {"up": False, "checked_at": 1784173221.5, "detail": "http 500", "latency_ms": 30.0},
         # kms/docforge는 LLM 엔진이 아니다 — 이 엔드포인트에 새어 나오면 안 된다
-        "kms": {"up": True, "checked_at": 1784173221.5, "detail": "ok"},
+        "kms": {"up": True, "checked_at": 1784173221.5, "detail": "ok", "latency_ms": 5.0},
     }
 
 
@@ -168,10 +168,12 @@ async def test_link_status_maps_to_first_role_key(call):
     r = await call()
     engines = {e["url"]: e for e in r["mlx"]["engines"]}
     assert engines["http://mlx:8106"]["link"] == {
-        "up": True, "checkedAt": 1784173221.5, "detail": "generate ok",
+        "up": True, "checkedAt": 1784173221.5, "detail": "generate ok", "latencyMs": 88.0,
     }
     assert engines["http://mlx:8104"]["link"]["up"] is False
-    assert r["dgx"]["link"] == {"up": True, "checkedAt": 1784173221.5, "detail": "generate ok"}
+    assert r["dgx"]["link"] == {
+        "up": True, "checkedAt": 1784173221.5, "detail": "generate ok", "latencyMs": 412.0,
+    }
 
 
 async def test_non_llm_links_do_not_leak(call):
@@ -220,9 +222,9 @@ async def test_unchecked_link_stays_null_not_false(call):
 async def test_unmonitored_engine_is_not_down(call):
     """감시 목록에 없는 엔진은 down이 아니라 unmonitored다."""
     r = await call(links={})
-    assert r["dgx"]["link"] == {"up": None, "checkedAt": None, "detail": "unmonitored"}
+    assert r["dgx"]["link"] == {"up": None, "checkedAt": None, "detail": "unmonitored", "latencyMs": None}
     for e in r["mlx"]["engines"]:
-        assert e["link"] == {"up": None, "checkedAt": None, "detail": "unmonitored"}
+        assert e["link"] == {"up": None, "checkedAt": None, "detail": "unmonitored", "latencyMs": None}
 
 
 # --- 실패는 실패로 보고한다 (하드코딩 폴백 금지) ---

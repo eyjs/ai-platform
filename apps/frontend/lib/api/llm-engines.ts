@@ -66,11 +66,12 @@ function asStringRecord(value: unknown): Record<string, string> {
  */
 function normalizeLink(value: unknown): LlmLinkStatus {
   const raw = asRecord(value);
-  if (!raw) return { up: null, checkedAt: null, detail: null };
+  if (!raw) return { up: null, checkedAt: null, detail: null, latencyMs: null };
   return {
     up: asStrictBoolean(raw.up),
     checkedAt: asFiniteNumber(raw.checkedAt),
     detail: asString(raw.detail),
+    latencyMs: asFiniteNumber(raw.latencyMs),
   };
 }
 

@@ -31,6 +31,27 @@ export function checkedAtToDate(checkedAt: number | null): Date | null {
   return new Date(checkedAt * 1000);
 }
 
+/** 부하 등급 임계(ms). 정상 프로브는 수백 ms — 초 단위로 넘어가면 부하가 실린 것. */
+export const LATENCY_WARN_MS = 2_000;
+export const LATENCY_SLOW_MS = 5_000;
+
+export type LatencyLevel = 'fast' | 'warn' | 'slow';
+
+/** 응답시간을 부하 등급으로. null(미측정)은 등급을 매기지 않는다. */
+export function toLatencyLevel(latencyMs: number | null): LatencyLevel | null {
+  if (latencyMs === null || !Number.isFinite(latencyMs)) return null;
+  if (latencyMs >= LATENCY_SLOW_MS) return 'slow';
+  if (latencyMs >= LATENCY_WARN_MS) return 'warn';
+  return 'fast';
+}
+
+/** "0.4초"·"18.1초" 같은 사람이 읽는 응답시간. 없으면 null. */
+export function formatLatency(latencyMs: number | null): string | null {
+  if (latencyMs === null || !Number.isFinite(latencyMs)) return null;
+  if (latencyMs < 1_000) return `${Math.round(latencyMs)}ms`;
+  return `${(latencyMs / 1_000).toFixed(1)}초`;
+}
+
 /**
  * "N초 전 확인" 상대 시각. 데이터가 없으면 null(문구 없음) — 추측하지 않는다.
  */

@@ -68,7 +68,7 @@ describe('normalizeLlmEnginesHealth', () => {
       ...validPayload,
       dgx: { ...validPayload.dgx, link: null },
     });
-    expect(result.dgx.link).toEqual({ up: null, checkedAt: null, detail: null });
+    expect(result.dgx.link).toEqual({ up: null, checkedAt: null, detail: null, latencyMs: null });
   });
 
   it('modelsError를 보존한다', () => {

@@ -3,8 +3,10 @@ import {
   checkedAtToDate,
   describeFallback,
   formatContextLength,
+  formatLatency,
   formatRelativeCheckedAt,
   hasToolsCapability,
+  toLatencyLevel,
   toLinkState,
 } from './llm-engine-format';
 
@@ -104,5 +106,23 @@ describe('describeFallback', () => {
 
   it('알 수 없는 모드는 모드명을 그대로 노출한다', () => {
     expect(describeFallback('openai', true)).toContain('openai');
+  });
+});
+
+describe('부하 관측: latency', () => {
+  it('응답시간을 부하 등급으로 매핑한다', () => {
+    expect(toLatencyLevel(400)).toBe('fast');
+    expect(toLatencyLevel(3000)).toBe('warn');
+    expect(toLatencyLevel(18000)).toBe('slow');
+  });
+
+  it('미측정(null)은 등급을 매기지 않는다 — 0으로 접으면 "빠름"으로 오독한다', () => {
+    expect(toLatencyLevel(null)).toBeNull();
+  });
+
+  it('사람이 읽는 응답시간으로 포맷한다', () => {
+    expect(formatLatency(400)).toBe('400ms');
+    expect(formatLatency(18059)).toBe('18.1초');
+    expect(formatLatency(null)).toBeNull();
   });
 });

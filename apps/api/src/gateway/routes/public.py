@@ -126,8 +126,14 @@ def _link_of(link_status: dict, key: str) -> dict:
     """
     s = link_status.get(key)
     if s is None:
-        return {"up": None, "checkedAt": None, "detail": "unmonitored"}
-    return {"up": s.get("up"), "checkedAt": s.get("checked_at"), "detail": s.get("detail")}
+        return {"up": None, "checkedAt": None, "detail": "unmonitored", "latencyMs": None}
+    return {
+        "up": s.get("up"),
+        "checkedAt": s.get("checked_at"),
+        "detail": s.get("detail"),
+        # 응답시간 = 부하 지표. DGX는 공유 GPU라 부하가 상수 — 얼마나 느린지 대시보드가 보여준다.
+        "latencyMs": s.get("latency_ms"),
+    }
 
 
 async def _fetch_dgx_models(

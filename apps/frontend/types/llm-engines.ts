@@ -19,6 +19,12 @@ export type LlmLinkStatus = {
   /** UNIX epoch **초**(float). 밀리초가 아니다. */
   checkedAt: number | null;
   detail: string | null;
+  /**
+   * 프로브 응답시간(ms) = 부하 지표. up이어도 이 값이 크면 서버가 느려지는 중이다.
+   * DGX는 여러 소비자가 공유하는 GPU라 부하가 상수 — up/down만으론 안 보인다.
+   * null이면 아직 안 잼(미점검).
+   */
+  latencyMs: number | null;
 };
 
 export type DgxModel = {

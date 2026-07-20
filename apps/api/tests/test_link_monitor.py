@@ -49,12 +49,17 @@ def test_build_link_targets_graceful_degradation():
 
 
 def _make_monitor(results):
-    """_probe 를 시퀀스 모킹한 모니터. results: [(name, up, detail) 리스트] 순차 소진."""
+    """_probe 를 시퀀스 모킹한 모니터. results: [(name, up, detail) 리스트] 순차 소진.
+
+    _probe는 (name, up, detail, latency_ms) 4-튜플을 반환하므로, 3-튜플로 준
+    케이스엔 latency 0을 붙인다(기존 테스트 케이스 호환).
+    """
     monitor = LinkMonitor({"kms": "http://kms/health"}, interval_seconds=0)
     seq = iter(results)
 
     async def fake_probe(client, name, url):
-        return next(seq)
+        r = next(seq)
+        return r if len(r) == 4 else (*r, 0.0)
 
     monitor._probe = fake_probe
     return monitor
@@ -150,7 +155,7 @@ async def test_generate_probe_catches_500_that_health_would_miss():
     client.post = AsyncMock(return_value=MagicMock(
         status_code=500, text='{"detail":"Generation failed: unicode-escape"}',
     ))
-    name, up, detail = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
+    name, up, detail, _lat = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
     assert up is False
     assert "unicode-escape" in detail
 
@@ -163,7 +168,7 @@ async def test_generate_probe_rejects_200_with_bad_shape():
     client = MagicMock()
     client.post = AsyncMock(return_value=resp)
     monitor = LinkMonitor({}, interval_seconds=0)
-    _, up, detail = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
+    _, up, detail, _lat = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
     assert up is False
     assert "형식 불량" in detail
 
@@ -176,9 +181,49 @@ async def test_generate_probe_ok_even_with_empty_content():
     client = MagicMock()
     client.post = AsyncMock(return_value=resp)
     monitor = LinkMonitor({}, interval_seconds=0)
-    _, up, detail = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
+    _, up, detail, _lat = await monitor._probe(client, "llm:x", GenerateProbe(url="http://mlx:8104"))
     assert up is True
     assert detail == "generate ok"
+
+
+# --- 부하 관측: latency ---
+#
+# DGX는 여러 소비자가 공유하는 GPU라 부하가 상수 — up/down 이분법으론 "느려지는 중"이
+# 안 보인다. 프로브가 응답시간을 재서 노출한다(2026-07-20).
+
+
+@pytest.mark.asyncio
+async def test_latency_is_measured_and_exposed():
+    """느린 응답(부하)이 status에 그대로 실린다 — up이어도 얼마나 느린지 보여야 한다."""
+    resp = MagicMock(status_code=200)
+    resp.json = MagicMock(return_value={"choices": [{"message": {"content": "x"}}]})
+
+    async def slow_post(*a, **k):
+        await asyncio.sleep(0.05)  # 부하 흉내
+        return resp
+
+    client = MagicMock()
+    client.post = slow_post
+    monitor = LinkMonitor({}, interval_seconds=0)
+    _, up, _detail, latency_ms = await monitor._probe(
+        client, "llm:x", GenerateProbe(url="http://dgx:11434"),
+    )
+    assert up is True
+    assert latency_ms >= 50  # 최소 sleep 반영
+
+
+@pytest.mark.asyncio
+async def test_status_carries_latency():
+    monitor = _make_monitor([("kms", True, "ok", 123.4)])
+    status = await monitor.check_once()
+    assert status["kms"]["latency_ms"] == 123.4
+
+
+@pytest.mark.asyncio
+async def test_initial_status_latency_is_none():
+    """점검 전엔 latency 미정(None) — 0이 아니라 '아직 안 잼'."""
+    monitor = LinkMonitor({"kms": "http://kms/health"}, interval_seconds=0)
+    assert monitor.status["kms"]["latency_ms"] is None
 
 
 # --- 잡 무음 실패 회귀 ---

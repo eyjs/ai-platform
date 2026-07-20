@@ -68,7 +68,7 @@ class LinkMonitor:
         self._targets = {name: t for name, t in targets.items() if _target_url(t)}
         self._interval = interval_seconds
         self._status: dict[str, dict] = {
-            name: {"up": None, "checked_at": None, "detail": "unchecked"}
+            name: {"up": None, "checked_at": None, "detail": "unchecked", "latency_ms": None}
             for name in self._targets
         }
         self._task: asyncio.Task | None = None
@@ -85,43 +85,60 @@ class LinkMonitor:
             results = await asyncio.gather(
                 *(self._probe(client, name, t) for name, t in self._targets.items()),
             )
-        for name, up, detail in results:
+        for name, up, detail, latency_ms in results:
             prev = self._status[name]["up"]
             self._status[name] = {
                 "up": up,
                 "checked_at": round(time.time(), 1),
                 "detail": detail,
+                # 응답시간 = 부하 지표. up/down 이분법으로는 "느려지는 중"이 안 보인다.
+                # DGX는 여러 소비자가 공유하는 GPU라 부하가 상수 — 얼마나 느린지가 관측 대상.
+                "latency_ms": latency_ms,
             }
             if prev is None:
                 # 부팅 첫 점검: 상태를 항상 남긴다 (연결 전제의 명시적 증거)
                 log = logger.info if up else logger.warning
-                log("link_status", link=name, up=up, detail=detail)
+                log("link_status", link=name, up=up, detail=detail, latency_ms=latency_ms)
             elif prev != up:
                 if up:
-                    logger.info("link_recovered", link=name, detail=detail)
+                    logger.info("link_recovered", link=name, detail=detail, latency_ms=latency_ms)
                 else:
-                    logger.warning("link_down", link=name, detail=detail)
+                    logger.warning("link_down", link=name, detail=detail, latency_ms=latency_ms)
         return self.status
 
     @staticmethod
     async def _probe(
         client: httpx.AsyncClient, name: str, target: str | GenerateProbe,
-    ) -> tuple[str, bool, str]:
+    ) -> tuple[str, bool, str, float]:
+        """대상 1개를 점검. name·성공여부·상세·응답시간(ms)을 반환한다.
+
+        latency는 성공/실패 무관하게 잰다 — 실패까지 얼마나 걸렸는지도 부하 신호다
+        (타임아웃 직전까지 매달리는 것과 즉시 거부는 다르다).
+        """
+        start = time.monotonic()
+        up, detail = await LinkMonitor._probe_inner(client, target)
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
+        return name, up, detail, latency_ms
+
+    @staticmethod
+    async def _probe_inner(
+        client: httpx.AsyncClient, target: str | GenerateProbe,
+    ) -> tuple[bool, str]:
         try:
             if isinstance(target, GenerateProbe):
-                return await LinkMonitor._probe_generate(client, name, target)
+                return await LinkMonitor._probe_generate(client, target)
             resp = await client.get(target, timeout=_PROBE_TIMEOUT)
             if resp.status_code == 200:
-                return name, True, "ok"
-            return name, False, f"http {resp.status_code}"
+                return True, "ok"
+            return False, f"http {resp.status_code}"
         except Exception as e:
             detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
-            return name, False, detail
+            return False, detail
 
     @staticmethod
     async def _probe_generate(
-        client: httpx.AsyncClient, name: str, probe: GenerateProbe,
-    ) -> tuple[str, bool, str]:
+        client: httpx.AsyncClient, probe: GenerateProbe,
+    ) -> tuple[bool, str]:
         """1토큰 생성으로 서빙 가능 여부를 본다.
 
         200이어도 choices 구조가 없으면 down으로 본다 — 200과 '생성 가능'은 다르다는 것이
@@ -141,14 +158,14 @@ class LinkMonitor:
         if resp.status_code != 200:
             # 본문 앞부분까지 남긴다 — 8104의 "Generation failed: unicode-escape"처럼
             # 원인이 본문에만 있는 경우가 있다.
-            return name, False, f"http {resp.status_code}: {resp.text[:120]}"
+            return False, f"http {resp.status_code}: {resp.text[:120]}"
         try:
             choices = resp.json()["choices"]
             if not choices or "message" not in choices[0]:
                 raise KeyError("choices[0].message")
         except Exception as e:
-            return name, False, f"200이나 응답 형식 불량: {type(e).__name__}: {e}"
-        return name, True, "generate ok"
+            return False, f"200이나 응답 형식 불량: {type(e).__name__}: {e}"
+        return True, "generate ok"
 
     async def start(self) -> None:
         """부팅 1회 점검 후 주기 감시 태스크를 시작한다. interval<=0 이면 1회만."""
