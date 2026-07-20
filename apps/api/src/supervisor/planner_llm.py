@@ -187,6 +187,10 @@ class SupervisorPlanner:
 
         description 외에 담당 도메인·인텐트를 함께 노출한다 — 경량 로컬 LLM 이
         id/name 만으로 추측하지 않도록 구별 신호를 최대한 준다(오라우팅 실사고 대응).
+
+        인텐트는 name(라벨)뿐 아니라 description(자연어)도 노출한다. "INSURANCE_INQUIRY"
+        같은 라벨은 LLM에게 불투명하지만 "보험 상품·보장·보험료 질문"은 판단 근거가 된다.
+        HybridTrigger가 이미 이 패턴(키워드 단축 + description LLM 매칭)을 쓴다.
         """
         lines = []
         for c in candidate_profiles:
@@ -194,12 +198,33 @@ class SupervisorPlanner:
             extras = []
             if c.get("domains"):
                 extras.append(f"담당 도메인: {', '.join(c['domains'])}")
-            if c.get("intents"):
-                extras.append(f"담당 작업: {', '.join(c['intents'])}")
+            intent_strs = SupervisorPlanner._intent_strings(c.get("intents"))
+            if intent_strs:
+                extras.append(f"담당 작업: {', '.join(intent_strs)}")
             if extras:
                 line += f" ({'; '.join(extras)})"
             lines.append(line)
         return "\n".join(lines)
+
+    @staticmethod
+    def _intent_strings(intents) -> list[str]:
+        """인텐트를 "name(description)" 문자열로 렌더한다.
+
+        {name, description} dict가 표준. description이 비면 name만.
+        문자열(구버전/테스트)이 오면 그대로 둔다 — 하위호환.
+        """
+        result: list[str] = []
+        for it in intents or []:
+            if isinstance(it, str):
+                if it:
+                    result.append(it)
+                continue
+            name = (it.get("name") or "").strip()
+            desc = (it.get("description") or "").strip()
+            if not name:
+                continue
+            result.append(f"{name}({desc})" if desc else name)
+        return result
 
     def _parse_delegations(
         self, result: dict, candidate_profiles: list[dict]

@@ -148,7 +148,13 @@ def _create_resolve_scope(authorizer: DelegationAuthorizer, profile_store):
                 "name": p.name,
                 "description": p.description,
                 "domains": list(p.domain_scopes),
-                "intents": [h.name for h in p.intent_hints],
+                # 인텐트를 name만이 아니라 description(자연어)까지 넘긴다 — decompose LLM이
+                # "INSURANCE_INQUIRY" 라벨보다 "보험 상품·보장·보험료 질문"으로 프로필을
+                # 더 잘 고른다. 렌더 형식은 _format_candidates가 정한다(관심사 분리).
+                "intents": [
+                    {"name": h.name, "description": h.description}
+                    for h in p.intent_hints
+                ],
             }
             for p in all_profiles
             if p.id != supervisor_id and authorizer.is_delegation_allowed(allowed, p.id)
