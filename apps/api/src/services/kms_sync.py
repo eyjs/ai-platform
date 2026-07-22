@@ -226,6 +226,128 @@ class KmsSyncService:
         result["domain_code"] = domain_code
         return result
 
+    async def sync_content(self, document_id: str, data: dict, event: str = "") -> dict:
+        """content-mode 인제스트 (레이어 분리 · 핸드오프 계약 `document.parsed`).
+
+        KMS+docforge 가 파싱을 소유하므로 ai-platform 은 **파일 다운로드·파싱을 하지 않고**
+        KMS 에서 이미 조립된 마크다운을 pull 하여 청킹·임베딩·저장만 한다. 마크다운 콜백
+        (`_post_parse_result`)도 하지 않는다 — KMS 가 마크다운을 소유한다.
+
+        기존 `document.file_uploaded` 경로(`_sync_locked`: 다운로드+docforge 파싱+콜백)와
+        **병행**한다. 두 경로 모두 동일한 `IngestPipeline.ingest_text` 로 수렴하되, 이쪽은
+        `content=` 인자를 쓰고 기존은 `file_bytes=` 인자를 쓴다. `external_id=documentId` 로
+        ai-platform 자체 문서 레코드를 동일하게 매핑한다.
+        """
+        if not self._kms_url or not self._internal_key:
+            raise RuntimeError("KMS API URL or Internal Key not configured")
+
+        doc_meta = await self._fetch_document_meta(document_id)
+        if not doc_meta:
+            logger.warning("kms_document_not_found", document_id=document_id)
+            return {"status": "skipped", "reason": "document not found in KMS"}
+
+        # KMS 가 이미 파싱한 마크다운을 pull (GET /processing/:id/content, 내부키 인증).
+        content_res = await self._fetch_content(document_id)
+        raw_text = (content_res or {}).get("rawText") or ""
+        if not raw_text.strip():
+            logger.warning(
+                "kms_content_empty",
+                document_id=document_id,
+                parse_status=(content_res or {}).get("parseStatus"),
+            )
+            return {"status": "skipped", "reason": "rawText empty (not parsed yet?)"}
+
+        # 배치 이벤트가 실은 회사도메인 → 상품도메인 해석 (미배치=None)
+        resolved_domain = self._resolve_domain(document_id, data)
+
+        # 같은 문서의 create/parsed/placement 동시 처리를 직렬화(이중 행 방지) — PG advisory lock.
+        async with self._doc_lock(document_id):
+            return await self._sync_content_locked(
+                document_id, data, doc_meta, resolved_domain, raw_text,
+            )
+
+    async def _sync_content_locked(
+        self,
+        document_id: str,
+        data: dict,
+        doc_meta: dict,
+        resolved_domain: str | None,
+        raw_text: str,
+    ) -> dict:
+        """advisory lock 하에서 실행되는 content-mode 적재 본체.
+
+        content 직접 인제스트라 파싱 스킵(ingest_text 는 file_bytes 없으면 content 를 그대로
+        청킹한다). mime_type 불필요, 마크다운 콜백 없음.
+        """
+        existing = await self._get_existing(document_id)
+
+        # 메타는 이벤트 페이로드(계약: fileName/securityLevel/domainCode) 우선, KMS 메타로 폴백.
+        file_name = (
+            data.get("fileName")
+            or doc_meta.get("fileName")
+            or doc_meta.get("originalName", "")
+        )
+        title = doc_meta.get("title") or file_name or "Untitled"
+        raw_security = (
+            data.get("securityLevel") or doc_meta.get("securityLevel", "PUBLIC")
+        )
+        security_level = raw_security if raw_security in _SECURITY_MAP else "PUBLIC"
+        status = doc_meta.get("lifecycle") or doc_meta.get("status", "DRAFT")
+
+        # 대상 도메인: 해석된 상품도메인 > 이벤트 단일 domainCode > 기존 도메인 > holding(미배치)
+        single_domain = data.get("domainCode") or None
+        domain_code = (
+            resolved_domain
+            or single_domain
+            or (existing["domain_code"] if existing else None)
+            or UNPLACED_DOMAIN
+        )
+
+        metadata = {
+            "kms_document_id": document_id,
+            "lifecycle_status": status,
+            "category_names": data.get("categoryNames", []),
+        }
+
+        # content 직접 인제스트 — file_bytes/mime_type 없음(파싱 스킵). ingest_text 가
+        # file_hash upsert + 임베딩 성공 후 청크 교체로 동일 콘텐츠를 원자적으로 처리한다.
+        result = await self._pipeline.ingest_text(
+            title=title,
+            content=raw_text,
+            domain_code=domain_code,
+            file_name=file_name,
+            security_level=security_level,
+            metadata=metadata,
+            external_id=document_id,
+            tenant_id=data.get("tenantId") or self._default_tenant_id,
+        )
+
+        if result.get("document_id"):
+            await self._set_external_id(result["document_id"], document_id)
+            stale = await self._delete_stale_by_external_id(
+                document_id, keep_doc_id=result["document_id"],
+            )
+            if stale:
+                logger.info(
+                    "kms_content_stale_cleaned",
+                    document_id=document_id, stale_chunks=stale,
+                )
+
+        # 마크다운 콜백(_post_parse_result) 없음 — KMS 가 마크다운을 소유한다.
+        # markdown 키는 job 큐 로그 비대 방지를 위해 버린다.
+        result.pop("markdown", None)
+
+        logger.info(
+            "kms_content_sync_complete",
+            document_id=document_id,
+            aip_doc_id=result.get("document_id"),
+            domain_code=domain_code,
+            unplaced=(domain_code == UNPLACED_DOMAIN),
+            chunks=result.get("chunks", 0),
+        )
+        result["domain_code"] = domain_code
+        return result
+
     async def delete_document(self, document_id: str) -> dict:
         """KMS 문서 삭제 시 벡터 DB에서도 삭제한다."""
         deleted = await self._delete_by_external_id(document_id)
@@ -301,6 +423,27 @@ class KmsSyncService:
             if raise_transient:
                 raise VlmTransientError(f"kms file download: {e}") from e
             return None
+
+    async def _fetch_content(self, document_id: str) -> dict | None:
+        """KMS 에서 이미 파싱된 마크다운을 pull 한다 (GET /processing/:id/content).
+
+        content-mode(레이어 분리) 전용. 응답은
+        ``{ rawText, parseStatus, parsedAt, vlmStatus, goldenMarkdown, goldenSource }``.
+        404(문서/파싱본 부재)는 None 을 반환하고 호출측이 스킵한다.
+        """
+        url = f"{self._kms_url}/processing/{document_id}/content"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(
+                    url, headers={"X-Internal-Key": self._internal_key},
+                )
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as e:
+            logger.error("kms_content_fetch_error", url=url, error=str(e))
+            raise
 
     async def _post_parse_result(
         self,
