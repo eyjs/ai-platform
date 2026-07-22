@@ -24,6 +24,11 @@ _SYNC_EVENTS = frozenset({
     "document.file_uploaded",
 })
 
+# 레이어 분리(핸드오프 계약): KMS+docforge 가 파싱을 소유하고 완료 후 발행하는 신규 이벤트.
+# ai-platform 은 파일 다운로드·파싱을 하지 않고 KMS 에서 마크다운을 pull 하여 인덱싱만 한다.
+# 기존 file_uploaded(다운로드+파싱+인덱싱) 경로와 병행 — PARSE_OWNER 플래그가 KMS 측에서 택일 발행.
+_PARSED_EVENTS = frozenset({"document.parsed"})
+
 _DELETE_EVENTS = frozenset({"document.deleted"})
 
 _LIFECYCLE_EVENTS = frozenset({"document.lifecycle_changed"})
@@ -79,6 +84,18 @@ async def receive_kms_webhook(request: Request):
             queue_name="kms_sync",
             payload={
                 "action": "sync",
+                "document_id": document_id,
+                "event": event,
+                "data": data,
+            },
+        )
+    elif event in _PARSED_EVENTS:
+        # content-mode: KMS 가 이미 파싱한 마크다운을 pull 하여 청킹·임베딩만 한다.
+        # 파일 다운로드·docforge 파싱·마크다운 콜백 없음(KMS 가 마크다운 소유).
+        await job_queue.enqueue(
+            queue_name="kms_sync",
+            payload={
+                "action": "content_sync",
                 "document_id": document_id,
                 "event": event,
                 "data": data,

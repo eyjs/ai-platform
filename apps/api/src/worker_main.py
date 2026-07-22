@@ -128,6 +128,13 @@ async def run_worker() -> None:
                     await job_queue.enqueue("vlm_enhance", {"document_id": document_id})
                     logger.info("vlm_enhance_enqueued", document_id=document_id)
             return result
+        elif action == "content_sync":
+            # content-mode(레이어 분리, document.parsed): KMS 가 파싱한 마크다운을 pull 하여
+            # 인덱싱만 한다. 파일 다운로드·docforge 파싱·VLM 보강 큐잉 없음 —
+            # PARSE_OWNER=kms 에서는 KMS+docforge 가 파싱·VLM 을 소유한다.
+            return await kms_sync.sync_content(
+                document_id, payload.get("data", {}), event=payload.get("event", ""),
+            )
         elif action == "delete":
             return await kms_sync.delete_document(document_id)
         elif action == "lifecycle":
